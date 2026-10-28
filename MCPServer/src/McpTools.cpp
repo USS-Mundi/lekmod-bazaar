@@ -379,6 +379,7 @@ MCP_TOOL(ToolUnitOptions)
 	for(int i = 0; i < GC.getNumBuildInfos(); ++i)
 	{
 		BuildTypes eBuild = (BuildTypes)i;
+		if(!GC.getBuildInfo(eBuild)) continue; // a mod that deletes rows leaves empty slots in the list, and the game core does not check for them
 		if(u->canBuild(p, eBuild))
 		{
 			JObj b;
@@ -436,6 +437,7 @@ MCP_TOOL(ToolCityOptions)
 	for(int i = 0; i < GC.getNumUnitInfos(); ++i)
 	{
 		UnitTypes e = (UnitTypes)i;
+		if(!GC.getUnitInfo(e)) continue;
 		bool bTrain = c->canTrain(e);
 		bool bBuy = c->IsCanPurchase(false, true, e, NO_BUILDING, NO_PROJECT, YIELD_GOLD);
 		bool bBuyFaith = c->IsCanPurchase(false, true, e, NO_BUILDING, NO_PROJECT, YIELD_FAITH);
@@ -461,6 +463,7 @@ MCP_TOOL(ToolCityOptions)
 	for(int i = 0; i < GC.getNumBuildingInfos(); ++i)
 	{
 		BuildingTypes e = (BuildingTypes)i;
+		if(!GC.getBuildingInfo(e)) continue;
 		bool bBuild = c->canConstruct(e);
 		bool bBuy = c->IsCanPurchase(false, true, NO_UNIT, e, NO_PROJECT, YIELD_GOLD);
 		bool bBuyFaith = c->IsCanPurchase(false, true, NO_UNIT, e, NO_PROJECT, YIELD_FAITH);
@@ -483,7 +486,7 @@ MCP_TOOL(ToolCityOptions)
 	for(int i = 0; i < GC.getNumProjectInfos(); ++i)
 	{
 		ProjectTypes e = (ProjectTypes)i;
-		if(!c->canCreate(e)) continue;
+		if(!GC.getProjectInfo(e) || !c->canCreate(e)) continue;
 		CvProjectEntry* info = GC.getProjectInfo(e);
 		JObj pj;
 		pj["type"] = J(info->GetType());
@@ -496,7 +499,7 @@ MCP_TOOL(ToolCityOptions)
 	for(int i = 0; i < GC.getNumProcessInfos(); ++i)
 	{
 		ProcessTypes e = (ProcessTypes)i;
-		if(!c->canMaintain(e)) continue;
+		if(!GC.getProcessInfo(e) || !c->canMaintain(e)) continue;
 		CvProcessInfo* info = GC.getProcessInfo(e);
 		JObj pr;
 		pr["type"] = J(info->GetType());
@@ -578,7 +581,7 @@ MCP_TOOL(ToolResearchOptions)
 	for(int i = 0; i < GC.getNumTechInfos(); ++i)
 	{
 		TechTypes e = (TechTypes)i;
-		if(!me->GetPlayerTechs()->CanResearch(e)) continue;
+		if(!GC.getTechInfo(e) || !me->GetPlayerTechs()->CanResearch(e)) continue;
 		CvTechEntry* info = GC.getTechInfo(e);
 		JObj t;
 		t["type"] = J(info->GetType());
