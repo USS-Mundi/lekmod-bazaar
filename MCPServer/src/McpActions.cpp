@@ -32,7 +32,11 @@ MCP_TOOL(ToolPolicyOptions)
 	o["culture"] = J(me->getJONSCulture());
 	o["next_policy_cost"] = J(me->getNextPolicyCost());
 	o["free_policies"] = J(me->GetNumFreePolicies());
+#ifdef MCP_LEKMOD
+	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned());
+#else
 	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned(MOD_BUGFIX_DUMMY_POLICIES));
+#endif
 	o["can_adopt_now"] = J(PolicyChoiceAvailable(me));
 
 	JArr branches;
@@ -177,16 +181,36 @@ namespace
 		int att = 0, def = 0, dmgToTarget = 0, dmgToMe = 0;
 		if(t.ranged)
 		{
+#ifdef MCP_LEKMOD
+			att = u->GetMaxRangedCombatStrength(McpCombat(u, t.unit, t.city, u->plot(), p, true));
+#else
 			att = u->GetMaxRangedCombatStrength(t.unit, t.city, true, true);
+#endif
 			if(!t.unit) def = t.city->getStrengthValue();
+#ifdef MCP_LEKMOD
+			else if(t.unit->isRanged()) def = t.unit->GetMaxRangedCombatStrength(McpCombat(t.unit, u, NULL, p, u->plot(), true));
+#else
 			else if(t.unit->isRanged()) def = t.unit->GetMaxRangedCombatStrength(u, NULL, false, false);
+#endif
+#ifdef MCP_LEKMOD
+			else def = t.unit->GetMaxDefenseStrength(McpCombat(u, t.unit, NULL, u->plot(), p, true));
+#else
 			else def = t.unit->GetMaxDefenseStrength(p, u, true);
+#endif
 			dmgToTarget = u->GetRangeCombatDamage(t.unit, t.city, false);
 		}
 		else
 		{
+#ifdef MCP_LEKMOD
+			att = u->GetMaxAttackStrength(McpCombat(u, t.unit, t.city, u->plot(), p, false));
+#else
 			att = u->GetMaxAttackStrength(u->plot(), p, t.unit);
+#endif
+#ifdef MCP_LEKMOD
+			def = t.unit ? t.unit->GetMaxDefenseStrength(McpCombat(u, t.unit, NULL, u->plot(), p, false)) : t.city->getStrengthValue();
+#else
 			def = t.unit ? t.unit->GetMaxDefenseStrength(p, u) : t.city->getStrengthValue();
+#endif
 			dmgToTarget = u->getCombatDamage(att, def, u->getDamage(), false, false, t.unit == NULL);
 			dmgToMe = t.unit ? t.unit->getCombatDamage(def, att, t.unit->getDamage(), false, false, false)
 			                 : u->getCombatDamage(def, att, t.city->getDamage(), false, true, false);
@@ -323,8 +347,16 @@ MCP_TOOL(ToolDeclareWar)
 	CvTeam& myTeam = GET_TEAM(me->getTeam());
 	if(!myTeam.isHasMet(other.getTeam())) { err = "you have not met them"; return JVal(); }
 	if(myTeam.isAtWar(other.getTeam())) { err = "you are already at war with them"; return JVal(); }
+#ifdef MCP_LEKMOD
+	if(!myTeam.canDeclareWar(other.getTeam())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
+#else
 	if(!myTeam.canDeclareWar(other.getTeam(), me->GetID())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
+#endif
+#ifdef MCP_LEKMOD
+	myTeam.declareWar(other.getTeam(), false);
+#else
 	myTeam.declareWar(other.getTeam(), false, me->GetID());
+#endif
 	JObj o;
 	o["ok"] = J(true);
 	o["at_war_with"] = J(CivName(e));

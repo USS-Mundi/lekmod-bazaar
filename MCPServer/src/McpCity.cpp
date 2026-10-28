@@ -120,7 +120,11 @@ namespace
 		o["focus"] = J(FocusName(pCitizens->GetFocusType()));
 		o["avoid_growth"] = J(pCitizens->IsForcedAvoidGrowth());
 		JArr worked, available;
+#ifdef MCP_LEKMOD
+		for(int i = 0; i < NUM_CITY_PLOTS; ++i)
+#else
 		for(int i = 0; i < c->GetNumWorkablePlots(); ++i)
+#endif
 		{
 			if(i == CITY_HOME_PLOT) continue;
 			CvPlot* p = pCitizens->GetCityPlotFromIndex(i);

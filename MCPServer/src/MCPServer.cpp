@@ -2,6 +2,15 @@
 
 #include "CivHooks.h"
 #include "CivPluginApi.h"
+#ifdef MCP_LEKMOD
+// Under LEKMOD for Bazaar these two hook points carry their parameter types in their names: our hook-id registry was
+// seeded from Bazaar's, where the same functions have VMC's signatures, so LEKMOD's got names of their own.
+namespace CivHooks
+{
+	typedef CvDiplomacyRequests_SendRequest_with_PlayerTypes_PlayerTypes_DiploUIStateTypes_const_char_LeaderheadAnimationTypes_int CvDiplomacyRequests_SendRequest;
+	typedef CvDiplomacyRequests_SendDealRequest_with_PlayerTypes_PlayerTypes_CvDeal_DiploUIStateTypes_const_char_LeaderheadAnimationTypes CvDiplomacyRequests_SendDealRequest;
+}
+#endif
 
 #include "CvDealAI.h"
 #include "CvDllPlayer.h"
@@ -60,15 +69,29 @@ static void AfterDllPreGameIsHuman(CvDllPreGame* self, PlayerTypes ePlayer, bool
 	result = result && McpEngineSeesAsHuman(ePlayer);
 }
 
+#ifdef MCP_LEKMOD
+static bool BeforeSendRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, LeaderheadAnimationTypes, int iExtraGameData)
+{
+	return McpInterceptRequest(eFrom, eTo, eState, szMessage, iExtraGameData);
+}
+#else
 static bool BeforeSendRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, DiploMessageTypes eMessage, const char* szMessage, LeaderheadAnimationTypes eAnimation, int iExtraGameData)
 {
 	return McpInterceptRequest(eFrom, eTo, eState, szMessage, iExtraGameData);
 }
+#endif
 
+#ifdef MCP_LEKMOD
+static bool BeforeSendDealRequest(PlayerTypes eFrom, PlayerTypes eTo, CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage, LeaderheadAnimationTypes)
+{
+	return McpInterceptDealRequest(eFrom, eTo, pDeal, eState, szMessage);
+}
+#else
 static bool BeforeSendDealRequest(PlayerTypes eFrom, PlayerTypes eTo, CvDeal* pDeal, DiploUIStateTypes eState, DiploMessageTypes eMessage, const char* szMessage, LeaderheadAnimationTypes eAnimation)
 {
 	return McpInterceptDealRequest(eFrom, eTo, pDeal, eState, szMessage);
 }
+#endif
 
 static bool BeforeEqualizeDeal(CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, bool bDontChangeMyExistingItems, bool bDontChangeTheirExistingItems, bool& bDealGoodToBeginWith, bool& bCantMatchOffer, bool& result)
 {

@@ -102,7 +102,11 @@ namespace
 		o["num_cities"] = J(other.getNumCities());
 		int iMine = me->GetMilitaryMight();
 		if(iMine > 0) o["military_strength_vs_yours"] = J((double)other.GetMilitaryMight() / (double)iMine);
+#ifdef MCP_LEKMOD
+		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam()));
+#else
 		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam(), me->GetID()));
+#endif
 		CvCity* cap = other.getCapitalCity();
 		if(cap && cap->plot()->isRevealed(me->getTeam()))
 			o["capital"] = J(McpFormat("%s at (%d,%d)", cap->getName().c_str(), cap->getX(), cap->getY()));
@@ -145,7 +149,11 @@ namespace
 			ev["turn"] = J(pNotes->GetNotificationTurn(i));
 			ev["summary"] = J(pNotes->GetNotificationSummary(i).c_str());
 			ev["text"] = J(pNotes->GetNotificationStr(i).c_str());
+#ifdef MCP_LEKMOD
+			int x = McpNotificationX(pNotes, i), y = McpNotificationY(pNotes, i);
+#else
 			int x = pNotes->GetNotificationX(i), y = pNotes->GetNotificationY(i);
+#endif
 			if(x >= 0 && y >= 0) ev["at"] = J(McpFormat("(%d,%d)", x, y));
 			events.push_back(JVal(ev));
 		}

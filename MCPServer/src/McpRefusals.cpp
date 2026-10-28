@@ -142,9 +142,17 @@ namespace McpTool
 	std::string BuildRefusal(CvCity* c, BuildingTypes eBuilding, bool bPurchase)
 	{
 		if(bPurchase && c->getFirstBuildingOrder(eBuilding) != -1 && c->canConstruct(eBuilding, true, false, true)) return "";
+#ifdef MCP_LEKMOD
+		if(c->canConstruct(eBuilding, false, false, bPurchase)) return "";
+#else
 		if(c->canConstruct(eBuilding, false, false, bPurchase, bPurchase)) return "";
+#endif
 		CvString why;
+#ifdef MCP_LEKMOD
+		c->canConstruct(eBuilding, false, false, bPurchase, &why);
+#else
 		c->canConstruct(eBuilding, false, false, bPurchase, bPurchase, &why);
+#endif
 		std::string s = StripMarkup(why.c_str());
 		if(!s.empty()) return s;
 		CvBuildingEntry* info = GC.getBuildingInfo(eBuilding);

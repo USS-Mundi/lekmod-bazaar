@@ -507,7 +507,11 @@ MCP_TOOL(ToolCityOptions)
 	o["faith"] = J(me->GetFaith());
 
 	JArr tiles;
+#ifdef MCP_LEKMOD
+	int iBuyRange = GC.getMAXIMUM_BUY_PLOT_DISTANCE();
+#else
 	int iBuyRange = c->getBuyPlotDistance();
+#endif
 	for(int dy = -iBuyRange; dy <= iBuyRange; ++dy)
 	{
 		for(int dx = -iBuyRange; dx <= iBuyRange; ++dx)

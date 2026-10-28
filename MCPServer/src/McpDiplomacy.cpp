@@ -794,7 +794,11 @@ namespace
 					JObj o;
 					o["from"] = J(CivName(e));
 					o["kind"] = J("human_deal_offer");
+#ifdef MCP_LEKMOD
+					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat));
+#else
 					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat, true));
+#endif
 					o["choices"] = J("answer_deal with civ and accept true or false");
 					list->push_back(JVal(o));
 				}
@@ -804,7 +808,11 @@ namespace
 				JObj o;
 				o["to"] = J(CivName(e));
 				o["kind"] = J("your_offer_awaiting_their_answer");
+#ifdef MCP_LEKMOD
+				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e));
+#else
 				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e, true));
+#endif
 				o["choices"] = J("wait, or answer_deal with civ and withdraw true");
 				list->push_back(JVal(o));
 			}
@@ -869,7 +877,11 @@ MCP_TOOL(ToolAnswerDeal)
 	if(ArgBool(args, "withdraw", false))
 	{
 		if(!pDeals->ProposedDealExists(me->GetID(), other->GetID())) { err = "you have no offer waiting with them"; return JVal(); }
+#ifdef MCP_LEKMOD
+		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID()));
+#else
 		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID(), true));
+#endif
 		FinalizePlayerDeal(me->GetID(), other->GetID(), me->GetID(), false);
 		o["ok"] = J(true);
 		o["answered"] = J("withdrawn");
@@ -878,7 +890,11 @@ MCP_TOOL(ToolAnswerDeal)
 	if(!pDeals->ProposedDealExists(other->GetID(), me->GetID())) { err = "they have no deal waiting for your answer"; return JVal(); }
 	if(!HasArg(args, "accept")) { err = "accept is missing: true takes their deal, false declines it (withdraw=true takes back your own offer instead)"; return JVal(); }
 	bool bAccept = ArgBool(args, "accept", false);
+#ifdef MCP_LEKMOD
+	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID()));
+#else
 	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID(), true));
+#endif
 	DealAnswer eAnswer = FinalizePlayerDeal(other->GetID(), me->GetID(), me->GetID(), bAccept);
 	if(eAnswer == DEAL_ANSWER_EXPIRED) { err = "the deal expired: something in it is no longer available"; return JVal(); }
 	if(eAnswer == DEAL_ANSWER_UNREPORTED)

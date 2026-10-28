@@ -121,7 +121,11 @@ namespace
 		CvNotifications* pN = me->GetNotifications();
 		if(!pN) return false;
 		for(int i = 0; i < pN->GetNumNotifications(); ++i)
+#ifdef MCP_LEKMOD
+			if(McpNotificationType(pN, i) == eType && !pN->IsNotificationDismissed(i)) { iCityId = McpNotificationExtraGameData(pN, i); return true; }
+#else
 			if(pN->GetNotificationType(i) == eType && !pN->IsNotificationDismissed(i)) { iCityId = pN->GetNotificationExtraGameData(i); return true; }
+#endif
 		return false;
 	}
 	bool CanFoundNow(CvPlayer* me, int& iCityId)
@@ -212,7 +216,11 @@ MCP_TOOL(ToolReligionOptions)
 		CvGameReligions::FOUNDING_RESULT r = pR->CanCreatePantheon(me->GetID(), true);
 		pantheon["can_found_now"] = J(r == CvGameReligions::FOUNDING_OK);
 		if(r != CvGameReligions::FOUNDING_OK) pantheon["why_not"] = J(FoundingResult(r));
+#ifdef MCP_LEKMOD
+		if(r == CvGameReligions::FOUNDING_OK) pantheon["beliefs_available"] = JVal(BeliefsJson(pR->GetAvailablePantheonBeliefs()));
+#else
 		if(r == CvGameReligions::FOUNDING_OK) pantheon["beliefs_available"] = JVal(BeliefsJson(pR->GetAvailablePantheonBeliefs(me->GetID())));
+#endif
 	}
 	o["pantheon"] = JVal(pantheon);
 
@@ -284,7 +292,11 @@ MCP_TOOL(ToolFoundPantheon)
 	CvGameReligions* pR = GC.getGame().GetGameReligions();
 	CvGameReligions::FOUNDING_RESULT r = pR->CanCreatePantheon(me->GetID(), true);
 	if(r != CvGameReligions::FOUNDING_OK) { err = std::string("cannot found a pantheon: ") + FoundingResult(r); return JVal(); }
+#ifdef MCP_LEKMOD
+	if(!pR->IsPantheonBeliefAvailable(b)) { err = "that belief is not available as a pantheon belief"; return JVal(); }
+#else
 	if(!pR->IsPantheonBeliefAvailable(b, me->GetID())) { err = "that belief is not available as a pantheon belief"; return JVal(); }
+#endif
 	pR->FoundPantheon(me->GetID(), b);
 	JObj o;
 	o["ok"] = J(true);
@@ -399,7 +411,11 @@ MCP_TOOL(ToolReligionOverview)
 	JObj o;
 	o["faith"] = J(me->GetFaith());
 	o["faith_per_turn"] = J(me->GetTotalFaithPerTurn());
+#ifdef MCP_LEKMOD
+	o["next_great_prophet_costs"] = J(me->GetReligions()->GetCostNextProphet(true, true));
+#else
 	o["next_great_prophet_costs"] = J(me->GetReligions()->GetCostNextProphet(true, true, MOD_GLOBAL_TRULY_FREE_GP));
+#endif
 	BeliefTypes ePantheon = pR->GetBeliefInPantheon(me->GetID());
 	if(ePantheon != NO_BELIEF) o["pantheon"] = BeliefJson(ePantheon);
 	ReligionTypes eMine = pR->GetReligionCreatedByPlayer(me->GetID());
