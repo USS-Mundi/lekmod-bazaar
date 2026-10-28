@@ -167,9 +167,9 @@ namespace McpTool
 		if(me->GetNumFreePolicies() <= 0 && me->getJONSCulture() < me->getNextPolicyCost()) return false;
 		CvPlayerPolicies* pPolicies = me->GetPlayerPolicies();
 		for(int i = 0; i < GC.getNumPolicyBranchInfos(); ++i)
-			if(!pPolicies->IsPolicyBranchUnlocked((PolicyBranchTypes)i) && pPolicies->CanUnlockPolicyBranch((PolicyBranchTypes)i)) return true;
+			if(GC.getPolicyBranchInfo((PolicyBranchTypes)i) && !pPolicies->IsPolicyBranchUnlocked((PolicyBranchTypes)i) && pPolicies->CanUnlockPolicyBranch((PolicyBranchTypes)i)) return true;
 		for(int i = 0; i < GC.getNumPolicyInfos(); ++i)
-			if(!pPolicies->HasPolicy((PolicyTypes)i) && me->canAdoptPolicy((PolicyTypes)i)) return true;
+			if(GC.getPolicyInfo((PolicyTypes)i) && !pPolicies->HasPolicy((PolicyTypes)i) && me->canAdoptPolicy((PolicyTypes)i)) return true;
 		return false;
 	}
 
@@ -614,7 +614,7 @@ namespace McpTool
 		for(int i = 0; i < GC.getNumPromotionInfos(); ++i)
 		{
 			PromotionTypes e = (PromotionTypes)i;
-			if(!u->canPromote(e, -1)) continue;
+			if(!GC.getPromotionInfo(e) || !u->canPromote(e, -1)) continue;
 			CvPromotionEntry* info = GC.getPromotionInfo(e);
 			JObj p;
 			p["type"] = J(info->GetType());
