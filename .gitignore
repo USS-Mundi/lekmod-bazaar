@@ -1,0 +1,6 @@
+sdk-download/
+upstream/
+build/
+*.dll
+*.civ5mod
+__pycache__/

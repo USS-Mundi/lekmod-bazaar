@@ -1,0 +1,79 @@
+diff --git a/host/CivHostSetup.cpp b/host/CivHostSetup.cpp
+index 515a263..7c185cc 100644
+--- a/host/CivHostSetup.cpp
++++ b/host/CivHostSetup.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <windows.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ 
+ namespace
+ {
+@@ -28,6 +29,55 @@ namespace
+ 		}
+ 		return source;
+ 	}
++	// A DLC pack's UI skin can carry its own AdvancedSetup.lua or .xml (LEKMOD's does), and the game shows the skin's file
++	// over its own. The pack with the highest Priority wins, as in the game's skin order; a pack's skin applies only when
++	// its expansion is active, which this takes as given.
++	std::string SkinnedByDlc(const std::string& gameFolder, const std::string& fileName)
++	{
++		std::string best;
++		int bestPriority = -1;
++		const std::string dlcRoot = gameFolder + "\\Assets\\DLC\\";
++		WIN32_FIND_DATAW ffd;
++		HANDLE h = FindFirstFileW(CivWide(dlcRoot + "*").c_str(), &ffd);
++		if (h == INVALID_HANDLE_VALUE)
++			return best;
++		do
++		{
++			if (!(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
++				continue;
++			const std::string name = CivUtf8(ffd.cFileName);
++			if (name == "." || name == "..")
++				continue;
++			const std::string pack = dlcRoot + name;
++			WIN32_FIND_DATAW pf;
++			HANDLE ph = FindFirstFileW(CivWide(pack + "\\*.Civ5Pkg").c_str(), &pf);
++			if (ph == INVALID_HANDLE_VALUE)
++				continue;
++			std::string text;
++			const bool read = CivReadFile(pack + "\\" + CivUtf8(pf.cFileName), &text);
++			FindClose(ph);
++			if (!read)
++				continue;
++			int priority = 0;
++			const size_t p = text.find("<Priority>");
++			if (p != std::string::npos)
++				priority = atoi(text.c_str() + p + 10);
++			for (size_t d = text.find("<Directory>"); d != std::string::npos; d = text.find("<Directory>", d + 1))
++			{
++				const size_t e = text.find("</Directory>", d);
++				if (e == std::string::npos)
++					break;
++				const std::string file = pack + "\\" + text.substr(d + 11, e - d - 11) + "\\UI\\" + fileName;
++				if (priority > bestPriority && CivExists(file))
++				{
++					best = file;
++					bestPriority = priority;
++				}
++			}
++		} while (FindNextFileW(h, &ffd));
++		FindClose(h);
++		return best;
++	}
+ }
+ 
+ CivReplacedSetup CivCopyReplacedSetup(const std::string& gameFolder, const std::string& ownFolder, const std::vector<CivActiveMod>& mods,
+@@ -38,6 +88,10 @@ CivReplacedSetup CivCopyReplacedSetup(const std::string& gameFolder, const std::
+ 	result.luaSource = ImportedByActiveMod(mods, ownFolder, kLua);
+ 	const std::string gameSetup = gameFolder + "\\Assets\\UI\\FrontEnd\\GameSetup\\";
+ 	const std::string expansionSetup = gameFolder + "\\Assets\\DLC\\Expansion\\UI\\FrontEnd\\GameSetup\\";
++	if (result.xmlSource.empty())
++		result.xmlSource = SkinnedByDlc(gameFolder, kXml);
++	if (result.luaSource.empty())
++		result.luaSource = SkinnedByDlc(gameFolder, kLua);
+ 	if (result.xmlSource.empty())
+ 		result.xmlSource = expansion1 && CivExists(expansionSetup + kXml) ? expansionSetup + kXml : gameSetup + kXml;
+ 	if (result.luaSource.empty())

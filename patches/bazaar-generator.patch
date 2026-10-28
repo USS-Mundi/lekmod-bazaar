@@ -1,0 +1,40 @@
+diff --git a/tools/generator/common.py b/tools/generator/common.py
+index 7cb183b..41819d5 100644
+--- a/tools/generator/common.py
++++ b/tools/generator/common.py
+@@ -20,10 +20,16 @@ FREEZE = (0, 5)
+ FREEZE_SHOWN = "%d.%d" % FREEZE
+ NOTICE = os.path.join(REPO, "NOTICE")
+ 
+-VS2008_INCLUDE = [
+-    r"C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\INCLUDE",
+-    r"C:\Program Files\Microsoft SDKs\Windows\v6.0A\include",
+-]
++# BAZAAR_VS2008_INCLUDE, when set, names the compiler's and the Windows SDK's include folders (os.pathsep between
++# them) for a run on another machine; worker processes read it too, which a value set in one process would not reach.
++VS2008_INCLUDE = (
++    os.environ["BAZAAR_VS2008_INCLUDE"].split(os.pathsep)
++    if os.environ.get("BAZAAR_VS2008_INCLUDE")
++    else [
++        r"C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\INCLUDE",
++        r"C:\Program Files\Microsoft SDKs\Windows\v6.0A\include",
++    ]
++)
+ VSVARS = r"C:\Program Files (x86)\Microsoft Visual Studio 9.0\Common7\Tools\vsvars32.bat"
+ 
+ SUPPORT_INCLUDE = [
+diff --git a/tools/generator/generate.py b/tools/generator/generate.py
+index fca66ac..267a56b 100644
+--- a/tools/generator/generate.py
++++ b/tools/generator/generate.py
+@@ -74,7 +74,9 @@ class PathDict(dict):
+ 
+     @staticmethod
+     def _key(path):
+-        return os.path.normcase(os.path.abspath(path))
++        # normcase folds case only on Windows; the fold is applied here too, so that a header a source includes
++        # under another spelling of its name keeps its edits on a case-sensitive host as well.
++        return os.path.normcase(os.path.abspath(path)).lower()
+ 
+     def __getitem__(self, path):
+         return dict.__getitem__(self, self._key(path))

@@ -1,0 +1,378 @@
+diff --git a/MCPServer/src/MCPServer.cpp b/MCPServer/src/MCPServer.cpp
+index 028ef49..1dec5b4 100644
+--- a/MCPServer/src/MCPServer.cpp
++++ b/MCPServer/src/MCPServer.cpp
+@@ -2,6 +2,15 @@
+ 
+ #include "CivHooks.h"
+ #include "CivPluginApi.h"
++#ifdef MCP_LEKMOD
++// Under LEKMOD for Bazaar these two hook points carry their parameter types in their names: our hook-id registry was
++// seeded from Bazaar's, where the same functions have VMC's signatures, so LEKMOD's got names of their own.
++namespace CivHooks
++{
++	typedef CvDiplomacyRequests_SendRequest_with_PlayerTypes_PlayerTypes_DiploUIStateTypes_const_char_LeaderheadAnimationTypes_int CvDiplomacyRequests_SendRequest;
++	typedef CvDiplomacyRequests_SendDealRequest_with_PlayerTypes_PlayerTypes_CvDeal_DiploUIStateTypes_const_char_LeaderheadAnimationTypes CvDiplomacyRequests_SendDealRequest;
++}
++#endif
+ 
+ #include "CvDealAI.h"
+ #include "CvDllPlayer.h"
+@@ -60,15 +69,29 @@ static void AfterDllPreGameIsHuman(CvDllPreGame* self, PlayerTypes ePlayer, bool
+ 	result = result && McpEngineSeesAsHuman(ePlayer);
+ }
+ 
++#ifdef MCP_LEKMOD
++static bool BeforeSendRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, LeaderheadAnimationTypes, int iExtraGameData)
++{
++	return McpInterceptRequest(eFrom, eTo, eState, szMessage, iExtraGameData);
++}
++#else
+ static bool BeforeSendRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, DiploMessageTypes eMessage, const char* szMessage, LeaderheadAnimationTypes eAnimation, int iExtraGameData)
+ {
+ 	return McpInterceptRequest(eFrom, eTo, eState, szMessage, iExtraGameData);
+ }
++#endif
+ 
++#ifdef MCP_LEKMOD
++static bool BeforeSendDealRequest(PlayerTypes eFrom, PlayerTypes eTo, CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage, LeaderheadAnimationTypes)
++{
++	return McpInterceptDealRequest(eFrom, eTo, pDeal, eState, szMessage);
++}
++#else
+ static bool BeforeSendDealRequest(PlayerTypes eFrom, PlayerTypes eTo, CvDeal* pDeal, DiploUIStateTypes eState, DiploMessageTypes eMessage, const char* szMessage, LeaderheadAnimationTypes eAnimation)
+ {
+ 	return McpInterceptDealRequest(eFrom, eTo, pDeal, eState, szMessage);
+ }
++#endif
+ 
+ static bool BeforeEqualizeDeal(CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, bool bDontChangeMyExistingItems, bool bDontChangeTheirExistingItems, bool& bDealGoodToBeginWith, bool& bCantMatchOffer, bool& result)
+ {
+diff --git a/MCPServer/src/McpActions.cpp b/MCPServer/src/McpActions.cpp
+index 0ed23e0..1f940c4 100644
+--- a/MCPServer/src/McpActions.cpp
++++ b/MCPServer/src/McpActions.cpp
+@@ -32,7 +32,11 @@ MCP_TOOL(ToolPolicyOptions)
+ 	o["culture"] = J(me->getJONSCulture());
+ 	o["next_policy_cost"] = J(me->getNextPolicyCost());
+ 	o["free_policies"] = J(me->GetNumFreePolicies());
++#ifdef MCP_LEKMOD
++	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned());
++#else
+ 	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned(MOD_BUGFIX_DUMMY_POLICIES));
++#endif
+ 	o["can_adopt_now"] = J(PolicyChoiceAvailable(me));
+ 
+ 	JArr branches;
+@@ -177,16 +181,36 @@ namespace
+ 		int att = 0, def = 0, dmgToTarget = 0, dmgToMe = 0;
+ 		if(t.ranged)
+ 		{
++#ifdef MCP_LEKMOD
++			att = u->GetMaxRangedCombatStrength(McpCombat(u, t.unit, t.city, u->plot(), p, true));
++#else
+ 			att = u->GetMaxRangedCombatStrength(t.unit, t.city, true, true);
++#endif
+ 			if(!t.unit) def = t.city->getStrengthValue();
++#ifdef MCP_LEKMOD
++			else if(t.unit->isRanged()) def = t.unit->GetMaxRangedCombatStrength(McpCombat(t.unit, u, NULL, p, u->plot(), true));
++#else
+ 			else if(t.unit->isRanged()) def = t.unit->GetMaxRangedCombatStrength(u, NULL, false, false);
++#endif
++#ifdef MCP_LEKMOD
++			else def = t.unit->GetMaxDefenseStrength(McpCombat(u, t.unit, NULL, u->plot(), p, true));
++#else
+ 			else def = t.unit->GetMaxDefenseStrength(p, u, true);
++#endif
+ 			dmgToTarget = u->GetRangeCombatDamage(t.unit, t.city, false);
+ 		}
+ 		else
+ 		{
++#ifdef MCP_LEKMOD
++			att = u->GetMaxAttackStrength(McpCombat(u, t.unit, t.city, u->plot(), p, false));
++#else
+ 			att = u->GetMaxAttackStrength(u->plot(), p, t.unit);
++#endif
++#ifdef MCP_LEKMOD
++			def = t.unit ? t.unit->GetMaxDefenseStrength(McpCombat(u, t.unit, NULL, u->plot(), p, false)) : t.city->getStrengthValue();
++#else
+ 			def = t.unit ? t.unit->GetMaxDefenseStrength(p, u) : t.city->getStrengthValue();
++#endif
+ 			dmgToTarget = u->getCombatDamage(att, def, u->getDamage(), false, false, t.unit == NULL);
+ 			dmgToMe = t.unit ? t.unit->getCombatDamage(def, att, t.unit->getDamage(), false, false, false)
+ 			                 : u->getCombatDamage(def, att, t.city->getDamage(), false, true, false);
+@@ -323,8 +347,16 @@ MCP_TOOL(ToolDeclareWar)
+ 	CvTeam& myTeam = GET_TEAM(me->getTeam());
+ 	if(!myTeam.isHasMet(other.getTeam())) { err = "you have not met them"; return JVal(); }
+ 	if(myTeam.isAtWar(other.getTeam())) { err = "you are already at war with them"; return JVal(); }
++#ifdef MCP_LEKMOD
++	if(!myTeam.canDeclareWar(other.getTeam())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
++#else
+ 	if(!myTeam.canDeclareWar(other.getTeam(), me->GetID())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
++#endif
++#ifdef MCP_LEKMOD
++	myTeam.declareWar(other.getTeam(), false);
++#else
+ 	myTeam.declareWar(other.getTeam(), false, me->GetID());
++#endif
+ 	JObj o;
+ 	o["ok"] = J(true);
+ 	o["at_war_with"] = J(CivName(e));
+diff --git a/MCPServer/src/McpBriefing.cpp b/MCPServer/src/McpBriefing.cpp
+index 3cfe09d..781096a 100644
+--- a/MCPServer/src/McpBriefing.cpp
++++ b/MCPServer/src/McpBriefing.cpp
+@@ -102,7 +102,11 @@ namespace
+ 		o["num_cities"] = J(other.getNumCities());
+ 		int iMine = me->GetMilitaryMight();
+ 		if(iMine > 0) o["military_strength_vs_yours"] = J((double)other.GetMilitaryMight() / (double)iMine);
++#ifdef MCP_LEKMOD
++		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam()));
++#else
+ 		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam(), me->GetID()));
++#endif
+ 		CvCity* cap = other.getCapitalCity();
+ 		if(cap && cap->plot()->isRevealed(me->getTeam()))
+ 			o["capital"] = J(McpFormat("%s at (%d,%d)", cap->getName().c_str(), cap->getX(), cap->getY()));
+@@ -145,7 +149,11 @@ namespace
+ 			ev["turn"] = J(pNotes->GetNotificationTurn(i));
+ 			ev["summary"] = J(pNotes->GetNotificationSummary(i).c_str());
+ 			ev["text"] = J(pNotes->GetNotificationStr(i).c_str());
++#ifdef MCP_LEKMOD
++			int x = McpNotificationX(pNotes, i), y = McpNotificationY(pNotes, i);
++#else
+ 			int x = pNotes->GetNotificationX(i), y = pNotes->GetNotificationY(i);
++#endif
+ 			if(x >= 0 && y >= 0) ev["at"] = J(McpFormat("(%d,%d)", x, y));
+ 			events.push_back(JVal(ev));
+ 		}
+diff --git a/MCPServer/src/McpCity.cpp b/MCPServer/src/McpCity.cpp
+index 9758caf..31bc6a3 100644
+--- a/MCPServer/src/McpCity.cpp
++++ b/MCPServer/src/McpCity.cpp
+@@ -120,7 +120,11 @@ namespace
+ 		o["focus"] = J(FocusName(pCitizens->GetFocusType()));
+ 		o["avoid_growth"] = J(pCitizens->IsForcedAvoidGrowth());
+ 		JArr worked, available;
++#ifdef MCP_LEKMOD
++		for(int i = 0; i < NUM_CITY_PLOTS; ++i)
++#else
+ 		for(int i = 0; i < c->GetNumWorkablePlots(); ++i)
++#endif
+ 		{
+ 			if(i == CITY_HOME_PLOT) continue;
+ 			CvPlot* p = pCitizens->GetCityPlotFromIndex(i);
+diff --git a/MCPServer/src/McpDiplomacy.cpp b/MCPServer/src/McpDiplomacy.cpp
+index 452b279..79b0eb3 100644
+--- a/MCPServer/src/McpDiplomacy.cpp
++++ b/MCPServer/src/McpDiplomacy.cpp
+@@ -794,7 +794,11 @@ namespace
+ 					JObj o;
+ 					o["from"] = J(CivName(e));
+ 					o["kind"] = J("human_deal_offer");
++#ifdef MCP_LEKMOD
++					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat));
++#else
+ 					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat, true));
++#endif
+ 					o["choices"] = J("answer_deal with civ and accept true or false");
+ 					list->push_back(JVal(o));
+ 				}
+@@ -804,7 +808,11 @@ namespace
+ 				JObj o;
+ 				o["to"] = J(CivName(e));
+ 				o["kind"] = J("your_offer_awaiting_their_answer");
++#ifdef MCP_LEKMOD
++				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e));
++#else
+ 				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e, true));
++#endif
+ 				o["choices"] = J("wait, or answer_deal with civ and withdraw true");
+ 				list->push_back(JVal(o));
+ 			}
+@@ -869,7 +877,11 @@ MCP_TOOL(ToolAnswerDeal)
+ 	if(ArgBool(args, "withdraw", false))
+ 	{
+ 		if(!pDeals->ProposedDealExists(me->GetID(), other->GetID())) { err = "you have no offer waiting with them"; return JVal(); }
++#ifdef MCP_LEKMOD
++		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID()));
++#else
+ 		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID(), true));
++#endif
+ 		FinalizePlayerDeal(me->GetID(), other->GetID(), me->GetID(), false);
+ 		o["ok"] = J(true);
+ 		o["answered"] = J("withdrawn");
+@@ -878,7 +890,11 @@ MCP_TOOL(ToolAnswerDeal)
+ 	if(!pDeals->ProposedDealExists(other->GetID(), me->GetID())) { err = "they have no deal waiting for your answer"; return JVal(); }
+ 	if(!HasArg(args, "accept")) { err = "accept is missing: true takes their deal, false declines it (withdraw=true takes back your own offer instead)"; return JVal(); }
+ 	bool bAccept = ArgBool(args, "accept", false);
++#ifdef MCP_LEKMOD
++	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID()));
++#else
+ 	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID(), true));
++#endif
+ 	DealAnswer eAnswer = FinalizePlayerDeal(other->GetID(), me->GetID(), me->GetID(), bAccept);
+ 	if(eAnswer == DEAL_ANSWER_EXPIRED) { err = "the deal expired: something in it is no longer available"; return JVal(); }
+ 	if(eAnswer == DEAL_ANSWER_UNREPORTED)
+diff --git a/MCPServer/src/McpMinorCivs.cpp b/MCPServer/src/McpMinorCivs.cpp
+index 924f8bf..738615f 100644
+--- a/MCPServer/src/McpMinorCivs.cpp
++++ b/MCPServer/src/McpMinorCivs.cpp
+@@ -104,7 +104,11 @@ namespace
+ 	bool CanBuyout(CvPlayer* me, CvPlayer& minor) { return AtPeace(me, minor) && MinorAI(minor)->CanMajorBuyout(me->GetID()); }
+ 	bool RunBuyout(CvPlayer* me, CvPlayer& minor, const JObj&, JObj&, std::string&)
+ 	{
++#ifdef MCP_LEKMOD
++		MinorAI(minor)->DoBuyout(me->GetID());
++#else
+ 		MinorAI(minor)->DoBuyout(me->GetID(), MOD_GLOBAL_CS_MARRIAGE_KEEPS_RESOURCES);
++#endif
+ 		return true;
+ 	}
+ 	bool CanMakePeace(CvPlayer* me, CvPlayer& minor)
+@@ -113,7 +117,11 @@ namespace
+ 	}
+ 	bool RunMakePeace(CvPlayer* me, CvPlayer& minor, const JObj&, JObj&, std::string&)
+ 	{
++#ifdef MCP_LEKMOD
++		GET_TEAM(me->getTeam()).makePeace(minor.getTeam(), true, false);
++#else
+ 		GET_TEAM(me->getTeam()).makePeace(minor.getTeam(), true, false, me->GetID());
++#endif
+ 		return true;
+ 	}
+ 
+diff --git a/MCPServer/src/McpRankings.cpp b/MCPServer/src/McpRankings.cpp
+index 56334cd..a255083 100644
+--- a/MCPServer/src/McpRankings.cpp
++++ b/MCPServer/src/McpRankings.cpp
+@@ -44,7 +44,11 @@ namespace
+ 	int Techs(CvPlayer& p) { return GET_TEAM(p.getTeam()).GetTeamTechs()->GetNumTechsKnown(); }
+ 	int CulturePerTurn(CvPlayer& p) { return p.GetTotalJONSCulturePerTurn(); }
+ 	int Culture(CvPlayer& p) { return p.getJONSCulture(); }
++#ifdef MCP_LEKMOD
++	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(); }
++#else
+ 	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(MOD_BUGFIX_DUMMY_POLICIES); }
++#endif
+ 	int Faith(CvPlayer& p) { return p.GetFaith(); }
+ 	int FaithPerTurn(CvPlayer& p) { return p.GetFaithPerTurnFromCities() + p.GetFaithPerTurnFromMinorCivs() + p.GetFaithPerTurnFromReligion(); }
+ 	int ExcessHappiness(CvPlayer& p) { return p.GetExcessHappiness(); }
+diff --git a/MCPServer/src/McpRefusals.cpp b/MCPServer/src/McpRefusals.cpp
+index 7152313..f12ccae 100644
+--- a/MCPServer/src/McpRefusals.cpp
++++ b/MCPServer/src/McpRefusals.cpp
+@@ -142,9 +142,17 @@ namespace McpTool
+ 	std::string BuildRefusal(CvCity* c, BuildingTypes eBuilding, bool bPurchase)
+ 	{
+ 		if(bPurchase && c->getFirstBuildingOrder(eBuilding) != -1 && c->canConstruct(eBuilding, true, false, true)) return "";
++#ifdef MCP_LEKMOD
++		if(c->canConstruct(eBuilding, false, false, bPurchase)) return "";
++#else
+ 		if(c->canConstruct(eBuilding, false, false, bPurchase, bPurchase)) return "";
++#endif
+ 		CvString why;
++#ifdef MCP_LEKMOD
++		c->canConstruct(eBuilding, false, false, bPurchase, &why);
++#else
+ 		c->canConstruct(eBuilding, false, false, bPurchase, bPurchase, &why);
++#endif
+ 		std::string s = StripMarkup(why.c_str());
+ 		if(!s.empty()) return s;
+ 		CvBuildingEntry* info = GC.getBuildingInfo(eBuilding);
+diff --git a/MCPServer/src/McpReligion.cpp b/MCPServer/src/McpReligion.cpp
+index 2e84dd3..b7a9aba 100644
+--- a/MCPServer/src/McpReligion.cpp
++++ b/MCPServer/src/McpReligion.cpp
+@@ -121,7 +121,11 @@ namespace
+ 		CvNotifications* pN = me->GetNotifications();
+ 		if(!pN) return false;
+ 		for(int i = 0; i < pN->GetNumNotifications(); ++i)
++#ifdef MCP_LEKMOD
++			if(McpNotificationType(pN, i) == eType && !pN->IsNotificationDismissed(i)) { iCityId = McpNotificationExtraGameData(pN, i); return true; }
++#else
+ 			if(pN->GetNotificationType(i) == eType && !pN->IsNotificationDismissed(i)) { iCityId = pN->GetNotificationExtraGameData(i); return true; }
++#endif
+ 		return false;
+ 	}
+ 	bool CanFoundNow(CvPlayer* me, int& iCityId)
+@@ -212,7 +216,11 @@ MCP_TOOL(ToolReligionOptions)
+ 		CvGameReligions::FOUNDING_RESULT r = pR->CanCreatePantheon(me->GetID(), true);
+ 		pantheon["can_found_now"] = J(r == CvGameReligions::FOUNDING_OK);
+ 		if(r != CvGameReligions::FOUNDING_OK) pantheon["why_not"] = J(FoundingResult(r));
++#ifdef MCP_LEKMOD
++		if(r == CvGameReligions::FOUNDING_OK) pantheon["beliefs_available"] = JVal(BeliefsJson(pR->GetAvailablePantheonBeliefs()));
++#else
+ 		if(r == CvGameReligions::FOUNDING_OK) pantheon["beliefs_available"] = JVal(BeliefsJson(pR->GetAvailablePantheonBeliefs(me->GetID())));
++#endif
+ 	}
+ 	o["pantheon"] = JVal(pantheon);
+ 
+@@ -284,7 +292,11 @@ MCP_TOOL(ToolFoundPantheon)
+ 	CvGameReligions* pR = GC.getGame().GetGameReligions();
+ 	CvGameReligions::FOUNDING_RESULT r = pR->CanCreatePantheon(me->GetID(), true);
+ 	if(r != CvGameReligions::FOUNDING_OK) { err = std::string("cannot found a pantheon: ") + FoundingResult(r); return JVal(); }
++#ifdef MCP_LEKMOD
++	if(!pR->IsPantheonBeliefAvailable(b)) { err = "that belief is not available as a pantheon belief"; return JVal(); }
++#else
+ 	if(!pR->IsPantheonBeliefAvailable(b, me->GetID())) { err = "that belief is not available as a pantheon belief"; return JVal(); }
++#endif
+ 	pR->FoundPantheon(me->GetID(), b);
+ 	JObj o;
+ 	o["ok"] = J(true);
+@@ -399,7 +411,11 @@ MCP_TOOL(ToolReligionOverview)
+ 	JObj o;
+ 	o["faith"] = J(me->GetFaith());
+ 	o["faith_per_turn"] = J(me->GetTotalFaithPerTurn());
++#ifdef MCP_LEKMOD
++	o["next_great_prophet_costs"] = J(me->GetReligions()->GetCostNextProphet(true, true));
++#else
+ 	o["next_great_prophet_costs"] = J(me->GetReligions()->GetCostNextProphet(true, true, MOD_GLOBAL_TRULY_FREE_GP));
++#endif
+ 	BeliefTypes ePantheon = pR->GetBeliefInPantheon(me->GetID());
+ 	if(ePantheon != NO_BELIEF) o["pantheon"] = BeliefJson(ePantheon);
+ 	ReligionTypes eMine = pR->GetReligionCreatedByPlayer(me->GetID());
+diff --git a/MCPServer/src/McpToolSupport.cpp b/MCPServer/src/McpToolSupport.cpp
+index c289fb5..e9e5f27 100644
+--- a/MCPServer/src/McpToolSupport.cpp
++++ b/MCPServer/src/McpToolSupport.cpp
+@@ -482,7 +482,11 @@ namespace McpTool
+ 			int iDistance = plotDistance(u->getX(), u->getY(), p->getX(), p->getY());
+ 			if(iDistance > u->GetRange()) { why = McpFormat("out of range: the target is %d tiles away and this unit's range is %d", iDistance, u->GetRange()); return false; }
+ 			if(u->getUnitInfo().IsRangeAttackOnlyInDomain() && (!p->isValidDomainForAction(*u) || u->plot()->getArea() != p->getArea())) { why = "this unit can only fire at targets on the same body of water"; return false; }
++#ifdef MCP_LEKMOD
++			if(!u->IsRangeAttackIgnoreLOS() && u->getDomainType() != DOMAIN_AIR && !u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true)))
++#else
+ 			if(!u->IsRangeAttackIgnoreLOS() && u->getDomainType() != DOMAIN_AIR && !u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true), u->getDomainType()))
++#endif
+ 			{
+ 				why = "no line of sight: hills, mountains, forest or jungle between this unit and the target block the view; fire from a hill or an adjacent tile, or from another angle";
+ 				return false;
+@@ -651,7 +655,11 @@ namespace McpTool
+ 		o["can_found_city_here"] = J(u->canFound(u->plot()));
+ 		o["embarked"] = J(u->isEmbarked());
+ 		o["level"] = J(u->getLevel());
++#ifdef MCP_LEKMOD
++		o["xp"] = J(u->getExperience());
++#else
+ 		o["xp"] = J(u->getExperienceTimes100() / 100);
++#endif
+ 		if(u->isPromotionReady())
+ 		{
+ 			o["promotion_ready"] = J(true);
+diff --git a/MCPServer/src/McpTools.cpp b/MCPServer/src/McpTools.cpp
+index 8f06d94..21d9234 100644
+--- a/MCPServer/src/McpTools.cpp
++++ b/MCPServer/src/McpTools.cpp
+@@ -507,7 +507,11 @@ MCP_TOOL(ToolCityOptions)
+ 	o["faith"] = J(me->GetFaith());
+ 
+ 	JArr tiles;
++#ifdef MCP_LEKMOD
++	int iBuyRange = GC.getMAXIMUM_BUY_PLOT_DISTANCE();
++#else
+ 	int iBuyRange = c->getBuyPlotDistance();
++#endif
+ 	for(int dy = -iBuyRange; dy <= iBuyRange; ++dy)
+ 	{
+ 		for(int dx = -iBuyRange; dx <= iBuyRange; ++dx)

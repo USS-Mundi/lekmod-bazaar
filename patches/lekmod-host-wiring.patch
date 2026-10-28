@@ -1,0 +1,826 @@
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvBuildingClasses.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvBuildingClasses.cpp
+index 657d211c..544773e7 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvBuildingClasses.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvBuildingClasses.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "ICvDLLUserInterface.h"
+ #include "CvGameCoreUtils.h"
+ #include "CvInternalGameCoreUtils.h"
+@@ -3865,6 +3868,10 @@ void CvCityBuildings::SetNumRealBuildingTimed(BuildingTypes eIndex, int iNewValu
+ 
+ 						bool bDontShowRewardPopup = GC.GetEngineUserInterface()->IsOptionNoRewardPopups();
+ 
++#if defined(CIV_HOST_API)
++						CivHandPopupRaised(m_pCity->getOwner(), BUTTONPOPUP_WONDER_COMPLETED_ACTIVE_PLAYER, eIndex, -1, -1, false, false, "");
++#endif
++
+ 						// Notification in MP games
+ 						if(bDontShowRewardPopup || GC.getGame().isNetworkMultiPlayer())	// KWG: Candidate for !GC.getGame().IsOption(GAMEOPTION_SIMULTANEOUS_TURNS)
+ 						{
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCityCitizens.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCityCitizens.cpp
+index 112fcefc..b3406e83 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCityCitizens.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCityCitizens.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "ICvDLLUserInterface.h"
+ #include "CvGameCoreUtils.h"
+ #include "CvCitySpecializationAI.h"
+@@ -3731,6 +3734,10 @@ void CvCityCitizens::DoSpawnGreatPerson(UnitTypes eUnit, bool bIncrementCount, b
+ 	if (eUnit == NO_UNIT)
+ 		return;	// Better than crashing.
+ 
++#if defined(CIV_HOST_API)
++	CivHandPopupRaised(GetCity()->getOwner(), BUTTONPOPUP_GREAT_PERSON_REWARD, eUnit, GetCity()->GetID(), -1, false, false, "");
++#endif
++
+ 	// If it's the active player then show the popup
+ 	if(GetCity()->getOwner() == GC.getGame().getActivePlayer())
+ 	{
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllContext.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllContext.cpp
+index 5d818d98..20c4ba60 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllContext.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllContext.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvDllContext.h"
+ 
+ #include "CvDllBuildingInfo.h"
+@@ -691,10 +694,17 @@ bool CvDllGameContext::GetHexDebugLayerString(ICvPlot1* pPlot, const char* szLay
+ void CvDllGameContext::Init()
+ {
+ 	GC.init();
++#if defined(CIV_HOST_API)
++	// CacheGameDatabaseData only reaches the host when it re-caches, which an Init without a database change skips.
++	CivHostOnDatabaseReady();
++#endif
+ }
+ //------------------------------------------------------------------------------
+ void CvDllGameContext::Uninit()
+ {
++#if defined(CIV_HOST_API)
++	CivHostOnEngineShutdown();
++#endif
+ 	GC.uninit();
+ }
+ //------------------------------------------------------------------------------
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllDatabaseUtility.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllDatabaseUtility.cpp
+index be70df25..d2ca7390 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllDatabaseUtility.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllDatabaseUtility.cpp
+@@ -14,6 +14,9 @@
+ //  PURPOSE: Group of functions to load in the xml files for Civilization 5
+ //
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include <algorithm>
+ #include "CvDLLDatabaseUtility.h"
+ #include "CvDllContext.h"
+@@ -189,6 +192,9 @@ bool CvDllDatabaseUtility::CacheGameDatabaseData()
+ 	if(bSuccess)
+ 		m_bGameDatabaseNeedsCaching = false;
+ 
++#if defined(CIV_HOST_API)
++	CivHostOnDatabaseReady();
++#endif
+ 	return bSuccess;
+ }
+ //------------------------------------------------------------------------------
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllNetMessageHandler.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllNetMessageHandler.cpp
+index ab3605dd..72559a00 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllNetMessageHandler.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllNetMessageHandler.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvDllNetMessageHandler.h"
+ #include "CvDllContext.h"
+ 
+@@ -1101,7 +1104,11 @@ void CvDllNetMessageHandler::ResponsePlayerDealFinalized(PlayerTypes eFromPlayer
+ #endif
+ 
+ 	// is the deal valid?
+-	if(!game.GetGameDeals()->FinalizeDeal(eFromPlayer, eToPlayer, bAccepted))
++	const bool bFinalized = game.GetGameDeals()->FinalizeDeal(eFromPlayer, eToPlayer, bAccepted);
++#if defined(CIV_HOST_API)
++	CivHandDealResolved(eFromPlayer, eToPlayer, eActBy, bAccepted, bFinalized);
++#endif
++	if(!bFinalized)
+ 	{
+ 		Localization::String strMessage;
+ 		Localization::String strSummary = Localization::Lookup("TXT_KEY_DEAL_EXPIRED");
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllWorldBuilderMapLoader.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllWorldBuilderMapLoader.cpp
+index ac88c4d1..04a5573c 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllWorldBuilderMapLoader.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvDllWorldBuilderMapLoader.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvDllWorldBuilderMapLoader.h"
+ #include "CvDllContext.h"
+ 
+@@ -138,6 +141,12 @@ unsigned int CvDllWorldBuilderMapLoader::PreviewPlayableCivCount(const wchar_t*
+ //------------------------------------------------------------------------------
+ int CvDllWorldBuilderMapLoader::GetMapPreview(lua_State* L)
+ {
++#if defined(CIV_HOST_API)
++	// The Plugins screen reaches the host through this call; see CivHostEngine.h.
++	int results = 0;
++	if(CivHostOnFrontEndCall(L, &results))
++		return results;
++#endif
+ 	return CvWorldBuilderMapLoader::GetMapPreview(L);
+ }
+ //------------------------------------------------------------------------------
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvGame.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvGame.cpp
+index 94b888da..677e4398 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvGame.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvGame.cpp
+@@ -7,6 +7,9 @@
+ 	------------------------------------------------------------------------------------------------------- */
+ 
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvGameCoreUtils.h"
+ #include "CvInternalGameCoreUtils.h"
+ #include "CvGame.h"
+@@ -427,6 +430,9 @@ void CvGame::init(HandicapTypes eHandicap)
+ 	}
+ #endif
+ 	doUpdateCacheOnTurn();
++#if defined(CIV_HOST_API)
++	CivHostOnNewGame();
++#endif
+ }
+ 
+ //	--------------------------------------------------------------------------------
+@@ -954,6 +960,9 @@ void CvGame::regenerateMap()
+ 
+ 	GC.GetEngineUserInterface()->setCycleSelectionCounter(1);
+ 
++#if defined(CIV_HOST_API)
++	if (CivHostSavingAllowed())
++#endif
+ 	gDLL->AutoSave(true);
+ }
+ 
+@@ -1587,6 +1596,9 @@ void CvGame::assignStartingPlots()
+ //	---------------------------------------------------------------------------
+ void CvGame::update()
+ {
++#if defined(CIV_HOST_API)
++	CivHostOnGameUpdate();
++#endif
+ 	if(IsWaitingForBlockingInput())
+ 	{
+ 		if(!GC.GetEngineUserInterface()->isDiploActive())
+@@ -1634,6 +1646,9 @@ void CvGame::update()
+ 
+ 			if(getTurnSlice() == 0 && !isPaused())
+ 			{
++#if defined(CIV_HOST_API)
++				if (CivHostSavingAllowed())
++#endif
+ 				gDLL->AutoSave(true);
+ 			}
+ 
+@@ -1775,6 +1790,9 @@ void CvGame::CheckPlayerTurnDeactivate()
+ 						}
+ 						if (iI == iFirstAlivePlayer)  // save just before first player deactivation
+ 						{
++#if defined(CIV_HOST_API)
++							if (CivHostSavingAllowed())
++#endif
+ 							gDLL->AutoSave(false, true);
+ 						}
+ #endif
+@@ -3893,6 +3911,9 @@ void CvGame::doControl(ControlTypes eControl)
+ 			CvPlayerAI& kActivePlayer = GET_PLAYER(getActivePlayer());
+ 			if (!isNetworkMultiPlayer() && kActivePlayer.isHuman() && GC.GetPostTurnAutosaves())
+ 			{
++#if defined(CIV_HOST_API)
++				if (CivHostSavingAllowed())
++#endif
+ 				gDLL->AutoSave(false, true);
+ 			}
+ 			kActivePlayer.GetPlayerAchievements().EndTurn();
+@@ -3991,16 +4012,25 @@ void CvGame::doControl(ControlTypes eControl)
+ 		break;
+ 
+ 	case CONTROL_SAVE_GROUP:
++#if defined(CIV_HOST_API)
++		if (CivHostSavingAllowed())
++#endif
+ 		gDLL->SaveGame(SAVEGAME_GROUP);
+ 		break;
+ 
+ 	case CONTROL_SAVE_NORMAL:
++#if defined(CIV_HOST_API)
++		if (CivHostSavingAllowed())
++#endif
+ 		gDLL->SaveGame(SAVEGAME_NORMAL);
+ 		break;
+ 
+ 	case CONTROL_QUICK_SAVE:
+ 		if(!(isNetworkMultiPlayer()))	// SP only!
+ 		{
++#if defined(CIV_HOST_API)
++			if (CivHostSavingAllowed())
++#endif
+ 			gDLL->QuickSave();
+ 		}
+ 		break;
+@@ -8333,6 +8363,9 @@ void CvGame::doTurn()
+ 
+ 	if (getAIAutoPlay())
+ 	{
++#if defined(CIV_HOST_API)
++		if (CivHostSavingAllowed())
++#endif
+ 		gDLL->AutoSave(false);
+ 	}
+ 
+@@ -8668,6 +8701,9 @@ void CvGame::doTurn()
+ #ifndef AUTOSAVE_END_OF_TURN
+ 	if(isNetworkMultiPlayer())
+ 	{//autosave after doing a turn
++#if defined(CIV_HOST_API)
++		if (CivHostSavingAllowed())
++#endif
+ 		gDLL->AutoSave(false);
+ 	}
+ #endif
+@@ -9434,6 +9470,10 @@ void CvGame::updateMoves()
+ 
+ 									if(player.isLocalPlayer() && gDLL->sendTurnUnready())
+ 										player.setEndTurn(false);
++#if defined(CIV_HOST_API)
++									else if(!player.isLocalPlayer() && CivHandIsPluginControlledPlayer(player.GetID()))
++										player.setEndTurn(false);
++#endif
+ 								}
+ 							}
+ 
+@@ -9465,6 +9505,10 @@ void CvGame::updateMoves()
+ 										CvAssertMsg(GC.getGame().getActivePlayer() == player.GetID(), "slewis - We should not need to resolve ambiguous end turns for the AI or remotely.");
+ 										if(player.isLocalPlayer() && gDLL->sendTurnUnready())
+ 											player.setEndTurn(false);
++#if defined(CIV_HOST_API)
++										else if(!player.isLocalPlayer() && CivHandIsPluginControlledPlayer(player.GetID()))
++											player.setEndTurn(false);
++#endif
+ 									}
+ 								}
+ 							}
+@@ -10942,6 +10986,9 @@ void CvGame::ReadSupportingClassData(FDataStream& kStream)
+ 
+ 	CvBarbarians::Read(kStream, uiVersion);
+ 	CvGoodyHuts::Read(kStream, uiVersion);
++#if defined(CIV_HOST_API)
++	CivHostOnReadSave(kStream, uiVersion);
++#endif
+ }
+ 
+ //	--------------------------------------------------------------------------------
+@@ -11164,11 +11211,18 @@ void CvGame::Write(FDataStream& kStream) const
+ void CvGame::WriteSupportingClassData(FDataStream& kStream)
+ {
+ 	// Current version number
++#if defined(CIV_HOST_API)
++	uint uiVersion = CIV_HOST_SAVE_VERSION;
++#else
+ 	uint uiVersion = 1;
++#endif
+ 	kStream << uiVersion;
+ 
+ 	CvBarbarians::Write(kStream);
+ 	CvGoodyHuts::Write(kStream);
++#if defined(CIV_HOST_API)
++	CivHostOnWriteSave(kStream);
++#endif
+ }
+ 
+ //	--------------------------------------------------------------------------------
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvMinorCivAI.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvMinorCivAI.cpp
+index 2a8b7dff..ca126bac 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvMinorCivAI.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvMinorCivAI.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvMinorCivAI.h"
+ #include "ICvDLLUserInterface.h"
+ #include "CvGameCoreUtils.h"
+@@ -2641,6 +2644,11 @@ void CvMinorCivAI::DoFirstContactWithMajor(TeamTypes eTeam, bool bSuppressMessag
+ 				// See if there are any quests you can join now
+ 				DoTestQuestsOnFirstContact(ePlayer);
+ 
++#if defined(CIV_HOST_API)
++				if(!bSuppressMessages)
++					CivHandPopupRaised(ePlayer, BUTTONPOPUP_CITY_STATE_GREETING, GetPlayer()->GetID(), iGoldGift, iFaithGift, bFirstMajorCiv, false, "");
++#endif
++
+ 				// Greeting for active human player
+ 				if(ePlayer == GC.getGame().getActivePlayer() && !bSuppressMessages)
+ 				{
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvNotifications.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvNotifications.cpp
+index ffb7cb6b..60cc31b2 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvNotifications.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvNotifications.cpp
+@@ -6,6 +6,9 @@
+ 	All rights reserved. 
+ 	------------------------------------------------------------------------------------------------------- */
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvNotifications.h"
+ #include "CvPlayer.h"
+ #include "CvDiplomacyAI.h"
+@@ -478,6 +481,10 @@ int CvNotifications::Add(NotificationTypes eNotificationType, const char* strMes
+ 
+ 	m_iCurrentLookupIndex++;
+ 
++#if defined(CIV_HOST_API)
++	CivHandNotificationAdded(m_ePlayer, eNotificationType, strMessage, strSummary, iX, iY, iGameDataIndex, iExtraGameData,
++		newNotification.m_iLookupIndex);
++#endif
+ 	return newNotification.m_iLookupIndex;
+ }
+ 
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlayer.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlayer.cpp
+index c1b141f2..43ed111f 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlayer.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlayer.cpp
+@@ -7,6 +7,9 @@
+ 	------------------------------------------------------------------------------------------------------- */
+ 
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvGlobals.h"
+ #include "CvArea.h"
+ #include "CvMap.h"
+@@ -627,6 +630,9 @@ CvPlayer::~CvPlayer()
+ //	--------------------------------------------------------------------------------
+ void CvPlayer::init(PlayerTypes eID)
+ {
++#if defined(CIV_HOST_API)
++	CivHostOnPlayerReset(eID);
++#endif
+ 	LeaderHeadTypes eBestPersonality;
+ 	int iValue;
+ 	int iBestValue;
+@@ -2882,6 +2888,9 @@ void CvPlayer::acquireCity(CvCity* pOldCity, bool bConquest, bool bGift, bool bP
+ 		gDLL->GameplayCityCaptured(pkDllOldCity.get(), GetID());
+ 	}
+ 
++#if defined(CIV_HOST_API)
++	const int iCivHostOldCityID = pOldCity->GetID();
++#endif
+ 	GET_PLAYER(eOldOwner).deleteCity(pOldCity->GetID());
+ 	// adapted from PostKill()
+ 
+@@ -3522,6 +3531,10 @@ void CvPlayer::acquireCity(CvCity* pOldCity, bool bConquest, bool bGift, bool bP
+ 			}
+ 		}
+ 
++#if defined(CIV_HOST_API)
++		CivHandCityReplaced(eOldOwner, iCivHostOldCityID, pNewCity);
++#endif
++
+ 		long lResult = 0;
+ 
+ 		if(lResult == 0)
+@@ -3566,6 +3579,9 @@ void CvPlayer::acquireCity(CvCity* pOldCity, bool bConquest, bool bGift, bool bP
+ 				}
+ 				else if (pNewCity->getOriginalOwner() != GetID() || GetPlayerTraits()->IsNoAnnexing() || bIsMinorCivBuyout)
+ 				{
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(GetID(), BUTTONPOPUP_CITY_CAPTURED, pNewCity->GetID(), iCaptureGold, iCaptureCulture, bIsMinorCivBuyout, bConquest, "");
++#endif
+ 					if(GC.getGame().getActivePlayer() == GetID())
+ 					{
+ 						int iTemp[5] = { pNewCity->GetID(), iCaptureGold, iCaptureCulture, iCaptureGreatWorks, eLiberatedPlayer };
+@@ -8485,6 +8501,10 @@ void CvPlayer::receiveGoody(CvPlot* pPlot, GoodyTypes eGoody, CvUnit* pUnit)
+ 		GC.GetEngineUserInterface()->AddPlotMessage(0, pPlot->GetPlotIndex(), GetID(), true, GC.getEVENT_MESSAGE_TIME(), strBuffer);
+ 	}
+ 
++#if defined(CIV_HOST_API)
++	CivHandPopupRaised(GetID(), BUTTONPOPUP_GOODY_HUT_REWARD, eGoody, iGold > 0 ? iGold : (iCulture > 0 ? iCulture : (iFaith > 0 ? iFaith : 0)), -1, false, false, strBuffer.c_str());
++#endif
++
+ 	// If it's the active player then show the popup
+ 	if(GetID() == GC.getGame().getActivePlayer())
+ 	{
+@@ -17116,6 +17136,9 @@ void CvPlayer::DoProcessGoldenAge()
+ 					int iLength = getGoldenAgeLength();
+ 					changeGoldenAgeTurns(iLength);
+ 
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(GetID(), BUTTONPOPUP_GOLDEN_AGE_REWARD, -1, -1, -1, false, false, "");
++#endif
+ 					// If it's the active player then show the popup
+ 					if (GetID() == GC.getGame().getActivePlayer())
+ 					{
+@@ -17142,6 +17165,9 @@ void CvPlayer::DoProcessGoldenAge()
+ 					int iLength = getGoldenAgeLength();
+ 					changeGoldenAgeTurns(iLength);
+ 
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(GetID(), BUTTONPOPUP_GOLDEN_AGE_REWARD, -1, -1, -1, false, false, "");
++#endif
+ 					// If it's the active player then show the popup
+ 					if (GetID() == GC.getGame().getActivePlayer())
+ 					{
+@@ -17189,6 +17215,9 @@ void CvPlayer::DoProcessGoldenAge()
+ 					int iLength = getGoldenAgeLength();
+ 					changeGoldenAgeTurns(iLength);
+ 
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(GetID(), BUTTONPOPUP_GOLDEN_AGE_REWARD, -1, -1, -1, false, false, "");
++#endif
+ 					// If it's the active player then show the popup
+ 					if (GetID() == GC.getGame().getActivePlayer())
+ 					{
+@@ -17250,6 +17279,9 @@ void CvPlayer::DoProcessGoldenAge()
+ 				int iLength = getGoldenAgeLength();
+ 				changeGoldenAgeTurns(iLength);
+ 
++#if defined(CIV_HOST_API)
++				CivHandPopupRaised(GetID(), BUTTONPOPUP_GOLDEN_AGE_REWARD, -1, -1, -1, false, false, "");
++#endif
+ 				// If it's the active player then show the popup
+ 				if (GetID() == GC.getGame().getActivePlayer())
+ 				{
+@@ -21084,6 +21116,9 @@ void CvPlayer::setAlive(bool bNewValue, bool bNotify)
+ 
+ 			setTurnActive(false);
+ 
++#if defined(CIV_HOST_API)
++			if(!CivHandKeepDeadSlotOpen(GetID()))
++#endif
+ 			gDLL->closeSlot(GetID());
+ 
+ 			if(bNotify && !isBarbarian())
+@@ -23158,6 +23193,10 @@ void CvPlayer::DoCivilianReturnLogic(bool bReturn, PlayerTypes eToPlayer, int iU
+ 	{
+ 		pUnit->kill(true);
+ 		CvUnit* pNewUnit = GET_PLAYER(eToPlayer).initUnit(eNewUnitType, iX, iY);
++#if defined(CIV_HOST_API)
++		if (pNewUnit)
++			CivHandUnitReplaced(GetID(), iUnitID, pNewUnit);
++#endif
+ 		CvAssert(pNewUnit != NULL);
+ 		if (pNewUnit)
+ 		{
+@@ -23185,6 +23224,10 @@ void CvPlayer::DoCivilianReturnLogic(bool bReturn, PlayerTypes eToPlayer, int iU
+ 		{
+ 			pUnit->kill(true);
+ 			CvUnit* pNewUnit = initUnit(eNewUnitType, iX, iY);
++#if defined(CIV_HOST_API)
++			if (pNewUnit)
++				CivHandUnitReplaced(GetID(), iUnitID, pNewUnit);
++#endif
+ 			CvAssert(pNewUnit != NULL);
+ 			if (pNewUnit)
+ 				pNewUnit->finishMoves();
+@@ -23300,6 +23343,9 @@ void CvPlayer::AddIncomingUnit(PlayerTypes eFromPlayer, CvUnit* pUnit)
+ 		int iX = pUnit->getX();
+ 		int iY = pUnit->getY();
+ 		UnitTypes eType = pUnit->getUnitType();
++#if defined(CIV_HOST_API)
++		const int iCivHostOldID = pUnit->GetID();
++#endif
+ 
+ 		// Get rid of the old unit
+ 		pUnit->kill(true);
+@@ -23308,6 +23354,10 @@ void CvPlayer::AddIncomingUnit(PlayerTypes eFromPlayer, CvUnit* pUnit)
+ 		if(eType != NO_UNIT)
+ 		{
+ 			CvUnit* pNewUnit = initUnit(eType, iX, iY);
++#if defined(CIV_HOST_API)
++			if (pNewUnit)
++				CivHandUnitReplaced(eFromPlayer, iCivHostOldID, pNewUnit);
++#endif
+ 			CvAssert(pNewUnit);
+ 			if (pNewUnit)
+ 				pNewUnit->finishMoves();
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlot.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlot.cpp
+index 66223bd6..6c47c0f7 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlot.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvPlot.cpp
+@@ -7,6 +7,9 @@
+ 	------------------------------------------------------------------------------------------------------- */
+ 
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvPlot.h"
+ #include "CvCity.h"
+ #include "CvUnit.h"
+@@ -10199,6 +10202,10 @@ bool CvPlot::setRevealed(TeamTypes eTeam, bool bNewValue, bool bTerrainOnly, Tea
+ 						}
+ 					}
+ 
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(CivHostTeamPlayers(eTeam), BUTTONPOPUP_NATURAL_WONDER_REWARD, getX(), getY(), iFinderGold, bFirstFinder, false, "");
++#endif
++
+ 					// If it's the active team then tell them they found something
+ 					if(eTeam == eActiveTeam)
+ 					{
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTeam.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTeam.cpp
+index b356b13f..4462bb96 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTeam.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTeam.cpp
+@@ -7,6 +7,9 @@
+ 	------------------------------------------------------------------------------------------------------- */
+ 
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvPlayerAI.h"
+ #include "CvDefines.h"
+ #include "CvGameCoreUtils.h"
+@@ -6377,6 +6380,10 @@ void CvTeam::setHasTech(TechTypes eIndex, bool bNewValue, PlayerTypes ePlayer, b
+ 			{
+ 				bool bDontShowRewardPopup = DLLUI->IsOptionNoRewardPopups();
+ 
++#if defined(CIV_HOST_API)
++				CivHandPopupRaised(CivHostTeamPlayers(GetID()), BUTTONPOPUP_TECH_AWARD, -1, 0, eIndex, false, false, "");
++#endif
++
+ 				// Notification in MP games
+ 				if(bDontShowRewardPopup || GC.getGame().isNetworkMultiPlayer())
+ 				{
+@@ -7585,6 +7592,9 @@ void CvTeam::SetCurrentEra(EraTypes eNewValue)
+ 
+ 				
+ 				if(!isBarbarian() && (eNewValue != GC.getGame().getStartEra())){
++#if defined(CIV_HOST_API)
++					CivHandPopupRaised(CivHostTeamPlayers(GetID()), BUTTONPOPUP_NEW_ERA, eNewValue, -1, -1, false, false, "");
++#endif
+ 					//Era Popup
+ 					if (!GC.getGame().isNetworkMultiPlayer() && isHuman() && GetID() == GC.getGame().getActiveTeam()){
+ 						CvPopupInfo kPopupInfo(BUTTONPOPUP_NEW_ERA, eNewValue);
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnit.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnit.cpp
+index ee25a69f..6b139a70 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnit.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnit.cpp
+@@ -7,6 +7,9 @@
+ 	------------------------------------------------------------------------------------------------------- */
+ 
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvUnit.h"
+ #include "CvArea.h" 
+ #include "CvPlot.h"
+@@ -1599,6 +1602,9 @@ void CvUnit::convert(CvUnit* pUnit, bool bIsUpgrade)
+ 	SetIgnoreExpended(pUnit->IsIgnoreExpended());
+ #endif
+ 
++#if defined(CIV_HOST_API)
++	CivHandUnitReplaced(pUnit->getOwner(), pUnit->GetID(), this);
++#endif
+ 	pUnit->kill(true);
+ }
+ 
+@@ -1878,6 +1884,9 @@ void CvUnit::kill(bool bDelay, PlayerTypes ePlayer /*= NO_PLAYER*/)
+ 		}
+ 	}
+ 
++#if defined(CIV_HOST_API)
++	CivHostCaptureFrom(getOwner(), GetID());
++#endif
+ 	//////////////////////////////////////////////////////////////////////////
+ 	// WARNING: This next statement will delete 'this'
+ 	// ANYTHING BELOW HERE MUST NOT REFERENCE THE UNIT!
+@@ -1888,6 +1897,9 @@ void CvUnit::kill(bool bDelay, PlayerTypes ePlayer /*= NO_PLAYER*/)
+ 
+ 	// Create the captured unit that will replace this unit (if the capture definition is valid)
+ 	CvUnit::createCaptureUnit(kCaptureDef);
++#if defined(CIV_HOST_API)
++	CivHostCaptureDone();
++#endif
+ 
+ 	if(GC.getGame().getActivePlayer() == kCaptureDef.eOldPlayer)
+ 	{
+@@ -2036,6 +2048,12 @@ bool CvUnit::getCaptureDefinition(CvUnitCaptureDefinition* pkCaptureDef, PlayerT
+ 						}
+ 					}
+ 
++#if defined(CIV_HOST_API)
++					int iCivHostOldOwner = NO_PLAYER;
++					int iCivHostOldID = -1;
++					if(pkCapturedUnit != NULL && CivHostTakeCapturedFrom(&iCivHostOldOwner, &iCivHostOldID))
++						CivHandUnitReplaced(iCivHostOldOwner, iCivHostOldID, pkCapturedUnit);
++#endif
+ 					// Captured civilian who could be returned?
+ 					if(!kCaptureDef.bAsIs)
+ 					{
+@@ -17318,6 +17336,9 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
+ 	CvPlot* pNewPlot = 0;
+ 	FStaticVector<IDInfo, 10, true, c_eCiv5GameplayDLL, 0> oldUnitList;
+ 	FStaticVector<CvUnitCaptureDefinition, 8, true, c_eCiv5GameplayDLL, 0> kCaptureUnitList;
++#if defined(CIV_HOST_API)
++	std::vector<IDInfo> kCivHostCapturedFrom;
++#endif
+ 	ActivityTypes eOldActivityType = NO_ACTIVITY;
+ 	int iI;
+ 	TeamTypes activeTeam = GC.getGame().getActiveTeam();
+@@ -17498,7 +17519,12 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
+ 										if(bDoCapture)
+ 										{
+ 											if(pLoopUnit->getCaptureDefinition(&kCaptureDef, getOwner()))
++											{
+ 												kCaptureUnitList.push_back(kCaptureDef);
++#if defined(CIV_HOST_API)
++												kCivHostCapturedFrom.push_back(pLoopUnit->GetIDInfo());
++#endif
++											}
+ 											pLoopUnit->setCapturingPlayer(NO_PLAYER);	// Make absolutely sure this is not valid so the kill does not do the capture.
+ 										}
+ 
+@@ -17960,6 +17986,9 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
+ 							}
+ 						}
+ 
++#if defined(CIV_HOST_API)
++						CivHandPopupRaised(getOwner(), BUTTONPOPUP_BARBARIAN_CAMP_REWARD, iNumGold, -1, -1, false, false, "");
++#endif
+ 						// If it's the active player then show the popup
+ 						if(getOwner() == GC.getGame().getActivePlayer())
+ 						{
+@@ -18031,7 +18060,13 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
+ 	// Create any units we captured, now that we own the destination
+ 	for(uint uiCaptureIndex = 0; uiCaptureIndex < kCaptureUnitList.size(); ++uiCaptureIndex)
+ 	{
++#if defined(CIV_HOST_API)
++		CivHostCaptureFrom(kCivHostCapturedFrom[uiCaptureIndex].eOwner, kCivHostCapturedFrom[uiCaptureIndex].iID);
++#endif
+ 		createCaptureUnit(kCaptureUnitList[uiCaptureIndex]);
++#if defined(CIV_HOST_API)
++		CivHostCaptureDone();
++#endif
+ 	}
+ 
+ 	CvAssert(pOldPlot != pNewPlot);
+@@ -21517,6 +21552,9 @@ void CvUnit::setPromotionReady(bool bNewValue)
+ 
+ 		if(m_bPromotionReady)
+ 		{
++#if defined(CIV_HOST_API)
++			CivHandUnitOrdersCancelled(this, CIV_ORDERS_PROMOTION_READY);
++#endif
+ 			SetAutomateType(NO_AUTOMATE);
+ 			ClearMissionQueue();
+ 			SetActivityType(ACTIVITY_AWAKE);
+@@ -24939,6 +24977,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 	{
+ 		if(!canMoveInto(*pDestPlot))
+ 		{
++#if defined(CIV_HOST_API)
++			CivHandUnitOrdersCancelled(this, CIV_ORDERS_CANNOT_LAND);
++#endif
+ 			return 0;
+ 		}
+ 
+@@ -24952,6 +24993,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 			if(!GC.GetBuildRouteFinder().GeneratePath(getX(), getY(), iX, iY, getOwner()))
+ 			{
+ 				LOG_UNIT_MOVES_MESSAGE("Unable to generate path with BuildRouteFinder");
++#if defined(CIV_HOST_API)
++				CivHandUnitOrdersCancelled(this, CIV_ORDERS_NO_ROUTE_TO_BUILD);
++#endif
+ 				return 0;
+ 			}
+ 
+@@ -24973,6 +25017,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 			if(!pPathPlot || !canMoveInto(*pPathPlot, iFlags | MOVEFLAG_DESTINATION))
+ #endif
+ 			{
++#if defined(CIV_HOST_API)
++				CivHandUnitOrdersCancelled(this, CIV_ORDERS_ROUTE_BLOCKED);
++#endif
+ 				// add route interrupted
+ 				CvNotifications* pNotifications = GET_PLAYER(getOwner()).GetNotifications();
+ 				if(pNotifications)
+@@ -24998,6 +25045,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 			if (!bPathGenerated)
+ 			{
+ 				LOG_UNIT_MOVES_MESSAGE("Unable to Generate path");
++#if defined(CIV_HOST_API)
++				CivHandUnitOrdersCancelled(this, CIV_ORDERS_NO_PATH);
++#endif
+ 				return 0;
+ 			}
+ 
+@@ -25016,6 +25066,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 		if(iPrevETA >= 0 && kNode.m_iData2 > iPrevETA + 2)
+ 		{
+ 			LOG_UNIT_MOVES_MESSAGE_OSTR(std::string("Rejecting move iPrevETA=") << iPrevETA << std::string(", m_iData2=") << kNode.m_iData2);
++#if defined(CIV_HOST_API)
++			CivHandUnitOrdersCancelled(this, CIV_ORDERS_PATH_LONGER);
++#endif
+ 			bRejectMove = true;
+ 		}
+ 
+@@ -25038,6 +25091,9 @@ int CvUnit::UnitPathTo(int iX, int iY, int iFlags, int iPrevETA, bool bBuildingR
+ 			if(pkMissionData != NULL && pkMissionData->iPushTurn != GC.getGame().getGameTurn())
+ 			{
+ 				LOG_UNIT_MOVES_MESSAGE_OSTR(std::string("Rejecting move pkMissionData->iPushTurn=") << pkMissionData->iPushTurn << std::string(", GC.getGame().getGameTurn()=") << GC.getGame().getGameTurn());
++#if defined(CIV_HOST_API)
++				CivHandUnitOrdersCancelled(this, CIV_ORDERS_DESTINATION_BLOCKED);
++#endif
+ 				bRejectMove = true;
+ 			}
+ 		}
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnitMission.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnitMission.cpp
+index be67377f..b8671a20 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnitMission.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvUnitMission.cpp
+@@ -9,6 +9,9 @@
+ //	CvUnit Mission controller
+ //
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvUnit.h"
+ #include "CvPlot.h"
+ #include "CvCity.h"
+@@ -466,7 +469,11 @@ void CvUnitMission::ContinueMission(UnitHandle hUnit, int iSteps, int iETA)
+ 				{
+ 					bool bCityAttackInterrupt = gDLL->GetAdvisorCityAttackInterrupt();
+ 					bool bBadAttackInterrupt = gDLL->GetAdvisorBadAttackInterrupt();
+-					if(hUnit->isHuman() && !CvPreGame::isNetworkMultiplayerGame() && !GC.getGame().IsCombatWarned() && (bCityAttackInterrupt || bBadAttackInterrupt))
++					if(hUnit->isHuman() && !CvPreGame::isNetworkMultiplayerGame() && !GC.getGame().IsCombatWarned() && (bCityAttackInterrupt || bBadAttackInterrupt)
++#if defined(CIV_HOST_API)
++						&& !CivHandIsPluginControlledPlayer(hUnit->getOwner())
++#endif
++						)
+ 					{
+ 						if(hUnit->canMoveInto(*pPlot, CvUnit::MOVEFLAG_ATTACK) && pPlot->isVisible(hUnit->getTeam()))
+ 						{
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/Lua/CvLuaGame.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/Lua/CvLuaGame.cpp
+index bf6f226b..2428bec7 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/Lua/CvLuaGame.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/Lua/CvLuaGame.cpp
+@@ -14,6 +14,9 @@
+ //!
+ //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ #include "CvGameCoreDLLPCH.h"
++#if defined(CIV_HOST_API)
++#include "CivHostEngine.h"
++#endif
+ #include "CvLuaSupport.h"
+ #include "CvLuaCity.h"
+ #include "CvLuaGame.h"
+@@ -426,6 +429,9 @@ void CvLuaGame::RegisterMembers(lua_State* L)
+ #if defined(LEKMOD_COMBAT_PREDICTOR_IMPROVEMENTS)
+ 	Method(GetCombatDamage);
+ #endif
++#if defined(CIV_HOST_API)
++	RegisterMethod(L, &CivHostLuaGetPluginValue, "GetPluginValue");
++#endif
+ }
+ //------------------------------------------------------------------------------
+ 

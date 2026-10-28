@@ -1,0 +1,18 @@
+diff --git a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCultureClasses.cpp b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCultureClasses.cpp
+index 837d1f08..f2dd5865 100644
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCultureClasses.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvCultureClasses.cpp
+@@ -2631,7 +2631,12 @@ int CvPlayerCulture::GetInfluencePerTurn(PlayerTypes ePlayer) const
+ 			iRtnValue += iInfluenceToAdd;
+ 		}
+ #else
+-		iModifier = m_pPlayer->getCapitalCity()->GetCityCulture()->GetTourismMultiplier(kOtherPlayer.GetID(), false, false, false, false, false);
++		CvCity* pCapitalCity = m_pPlayer->getCapitalCity();
++		if (pCapitalCity == NULL)
++		{
++			return 0;
++		}
++		iModifier = pCapitalCity->GetCityCulture()->GetTourismMultiplier(kOtherPlayer.GetID(), false, false, false, false, false);
+ 		if (bPlayerHasInternet && bTargetHasGreatFirewall)
+ 		{
+ 			iRtnValue = (m_pPlayer->getYieldTimes100(YIELD_TOURISM, false) - m_pPlayer->getYieldFromCitiesTimes100(YIELD_TOURISM, false)) / 100;
