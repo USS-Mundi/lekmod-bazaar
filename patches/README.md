@@ -45,6 +45,10 @@ capital's culture without checking that a capital exists, so a player with no
 city yet crashes the game at the end of a turn. With the guard, such a player
 has no influence per turn.
 
+**`mcp-plugin-game-reference.patch`** — `civ5-mcp-plugin`, the game reference
+at `GET /game-reference`, offered upstream as a pull request. Apply it before
+`mcp-plugin-lekmod.patch`, and drop it once upstream has it.
+
 **`mcp-plugin-lekmod.patch`** — `civ5-mcp-plugin`, the plugin's sources under
 `MCP_LEKMOD`, which `generator/build_mcp.sh` defines. Every change is one of:
 an argument VMC adds and LEKMOD lacks, dropped; an accessor Community Patch adds,

@@ -41,6 +41,17 @@ It works in single player only.
 
 If the AI can't connect, check `Documents\My Games\Sid Meier's Civilization 5\Logs\Bazaar.log`. It says whether the plugin loaded.
 
+## Giving the AI the game's rules
+
+While a game is loaded, `http://127.0.0.1:7676/game-reference` returns LEKMOD's rules for that game as plain text: technologies, buildings, wonders, units, policies, beliefs, promotions, improvements, resources and terrain, with their costs and effects, and the civilizations in the game. An AI's memory knows the unmodded game, not LEKMOD, so it needs this to plan. For 8 civilizations it is about 55,000 tokens. Load your game first, then start Claude Code with it:
+
+```
+curl -s http://127.0.0.1:7676/game-reference -o game-reference.txt
+claude --append-system-prompt-file game-reference.txt
+```
+
+Fetch it again for each new game.
+
 ## Uninstall
 
 Put LEKMOD's original `CvGameCore_Expansion2.dll` back and delete the two folders from `MODS`.
