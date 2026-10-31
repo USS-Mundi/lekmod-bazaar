@@ -19,7 +19,7 @@ This plugin replaces the Local MCP Server DLL mod, so turn that one off.
 
 ## Giving the model the game's rules
 
-While a game is loaded, `http://127.0.0.1:7676/game-reference` returns the rules of that game as plain text: technologies, buildings, wonders, units, policies, beliefs, promotions, improvements, resources, terrain and specialists, with their costs and effects, and the abilities and unique units of the civilizations in the game. It is read from the game's own database, so mods are included. For an 8-civilization Brave New World game it is about 49,000 tokens.
+While a game is loaded, `http://127.0.0.1:7676/game-reference` returns the rules of that game as plain text: technologies, buildings, wonders, units, policies, beliefs, promotions, improvements, resources, terrain and specialists, with their costs and effects, and the abilities and unique units of the civilizations in the game. It also gives the rules at this game's difficulty and map size: what happiness, food and gold below zero cost, and what the computer players get. It is read from the game's own database, so mods are included. For an 8-civilization Brave New World game it is about 42,000 tokens.
 
 With it in the system prompt, the model plans from the game's numbers rather than from memory, which gets many of them wrong. Load your game first, then start Claude Code with it (PowerShell):
 
@@ -29,6 +29,18 @@ claude --append-system-prompt-file game-reference.txt
 ```
 
 Fetch it again for each new game, since it depends on the civilizations in it.
+
+## Testing what a model knows
+
+`tools/agent_quiz.py` quizzes a model on the rules of Brave New World without mods and scores its answers against the game's own data: 3,625 questions on costs, prerequisites, strengths, upgrades, yields, upkeep, abilities and global rules. It needs only Python 3. Build the answer key from your own install, make a quiz, give its sheet to the model and score the reply:
+
+```
+python tools/agent_quiz.py build "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization V\Assets"
+python tools/agent_quiz.py make sample --set sampler
+python tools/agent_quiz.py score sample
+```
+
+`python tools/agent_quiz.py -h` shows how to run Claude on the sheet with no tools, with or without the game reference. The key and the quizzes stay in `tools/agent-quiz/`, which git ignores.
 
 ## Making a release
 
