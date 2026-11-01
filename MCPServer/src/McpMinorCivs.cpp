@@ -268,7 +268,7 @@ MCP_TOOL(ToolCityState)
 	return JVal(o);
 }
 
-const char* McpMinorQuestName(MinorCivQuestTypes e) { return QuestName(e); }
+const char* McpMinorQuestName(int eQuest) { return QuestName((MinorCivQuestTypes)eQuest); }
 
 MCP_TOOL(ToolTellCityState)
 {

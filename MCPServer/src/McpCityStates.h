@@ -33,7 +33,7 @@ std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
 // save yet), the last 30 per civ, each line "turn N: what". Recorded for every city-state, switched on or not.
 void McpCsNoteDeed(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& what);
 std::vector<std::string> McpCsDeeds(PlayerTypes eMinor, PlayerTypes eCiv);
-const char* McpMinorQuestName(MinorCivQuestTypes e); // McpMinorCivs.cpp
+const char* McpMinorQuestName(int eQuest); // a MinorCivQuestTypes; McpMinorCivs.cpp
 
 // A switched-on city-state a model has taken (or one switched off during its own turn, until that turn ends).
 bool McpIsCityStateSeat(PlayerTypes e);

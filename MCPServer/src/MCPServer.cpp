@@ -167,25 +167,53 @@ static void AfterWarOnMinor(CvMinorCivAI* self, TeamTypes eTeam)
 		if(GET_PLAYER((PlayerTypes)i).isAlive() && GET_PLAYER((PlayerTypes)i).getTeam() == eTeam) McpCsNoteDeed(self->GetPlayer()->GetID(), (PlayerTypes)i, "declared war on them");
 }
 
+#ifdef MCP_LEKMOD
+static void AfterBuyout(CvMinorCivAI* self, PlayerTypes eMajor)
+#else
 static void AfterBuyout(CvMinorCivAI* self, PlayerTypes eMajor, bool)
+#endif
 {
 	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, "bought them out");
 }
 
-// A quest finished during DoCompletedQuestsForPlayer is one active before it and gone after it.
-static bool s_questsBefore[NUM_MINOR_CIV_QUEST_TYPES];
+// A quest finished during the game's completed-quests pass is one active before it and gone after it.
+static bool s_questsBefore[MAX_MAJOR_CIVS][NUM_MINOR_CIV_QUEST_TYPES];
+static void SnapshotQuests(CvMinorCivAI* self, PlayerTypes eMajor)
+{
+	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q) s_questsBefore[eMajor][q] = self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q);
+}
+
+static void NoteQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor)
+{
+	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q)
+		if(s_questsBefore[eMajor][q] && !self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q))
+			McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("completed their quest: ") + McpMinorQuestName(q));
+}
+
+#ifdef MCP_LEKMOD
+// LEKMOD's SDK hooks the pass over every player, not the per-player one.
+static bool BeforeQuestsDone(CvMinorCivAI* self)
+{
+	for(int i = 0; i < MAX_MAJOR_CIVS; ++i) SnapshotQuests(self, (PlayerTypes)i);
+	return false;
+}
+
+static void AfterQuestsDone(CvMinorCivAI* self)
+{
+	for(int i = 0; i < MAX_MAJOR_CIVS; ++i) NoteQuestsDone(self, (PlayerTypes)i);
+}
+#else
 static bool BeforeQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQuestTypes)
 {
-	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q) s_questsBefore[q] = self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q);
+	SnapshotQuests(self, eMajor);
 	return false;
 }
 
 static void AfterQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQuestTypes)
 {
-	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q)
-		if(s_questsBefore[q] && !self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q))
-			McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("completed their quest: ") + McpMinorQuestName((MinorCivQuestTypes)q));
+	NoteQuestsDone(self, eMajor);
 }
+#endif
 
 static void AfterMinorTurn(CvMinorCivAI* self)
 {
@@ -273,9 +301,15 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTeamDeclaredWarOnMe>(host, &AfterWarOnMinor), "after CvMinorCivAI::DoTeamDeclaredWarOnMe");
+#ifdef MCP_LEKMOD
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout_with_PlayerTypes>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
+	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuests");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuests");
+#else
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
 	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuestsForPlayer");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuestsForPlayer");
+#endif
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
 	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
 	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
