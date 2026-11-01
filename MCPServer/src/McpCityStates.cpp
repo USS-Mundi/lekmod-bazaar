@@ -8,6 +8,8 @@
 #include "CvPlayer.h"
 #include "CvUnit.h"
 #include "CvMinorCivAI.h"
+#include "CvTeam.h"
+#include "CvGameCoreUtils.h"
 #include "CvGlobals.h"
 #include "CvPreGame.h"
 #include <map>
@@ -266,6 +268,47 @@ int McpCsUnitsOut(PlayerTypes eMinor)
 {
 	if(!IsLiveMinor(eMinor)) return 0;
 	return MilitaryUnits(GET_PLAYER(eMinor), true);
+}
+
+std::string McpCsMoveRefusal(const CvUnit* u, const CvPlot* dest)
+{
+	if(!u || !dest || !u->IsCombatUnit()) return "";
+	PlayerTypes e = u->getOwner();
+	if(!McpCsIsSwitchedOn(e) || !u->plot() || u->plot()->getOwner() != e || dest->getOwner() == e) return "";
+	int cap = McpCsSendCapFor(e), out = McpCsUnitsOut(e);
+	if(out < cap) return "";
+	return McpFormat("at %d influence your ally can have %d of your units outside your land, and %d are out already; bring one home or wait for more influence", McpCsInfluence(e), cap, out);
+}
+
+bool McpCsMayEnter(PlayerTypes eMinor, TeamTypes eTeam)
+{
+	if(eTeam == NO_TEAM) return false;
+	PlayerTypes ePatron = McpCsPatron(eMinor);
+	if(ePatron == NO_PLAYER || GET_PLAYER(ePatron).getTeam() != eTeam) return false;
+	const McpCsTier* tier = McpCsCurrentTier(eMinor);
+	return tier && tier->enterAllyLand;
+}
+
+bool McpCsTeamMayEnter(TeamTypes eMinorTeam, TeamTypes eLandTeam)
+{
+	return McpCsMayEnter(GET_TEAM(eMinorTeam).getLeaderID(), eLandTeam);
+}
+
+void McpCsRevealAround(const CvUnit* u)
+{
+	PlayerTypes e = u->getOwner();
+	const McpCsTier* tier = McpCsCurrentTier(e);
+	if(!tier || !tier->revealSight || !u->plot()) return;
+	TeamTypes eAllyTeam = GET_PLAYER(McpCsPatron(e)).getTeam();
+	int range = u->visibilityRange();
+	for(int dx = -range; dx <= range; ++dx)
+	{
+		for(int dy = -range; dy <= range; ++dy)
+		{
+			CvPlot* p = plotXYWithRangeCheck(u->getX(), u->getY(), dx, dy, range);
+			if(p && !p->isRevealed(eAllyTeam)) p->setRevealed(eAllyTeam, true);
+		}
+	}
 }
 
 void McpCsTick()

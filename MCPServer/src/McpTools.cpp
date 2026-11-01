@@ -625,6 +625,11 @@ MCP_TOOL(ToolMoveUnit)
 	if(!dest->isRevealed(me->getTeam())) { err = "destination tile is unexplored"; return JVal(); }
 	if(dest->isMountain()) { err = "destination is a mountain: impassable"; return JVal(); }
 	if(dest == u->plot()) { err = "the unit is already on that tile"; return JVal(); }
+	if(me->isMinorCiv())
+	{
+		std::string why = McpCsMoveRefusal(u, dest);
+		if(!why.empty()) { err = why; return JVal(); }
+	}
 	if(dest->isVisible(me->getTeam()))
 	{
 		CvCity* c = dest->getPlotCity();

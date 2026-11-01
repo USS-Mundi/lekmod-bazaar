@@ -36,6 +36,15 @@ std::string McpCsToolRefusal(const std::string& tool);
 // What a city-state's player sees in status: its ally, what the alliance buys, its own character.
 picojson::value McpCsSeatView(PlayerTypes eMinor);
 
+// The army rules, by the ally's influence. "" when a city-state's unit may go to dest; otherwise why not: a unit in its
+// own land heading out while as many as its ally may have are out already.
+std::string McpCsMoveRefusal(const CvUnit* u, const CvPlot* dest);
+// Its units may enter its ally's land (from the step that allows it). Called from hot paths: cheap for non-minors.
+bool McpCsMayEnter(PlayerTypes eMinor, TeamTypes eTeam);
+bool McpCsTeamMayEnter(TeamTypes eMinorTeam, TeamTypes eLandTeam);
+// What a unit of a switched-on city-state sees stays uncovered on its ally's map (from the step that allows it).
+void McpCsRevealAround(const CvUnit* u);
+
 // Every game update: finishes hand-backs that waited for a turn to end, ends the turn of a city-state whose model is
 // gone (and switches it off), and catches a lost alliance.
 void McpCsTick();

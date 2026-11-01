@@ -14,6 +14,8 @@ namespace CivHooks
 
 #include "CvDealAI.h"
 #include "CvMinorCivAI.h"
+#include "CvTeam.h"
+#include "CvUnit.h"
 #include "CvDllPlayer.h"
 #include "CvDllPreGame.h"
 #include "McpBridge.h"
@@ -121,6 +123,26 @@ static void AfterMinorTurn(CvMinorCivAI* self)
 	McpCsAfterMinorTurn(self->GetPlayer()->GetID());
 }
 
+// A switched-on city-state's units may enter its ally's land (from the influence step that allows it). Both border
+// checks the pathfinder uses answer alike, or paths and moves disagree. The first test keeps the hot path cheap.
+static bool ReplaceCanEnterTerritory(CivHooks::CvUnit_canEnterTerritory::Original original, const CvUnit* self, TeamTypes eTeam, bool bIgnoreRightOfPassage, bool bIsCity, bool bIsDeclareWarMove)
+{
+	if(GET_PLAYER(self->getOwner()).isMinorCiv() && McpCsMayEnter(self->getOwner(), eTeam)) return true;
+	return original(self, eTeam, bIgnoreRightOfPassage, bIsCity, bIsDeclareWarMove);
+}
+
+static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam::Original original, const CvTeam* self, TeamTypes eTeam)
+{
+	if(eTeam != NO_TEAM && GET_TEAM(eTeam).isMinorCiv() && McpCsTeamMayEnter(eTeam, self->GetID())) return true;
+	return original(self, eTeam);
+}
+
+// What a switched-on city-state's units see stays uncovered on its ally's map.
+static void AfterUnitSetXY(CvUnit* self, int, int, bool, bool, bool, bool, bool)
+{
+	if(GET_PLAYER(self->getOwner()).isMinorCiv()) McpCsRevealAround(self);
+}
+
 static void AfterRegisterGame(lua_State* L)
 {
 	McpAddGameMethods(s_host, L);
@@ -175,6 +197,9 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
+	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
+	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
+	Check(CivRegisterAfter<CivHooks::CvUnit_setXY>(host, &AfterUnitSetXY), "after CvUnit::setXY");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)static_cast<CivPlayerQueryFn>(&IsPluginControlledPlayer)), "IsPluginControlledPlayer");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)static_cast<CivPlayerQueryFn>(&KeepDeadSlotOpen)), "KeepDeadSlotOpen");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)static_cast<CivPopupRaisedFn>(&PopupRaised)), "PopupRaised");
