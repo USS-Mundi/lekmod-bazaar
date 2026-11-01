@@ -1,5 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpCityStates.h"
+#include "McpCityStateFiles.h"
+#include "McpCityStateHistory.h"
 #include "McpBridge.h"
 #include "McpLogText.h"
 #include "McpSeat.h"
@@ -44,6 +46,38 @@ namespace
 	volatile bool s_teamOn[MAX_CIV_TEAMS]; // the teams of the switched-on city-states
 	std::map<std::pair<int, int>, std::vector<std::string> > s_talk; // (city-state, civ) -> lines, oldest first
 	std::map<std::pair<int, int>, std::vector<std::string> > s_deeds; // (city-state, civ) -> deeds, oldest first
+	// Every deed and line also goes to the city-state's file for this game, read back the first time the city-state
+	// comes up after a load, so a reload or a long game loses none of it; s_talk and s_deeds keep only the latest.
+	bool s_historyRead[MAX_CIV_PLAYERS];
+
+	void Remember(PlayerTypes eMinor, const McpCsHistoryEntry& e)
+	{
+		bool bSaid = e.kind == "said";
+		std::vector<std::string>& lines = (bSaid ? s_talk : s_deeds)[std::make_pair((int)eMinor, e.civ)];
+		lines.push_back(e.text);
+		if(lines.size() > (bSaid ? MCP_CS_TALK_KEPT : MCP_CS_DEEDS_KEPT)) lines.erase(lines.begin());
+	}
+
+	void ReadHistory(PlayerTypes eMinor)
+	{
+		if(eMinor < 0 || eMinor >= MAX_CIV_PLAYERS || s_historyRead[eMinor]) return;
+		s_historyRead[eMinor] = true;
+		std::vector<McpCsHistoryEntry> entries = McpCsHistoryParse(McpCsFileRead(McpGameId(), McpCsHistoryFileName(CivName(eMinor))));
+		for(size_t i = 0; i < entries.size(); ++i) Remember(eMinor, entries[i]);
+	}
+
+	void Record(PlayerTypes eMinor, PlayerTypes eCiv, const char* kind, const std::string& text)
+	{
+		ReadHistory(eMinor);
+		McpCsHistoryEntry e;
+		e.kind = kind;
+		e.civ = (int)eCiv;
+		e.civName = CivName(eCiv);
+		e.text = text;
+		Remember(eMinor, e);
+		std::string game = McpGameId(), file = McpCsHistoryFileName(CivName(eMinor));
+		McpCsFileAppend(game, file, McpCsHistoryHeader(CivName(eMinor), game), McpCsHistoryLine(e));
+	}
 
 	JArr Latest(const std::vector<std::string>& lines, size_t n)
 	{
@@ -397,13 +431,12 @@ void McpCsTick()
 
 void McpCsNoteLine(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& line)
 {
-	std::vector<std::string>& lines = s_talk[std::make_pair((int)eMinor, (int)eCiv)];
-	lines.push_back(line);
-	if(lines.size() > MCP_CS_TALK_KEPT) lines.erase(lines.begin());
+	Record(eMinor, eCiv, "said", line);
 }
 
 std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
 {
+	ReadHistory(eMinor);
 	std::map<std::pair<int, int>, std::vector<std::string> >::const_iterator it = s_talk.find(std::make_pair((int)eMinor, (int)eCiv));
 	return it == s_talk.end() ? std::vector<std::string>() : it->second;
 }
@@ -411,13 +444,12 @@ std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
 void McpCsNoteDeed(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& what)
 {
 	if(eMinor < MAX_MAJOR_CIVS || eCiv == NO_PLAYER || eCiv >= MAX_MAJOR_CIVS) return;
-	std::vector<std::string>& lines = s_deeds[std::make_pair((int)eMinor, (int)eCiv)];
-	lines.push_back(McpFormat("turn %d: ", GC.getGame().getGameTurn()) + what);
-	if(lines.size() > MCP_CS_DEEDS_KEPT) lines.erase(lines.begin());
+	Record(eMinor, eCiv, "deed", McpFormat("turn %d: ", GC.getGame().getGameTurn()) + what);
 }
 
 std::vector<std::string> McpCsDeeds(PlayerTypes eMinor, PlayerTypes eCiv)
 {
+	ReadHistory(eMinor);
 	std::map<std::pair<int, int>, std::vector<std::string> >::const_iterator it = s_deeds.find(std::make_pair((int)eMinor, (int)eCiv));
 	return it == s_deeds.end() ? std::vector<std::string>() : it->second;
 }
@@ -498,6 +530,8 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 		if(!d.empty()) deeds[CivName((PlayerTypes)i)] = JVal(Latest(d, MCP_CS_DEEDS_SHOWN));
 	}
 	if(!deeds.empty()) o["what_each_civ_did_for_you"] = JVal(deeds);
+	std::string file = McpCsFilePath(McpGameId(), McpCsHistoryFileName(CivName(eMinor)));
+	if(!file.empty()) o["whole_history_file"] = J(file + " (every deed toward you and every line of your conversations this game, oldest first; the lists above are only the latest)");
 	o["what_you_play"] = J("every unit and your city's builds; the game's rules decide your wars, peace, research and policies, and your alliance follows influence as always");
 	return JVal(o);
 }
@@ -516,6 +550,7 @@ void McpCsResetForNewGame()
 	s_switchedOn = 0;
 	s_talk.clear();
 	s_deeds.clear();
+	for(int i = 0; i < MAX_CIV_PLAYERS; ++i) s_historyRead[i] = false;
 	McpCsLoadSettings();
 	// Switching on is not kept in a save: a city-state seated when the game was saved goes back to the game's AI,
 	// or the game would wait on a turn no model is there to play.

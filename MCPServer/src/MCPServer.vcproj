@@ -39,6 +39,38 @@
 	</References>
 	<Files>
 		<File
+			RelativePath=".\McpCityStateFiles.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStateFiles.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStateHistory.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStateHistory.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStateRules.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStateRules.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStates.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCityStates.h"
+			>
+		</File>
+		<File
 			RelativePath=".\MCPServer.cpp"
 			>
 		</File>

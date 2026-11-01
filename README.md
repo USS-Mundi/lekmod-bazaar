@@ -50,7 +50,8 @@ A city-state's ally, the human or a model's seat, can ask for its active help. T
 - **What influence buys:** how many of its units it sends out of its own land, whether its units' sight stays uncovered on the ally's map, and whether its units may enter the ally's land all scale with the ally's influence. Each turn a model plays it, the ally pays extra influence.
 - **Switching off:** it goes back to the game's AI when its ally lets go (`switch_off`), when its player releases the seat, when its alliance passes to another civ, or when its player is gone (no request for two minutes) as its turn comes.
 - **Settings:** the steps, the text its player reads about its ally and the costs are tables in `MCPServer.sql` (`McpCityStateTiers`, `McpCityStateDispositions`, `McpCityStateSettings`). Change the numbers there; a missing table is reported in the log and built-in defaults apply.
-- **Not kept in a save yet:** after a reload every city-state goes back to the game's AI, and the conversations and the record of deeds start again.
+- **Kept on disk:** every deed toward a city-state and every line of its conversations also go to a file for that game, `My Games\Sid Meier's Civilization 5\MCP\<game id>\city-states\<city-state>.md`, read back after a reload. Its player's `status` names the file (`whole_history_file`); the lists in `status` show only the latest.
+- **Switching on is not kept in a save yet:** after a reload every city-state goes back to the game's AI.
 
 ## Making a release
 
