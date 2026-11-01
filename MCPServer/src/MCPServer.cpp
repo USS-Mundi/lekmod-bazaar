@@ -13,9 +13,11 @@ namespace CivHooks
 #endif
 
 #include "CvDealAI.h"
+#include "CvMinorCivAI.h"
 #include "CvDllPlayer.h"
 #include "CvDllPreGame.h"
 #include "McpBridge.h"
+#include "McpCityStates.h"
 #include "McpDiplomacy.h"
 #include "McpLua.h"
 #include "McpMapDraw.h"
@@ -109,6 +111,16 @@ static bool ReplaceIsDealWithHumanAcceptable(CivHooks::CvDealAI_IsDealWithHumanA
 	return original(self, pDeal, McpEqualizingWith(eOtherPlayer), iTotalValueToMe, iValueImOffering, iValueTheyreOffering, iAmountOverWeWillRequest, iAmountUnderWeWillOffer, bCantMatchOffer);
 }
 
+static void AfterSetAlly(CvMinorCivAI* self, PlayerTypes eNewAlly)
+{
+	McpCsAfterSetAlly(self->GetPlayer()->GetID(), eNewAlly);
+}
+
+static void AfterMinorTurn(CvMinorCivAI* self)
+{
+	McpCsAfterMinorTurn(self->GetPlayer()->GetID());
+}
+
 static void AfterRegisterGame(lua_State* L)
 {
 	McpAddGameMethods(s_host, L);
@@ -161,6 +173,8 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &AfterEqualizeDeal), "after CvDealAI::DoEqualizeDealWithHuman");
 	Check(CivRegisterReplace<CivHooks::CvDealAI_IsDealWithHumanAcceptable>(host, &ReplaceIsDealWithHumanAcceptable), "replace CvDealAI::IsDealWithHumanAcceptable");
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)static_cast<CivPlayerQueryFn>(&IsPluginControlledPlayer)), "IsPluginControlledPlayer");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)static_cast<CivPlayerQueryFn>(&KeepDeadSlotOpen)), "KeepDeadSlotOpen");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)static_cast<CivPopupRaisedFn>(&PopupRaised)), "PopupRaised");

@@ -1296,7 +1296,7 @@ namespace
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"tech\":{\"type\":\"string\"}},\"required\":[\"civ\",\"tech\"]}", ToolStealTech, LOG_EMPIRE, false },
 		{ "city_state", "City-states you have met (or one, with civ): influence, status, quests for you, and the actions open to you.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}}}", ToolCityState, LOG_NONE, false },
-		{ "city_state_action", "Act toward a city-state: gift_gold (amount), gift_unit (unit_id), bully_gold, bully_worker, pledge_protection, revoke_protection, buyout, make_peace.",
+		{ "city_state_action", "Act toward a city-state: gift_gold (amount), gift_unit (unit_id), bully_gold, bully_worker, pledge_protection, revoke_protection, buyout, make_peace, switch_on (their ally only: ask for their active help, so a model may play them; costs influence each turn), switch_off.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"amount\":{\"type\":\"integer\"},\"unit_id\":{\"type\":\"integer\"}},\"required\":[\"civ\",\"action\"]}", ToolCityStateAction, LOG_DIPLOMACY, false },
 		{ "choose_ideology", "Pick your ideology (Freedom, Order or Autocracy) when the game allows it; without ideology it lists them and whether you can choose now.",
 		  "{\"type\":\"object\",\"properties\":{\"ideology\":{\"type\":\"string\"}}}", ToolChooseIdeology, LOG_EMPIRE, false },

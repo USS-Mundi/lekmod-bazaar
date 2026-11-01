@@ -9,6 +9,7 @@
 #include "McpToolSupport.h"
 #include "McpPopups.h"
 #include "McpSeat.h"
+#include "McpCityStates.h"
 #include "McpDiplomacy.h"
 #include "McpGameReference.h"
 #include "McpLogText.h"
@@ -612,6 +613,7 @@ void McpBridge::Impl::Tick()
 	gameTurn = iTurn;
 	DrainChat();
 	UpdateSessions();
+	McpCsTick();
 	McpKeepSeatTurnVisible();
 	McpRemindHumanOfDeals();
 	DrainPopups();
@@ -767,6 +769,7 @@ void McpBridge::Impl::ResetForNewGame()
 	McpGameId();
 	McpResetDiploRequests();
 	McpResetBriefing();
+	McpCsResetForNewGame();
 }
 
 namespace

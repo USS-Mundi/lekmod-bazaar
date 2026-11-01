@@ -1,6 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpToolSupport.h"
 #include "McpToolHandlers.h"
+#include "McpCityStates.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -125,6 +126,15 @@ namespace
 		return true;
 	}
 
+	bool CanSwitchOn(CvPlayer* me, CvPlayer& minor) { return MinorAI(minor)->GetAlly() == me->GetID() && McpCsPatron(minor.GetID()) != me->GetID(); }
+	bool RunSwitchOn(CvPlayer* me, CvPlayer& minor, const JObj&, JObj&, std::string& err) { return McpCsSwitchOn(minor.GetID(), me->GetID(), err); }
+	bool CanSwitchOff(CvPlayer* me, CvPlayer& minor) { return McpCsPatron(minor.GetID()) == me->GetID(); }
+	bool RunSwitchOff(CvPlayer*, CvPlayer& minor, const JObj&, JObj&, std::string&)
+	{
+		McpCsSwitchOff(minor.GetID(), "its ally let go");
+		return true;
+	}
+
 	const MinorAction* MinorActions(size_t& count)
 	{
 		static const MinorAction TABLE[] =
@@ -137,6 +147,8 @@ namespace
 			{ "revoke_protection", CanRevoke, RunRevoke, "you are not protecting them, or the pledge is too recent to withdraw" },
 			{ "buyout", CanBuyout, RunBuyout, "you cannot buy them out now" },
 			{ "make_peace", CanMakePeace, RunMakePeace, "you are not at war with them, or peace is not possible yet" },
+			{ "switch_on", CanSwitchOn, RunSwitchOn, "only their ally can ask for their active help (or you already have)" },
+			{ "switch_off", CanSwitchOff, RunSwitchOff, "you have not switched them on" },
 		};
 		count = sizeof(TABLE) / sizeof(TABLE[0]);
 		return TABLE;
@@ -163,6 +175,23 @@ namespace
 		o["status"] = J(GET_TEAM(me->getTeam()).isAtWar(minor.getTeam()) ? "at war" : ai->IsAllies(e) ? "allies" : ai->IsFriends(e) ? "friends" : "neutral");
 		if(ai->GetAlly() != NO_PLAYER) o["their_ally"] = J(CivName(ai->GetAlly()));
 		o["protected_by_you"] = J(ai->IsProtectedByMajor(e));
+		PlayerTypes ePatron = McpCsPatron(minor.GetID());
+		o["switched_on"] = J(ePatron != NO_PLAYER);
+		if(ePatron != NO_PLAYER)
+		{
+			std::string playedBy = McpCsPlayedBy(minor.GetID());
+			o["played_by"] = J(playedBy.empty() ? std::string("the game's AI, until a model takes its seat") : playedBy);
+		}
+		if(ePatron == e)
+		{
+			const McpCsTier* tier = McpCsCurrentTier(minor.GetID());
+			o["influence_step"] = J(tier ? tier->minInfluence : 0);
+			o["units_it_will_send_out"] = J(McpCsSendCapFor(minor.GetID()));
+			o["units_out_now"] = J(McpCsUnitsOut(minor.GetID()));
+			o["its_sight_on_your_map"] = J(tier && tier->revealSight);
+			o["may_enter_your_land"] = J(tier && tier->enterAllyLand);
+			o["extra_influence_cost_per_turn"] = J(McpCsGetSettings().influenceCost);
+		}
 		CvCity* cap = minor.getCapitalCity();
 		if(cap) o["city"] = J(McpFormat("%s at (%d,%d)", cap->getName().c_str(), cap->getX(), cap->getY()));
 		JArr quests;
