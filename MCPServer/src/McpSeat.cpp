@@ -35,12 +35,6 @@ namespace
 		return (eActive != NO_PLAYER && GET_PLAYER(eActive).isHuman()) ? eActive : NO_PLAYER;
 	}
 
-	// A civilization some model plays: a seat, or the one on screen when a session plays it.
-	bool PlayedByModel(PlayerTypes e)
-	{
-		return McpIsSeat(e) || (e != NO_PLAYER && e == GC.getGame().getActivePlayer() && McpBridge::Get().ScreenPlayed());
-	}
-
 	std::string Nickname(PlayerTypes e)
 	{
 		return CvPreGame::nickname(e).c_str();
@@ -64,6 +58,11 @@ bool McpIsSeat(PlayerTypes e)
 	if(game.isNetworkMultiPlayer() || game.isHotSeat() || game.isPbem()) return false;
 	if(e >= MAX_MAJOR_CIVS) return McpIsCityStateSeat(e);
 	return e != NO_PLAYER && e < MAX_MAJOR_CIVS && e != game.getActivePlayer() && CvPreGame::slotStatus(e) == SS_TAKEN;
+}
+
+bool McpPlayedByModel(PlayerTypes e)
+{
+	return McpIsSeat(e) || (e != NO_PLAYER && e == GC.getGame().getActivePlayer() && McpBridge::Get().ScreenPlayed());
 }
 
 bool McpAnySeat()
@@ -318,7 +317,7 @@ void McpNoteSeatPopup(PlayerTypes ePlayer, int iType, int iData1, int iData2, in
 
 void McpNoteSeatNotification(PlayerTypes ePlayer, const char* szMessage, const char* szSummary)
 {
-	if(!PlayedByModel(ePlayer)) return;
+	if(!McpPlayedByModel(ePlayer)) return;
 	const char* szText = (szMessage && *szMessage) ? szMessage : szSummary;
 	if(!szText || !*szText) return;
 	// City-state quest notifications end with the game's "RIGHT-CLICK to dismiss" hint, meant for the notification panel.
@@ -349,7 +348,7 @@ namespace
 
 void McpNoteOrdersCancelled(CvUnit* u, CivOrdersCancelledReason reason)
 {
-	if(!u || !McpIsSeat(u->getOwner())) return;
+	if(!u || !McpPlayedByModel(u->getOwner())) return;
 	const MissionData* m = u->GetHeadMissionData();
 	if(!m || (m->eMissionType != CvTypes::getMISSION_MOVE_TO() && m->eMissionType != CvTypes::getMISSION_ROUTE_TO())) return;
 	CvUnitEntry* info = GC.getUnitInfo(u->getUnitType());

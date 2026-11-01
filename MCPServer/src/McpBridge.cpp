@@ -178,6 +178,8 @@ struct McpBridge::Impl
 		return last != 0 && GetTickCount() - last < MCP_GAME_IDLE_MS;
 	}
 	void Touch(const std::string& token); // creates the session when new
+	void KeepAlive(const std::string& token); // an ended session stays ended
+	void EndSession(const std::string& token);
 	// The session's flags; false when it no longer exists.
 	bool Flags(const std::string& token, bool& bMyTurn, int& iDiploSeq, bool& bChatWaiting, int& iSeat);
 
@@ -219,6 +221,23 @@ void McpBridge::Impl::Touch(const std::string& token)
 	Session& s = sessions[token];
 	s.info.token = token;
 	s.lastSeenMs = GetTickCount();
+	LeaveCriticalSection(&lock);
+}
+
+void McpBridge::Impl::KeepAlive(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::iterator it = sessions.find(token);
+	if(it != sessions.end()) it->second.lastSeenMs = GetTickCount();
+	LeaveCriticalSection(&lock);
+}
+
+// A seat the session held stays claimed, waiting for a player, so the same model can take it back at once.
+// Safe during the session's own job too: the job then finds no CurrentSession() and carries on.
+void McpBridge::Impl::EndSession(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	sessions.erase(token);
 	LeaveCriticalSection(&lock);
 }
 
@@ -605,7 +624,7 @@ void McpBridge::Impl::UpdateSessions()
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end();)
 	{
 		Session& s = it->second;
-		if(now - s.lastSeenMs > MCP_SESSION_EXPIRE_MS && !(inJob && it->first == currentToken))
+		if(now - s.lastSeenMs > MCP_SESSION_EXPIRE_MS)
 		{
 			sessions.erase(it++);
 			continue;
@@ -725,7 +744,7 @@ void McpBridge::Impl::DrainPopups()
 		popup.turn = GC.getGame().getGameTurn();
 		popup.player = p.onScreen ? (int)eActive : p.player;
 		popup.dialog = p.onScreen ? McpPopupDialogToClose(p.type) : "";
-		popup.text = McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text);
+		popup.text = McpTool::StripMarkup(McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text));
 		if(popup.text.empty())
 		{
 			if(popup.dialog.empty()) continue;
@@ -1044,10 +1063,18 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 		res.body = "{\"error\":\"the MCP endpoint is /mcp\"}";
 		return;
 	}
+	if(req.method == "DELETE")
+	{
+		std::map<std::string, std::string>::const_iterator itSession = req.headers.find("mcp-session-id");
+		if(itSession != req.headers.end()) EndSession(itSession->second);
+		res.status = 200;
+		res.body.clear();
+		return;
+	}
 	if(req.method != "POST")
 	{
 		res.status = 405;
-		res.body = "{\"error\":\"only POST is supported\"}";
+		res.body = "{\"error\":\"only POST and DELETE are supported\"}";
 		return;
 	}
 
@@ -1063,9 +1090,9 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 	}
 
 	// The session is whatever Mcp-Session-Id the client sends; initialize starts a fresh
-	// one and hands its id back. An id the server no longer knows (the game restarted)
-	// simply starts a session under that id: the model then names itself again. A client
-	// that never sends one shares the session with the empty id.
+	// one and hands its id back. An id the server no longer knows (the game restarted, or
+	// the client ended it) simply starts a session under that id: the model then names itself
+	// again. A client that never sends one shares the session with the empty id.
 	std::string token;
 	std::map<std::string, std::string>::const_iterator itSession = req.headers.find("mcp-session-id");
 	if(itSession != req.headers.end()) token = itSession->second;
@@ -1080,7 +1107,7 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 
 	bool bIsNotification = false;
 	picojson::value response = HandleRpc(request, token, bIsNotification);
-	Touch(token); // a long wait counts as presence
+	KeepAlive(token); // a long wait counts as presence
 	if(bIsNotification)
 	{
 		res.status = 202;
@@ -1129,14 +1156,19 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		    "your provider (Claude, ChatGPT, Gemini...), model (Opus, Fable, GPT...) and version (5.5...); actions are refused until you do, "
 		    "and you must do it again after every reconnect. Then call wait_for_my_turn until it is your turn, "
 		    "use the query tools, act, write your reasoning with log, and finish with end_turn and a short summary of what you did. "
+		    "Your memory of Civilization V's rules can be wrong, and mods change them. The other tools already show what "
+		    "you can build or research now; when a longer plan depends on a rule you are not sure of, such as what a far "
+		    "tech needs or what a unit upgrades into, check it with lookup instead of guessing. "
 		    "A unit with a queued multi-turn move is still where it stopped when your next turn opens; it moves when you call end_turn, "
 		    "as for a human clicking End Turn. Leave it alone unless you want it to go somewhere else. "
 		    "status.game_id names this game across reloads and reconnections: keep your memories about this game "
 		    "(your role, plans, what you learned about the other players) under that id, keep lessons for every game separate, "
 		    "and when you connect, look up your memories for this game_id before you play. "
-		    "The first status after you connect, or after another game is loaded, also carries game_settings (era, map, difficulty, "
-		    "victory types and the game options that change the rules, such as no happiness) and the loaded mods with what each does. "
-		    "Store both with your memories for this game_id; mods can change between loads, so compare them with what you remembered. "
+		    "The first status after you connect, or after another game is loaded, also carries game_settings (era, map, "
+		    "difficulty, victory types and the game options that change the rules, such as no happiness), the loaded mods "
+		    "with what each does, and your_civilization: your leader's unique ability and your unique units, buildings and "
+		    "improvements (take_seat's answer gives them again for the civilization you claim). Store them with your "
+		    "memories for this game_id; mods can change between loads, so compare them with what you remembered. "
 		    "Later statuses list only the mod names; the game_settings and mods tools show the full detail again. "
 		    "Right after naming yourself, call status and tell the human in your reply who you are and what you play: "
 		    "their own civilization, a teammate (name it), or an opponent (never name it; they will see you once they meet you). "
@@ -1340,7 +1372,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 			Sleep(250);
 			// A client that went away stops being kept alive, so its seat frees as any idle session's does.
 			if(McpHttpClientGone()) { bClientGone = true; break; }
-			Touch(token);
+			KeepAlive(token);
 		}
 		if(bClientGone)
 		{
@@ -1378,7 +1410,7 @@ picojson::value McpBridge::Impl::AdvanceRound(const std::string& token, const pi
 	{
 		bool bMyTurn = false, bChatWaiting = false;
 		int iDiploSeq = 0, iSeat = 0;
-		Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat);
+		if(!Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat)) break;
 		if(!bTurnEnded)
 		{
 			// Give the turn a few seconds to close before watching for it to come back.
@@ -1393,7 +1425,7 @@ picojson::value McpBridge::Impl::AdvanceRound(const std::string& token, const pi
 			bSkipped = true;
 		}
 		Sleep(bTurnEnded ? 250 : 100);
-		Touch(token);
+		KeepAlive(token);
 	}
 	picojson::object none;
 	r = RunOnGameThread(token, MCP_TOOL_STATUS, none, error);

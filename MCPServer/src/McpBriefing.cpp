@@ -17,11 +17,6 @@
 #include "CvDiplomacyAI.h"
 #include "CvMinorCivAI.h"
 #include "CvTechClasses.h"
-#include "CvUnitClasses.h"
-#include "CvBuildingClasses.h"
-#include "CvImprovementClasses.h"
-#include "CvPromotionClasses.h"
-#include "CvPolicyClasses.h"
 #include "CvTreasury.h"
 #include "CvInfos.h"
 
@@ -96,6 +91,7 @@ namespace
 			o["their_opinion_of_you"] = J(OpinionName(pDiplo->GetMajorCivOpinion(me->GetID())));
 		}
 		if(pDiplo->IsDenouncedPlayer(me->GetID())) o["denounced_you"] = J(true);
+		if(me->GetDiplomacyAI()->IsDenouncedPlayer(other.GetID())) o["you_denounced_them"] = J(true);
 		if(pDiplo->IsDoFAccepted(me->GetID())) o["declared_friendship"] = J(true);
 		if(bBrief) return JVal(o);
 		o["score"] = J(other.GetScore());
@@ -137,18 +133,41 @@ namespace
 
 	// ------------------------------------------------------------ briefing sections
 
-	JArr BriefingEvents(CvPlayer* me, int iSince)
+	// Other players' notifications carry the turn this player ended, so the default window starts there and
+	// skips, by id (ids only grow), what last turn's briefings already reported.
+	struct NoticesReported
+	{
+		int turn, newest, newestLastTurn;
+		NoticesReported() : turn(-1), newest(-1), newestLastTurn(-1) {}
+		void BeginTurn(int iTurn)
+		{
+			if(turn == iTurn) return;
+			newestLastTurn = (turn == iTurn - 1) ? newest : -1;
+			newest = -1;
+			turn = iTurn;
+		}
+	};
+	std::map<int, NoticesReported> s_noticesReported;
+
+	JArr BriefingEvents(CvPlayer* me, int iSince, bool bSkipReported)
 	{
 		JArr events;
 		CvNotifications* pNotes = me->GetNotifications();
 		if(!pNotes) return events;
+		int iTurn = GC.getGame().getGameTurn();
+		NoticesReported& reported = s_noticesReported[(int)me->GetID()];
+		reported.BeginTurn(iTurn);
 		for(int i = 0; i < pNotes->GetNumNotifications(); ++i)
 		{
-			if(pNotes->GetNotificationTurn(i) < iSince) continue;
+			int iNoteTurn = pNotes->GetNotificationTurn(i);
+			if(iNoteTurn < iSince) continue;
+			int iId = pNotes->GetNotificationID(i);
+			if(iId > reported.newest) reported.newest = iId;
+			if(bSkipReported && iNoteTurn < iTurn && iId <= reported.newestLastTurn) continue;
 			JObj ev;
-			ev["turn"] = J(pNotes->GetNotificationTurn(i));
-			ev["summary"] = J(pNotes->GetNotificationSummary(i).c_str());
-			ev["text"] = J(pNotes->GetNotificationStr(i).c_str());
+			ev["turn"] = J(iNoteTurn);
+			ev["summary"] = J(StripMarkup(pNotes->GetNotificationSummary(i).c_str()));
+			ev["text"] = J(StripMarkup(pNotes->GetNotificationStr(i).c_str()));
 #ifdef MCP_LEKMOD
 			int x = McpNotificationX(pNotes, i), y = McpNotificationY(pNotes, i);
 #else
@@ -221,7 +240,10 @@ namespace
 		int iLoop = 0;
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
 		{
-			if(c->getOrderQueueLength() == 0)
+			// The game asks for production only once a captured city's fate is chosen.
+			if(CaptureUndecided(c))
+				pending.push_back(J(CaptureDecision(me, c)));
+			else if(c->getOrderQueueLength() == 0)
 				pending.push_back(J(McpFormat("production: %s (id %d) is building nothing (city_options, set_production)", c->getName().c_str(), c->GetID())));
 			if(c->CanRangeStrikeNow())
 				pending.push_back(J(McpFormat("city_attack: %s can bombard an enemy this turn", c->getName().c_str())));
@@ -308,8 +330,9 @@ namespace
 		int iLoop = 0;
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
 		{
-			if(c->foodDifference() < 0)
-				warnings.push_back(J(McpFormat("starvation: %s loses %d food per turn", c->getName().c_str(), -c->foodDifference())));
+			int iFoodTimes100 = c->foodDifferenceTimes100();
+			if(iFoodTimes100 < 0)
+				warnings.push_back(J(McpFormat("starvation: %s loses %g food per turn", c->getName().c_str(), -iFoodTimes100 / 100.0)));
 			if(c->getDamage() > 0)
 				warnings.push_back(J(McpFormat("city damaged: %s at %d/%d hp", c->getName().c_str(), c->GetMaxHitPoints() - c->getDamage(), c->GetMaxHitPoints())));
 		}
@@ -348,6 +371,7 @@ namespace
 		econ["culture"] = J(me->getJONSCulture());
 		econ["next_policy_cost"] = J(me->getNextPolicyCost());
 		econ["science_per_turn"] = J(me->GetScience());
+		if(me->isGoldenAge()) econ["golden_age_turns_left"] = J(me->getGoldenAgeTurns());
 		return JVal(econ);
 	}
 }
@@ -355,6 +379,7 @@ namespace
 void McpResetBriefing()
 {
 	s_snapshots.clear();
+	s_noticesReported.clear();
 }
 
 MCP_TOOL(ToolBriefing)
@@ -363,15 +388,16 @@ MCP_TOOL(ToolBriefing)
 	if(!me) return JVal();
 	CvGame& g = GC.getGame();
 	int iTurn = g.getGameTurn();
+	bool bDefaultWindow = !HasArg(args, "since_turn");
 	int iSince = ArgInt(args, "since_turn", iTurn - 1);
 
 	JObj o;
 	o["turn"] = J(iTurn);
 	o["year"] = J(g.getGameTurnYear());
 	o["is_my_turn"] = J(McpIsPlayerTurn(*me));
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["events_since_turn"] = J(iSince);
-	o["events"] = JVal(BriefingEvents(me, iSince));
+	o["events"] = JVal(BriefingEvents(me, iSince, bDefaultWindow));
 	o["game_messages"] = JVal(BriefingGameMessages(me, iSince));
 	int iUnread = McpBridge::Get().CountUnread(me->GetID());
 	if(iUnread > 0) o["unread_messages"] = J(McpFormat("%d - read them above and call acknowledge_messages before acting", iUnread));
@@ -403,153 +429,5 @@ MCP_TOOL(ToolCivs)
 	o["your_military_strength"] = J(me->GetMilitaryMight());
 	o["civilizations"] = JVal(majors);
 	o["city_states"] = JVal(minors);
-	return JVal(o);
-}
-
-// ------------------------------------------------------------------ lookup
-
-namespace
-{
-	bool StartsWith(const std::string& s, const char* prefix)
-	{
-		return _strnicmp(s.c_str(), prefix, strlen(prefix)) == 0;
-	}
-
-	JVal LookupTech(TechTypes e)
-	{
-		CvTechEntry* info = GC.getTechInfo(e);
-		JObj o;
-		o["name"] = J(info->GetDescription());
-		o["era"] = J(EraName((EraTypes)info->GetEra()));
-		o["cost"] = J(info->GetResearchCost());
-		o["help"] = J(Localized(info->GetHelp()));
-		JArr unlocks;
-		for(int i = 0; i < GC.getNumUnitInfos(); ++i)
-		{
-			CvUnitEntry* u = GC.getUnitInfo((UnitTypes)i);
-			if(u && u->GetPrereqAndTech() == (int)e) unlocks.push_back(J(McpFormat("unit: %s (%s)", u->GetDescription(), u->GetType())));
-		}
-		for(int i = 0; i < GC.getNumBuildingInfos(); ++i)
-		{
-			CvBuildingEntry* b = GC.getBuildingInfo((BuildingTypes)i);
-			if(b && b->GetPrereqAndTech() == (int)e) unlocks.push_back(J(McpFormat("building: %s (%s)", b->GetDescription(), b->GetType())));
-		}
-		for(int i = 0; i < GC.getNumBuildInfos(); ++i)
-		{
-			CvBuildInfo* b = GC.getBuildInfo((BuildTypes)i);
-			if(b && b->getTechPrereq() == (int)e) unlocks.push_back(J(McpFormat("worker build: %s (%s)", b->GetDescription(), b->GetType())));
-		}
-		o["unlocks"] = JVal(unlocks);
-		return JVal(o);
-	}
-
-	JVal LookupUnit(UnitTypes e)
-	{
-		CvUnitEntry* info = GC.getUnitInfo(e);
-		JObj o;
-		o["name"] = J(info->GetDescription());
-		o["help"] = J(Localized(info->GetHelp()));
-		o["production_cost"] = J(info->GetProductionCost());
-		o["strength"] = J(info->GetCombat());
-		if(info->GetRangedCombat() > 0)
-		{
-			o["ranged_strength"] = J(info->GetRangedCombat());
-			o["range"] = J(info->GetRange());
-		}
-		o["moves"] = J(info->GetMoves());
-		if(info->GetPrereqAndTech() != NO_TECH) o["requires_tech"] = J(TechName((TechTypes)info->GetPrereqAndTech()));
-		return JVal(o);
-	}
-
-	JVal LookupBuilding(BuildingTypes e)
-	{
-		CvBuildingEntry* info = GC.getBuildingInfo(e);
-		JObj o;
-		o["name"] = J(info->GetDescription());
-		o["help"] = J(Localized(info->GetHelp()));
-		o["production_cost"] = J(info->GetProductionCost());
-		if(info->GetPrereqAndTech() != NO_TECH) o["requires_tech"] = J(TechName((TechTypes)info->GetPrereqAndTech()));
-		return JVal(o);
-	}
-
-	JVal NameAndHelp(const char* szName, const char* szHelp)
-	{
-		JObj p;
-		p["name"] = J(szName);
-		p["help"] = J(Localized(szHelp));
-		return JVal(p);
-	}
-}
-
-MCP_TOOL(ToolLookup)
-{
-	std::string key = ArgStr(args, "type");
-	if(key.empty()) { err = "type is required"; return JVal(); }
-	JObj o;
-	o["type"] = J(key);
-	// POLICY_BRANCH_ must be tested before POLICY_, which it also matches.
-	if(StartsWith(key, "TECH_"))
-	{
-		TechTypes e = FindTechType(key);
-		if(e == NO_TECH) { err = "unknown tech " + key; return JVal(); }
-		o["tech"] = LookupTech(e);
-	}
-	else if(StartsWith(key, "UNIT_"))
-	{
-		UnitTypes e = FindUnitType(key);
-		if(e == NO_UNIT) { err = "unknown unit " + key; return JVal(); }
-		o["unit"] = LookupUnit(e);
-	}
-	else if(StartsWith(key, "BUILDING_"))
-	{
-		BuildingTypes e = FindBuildingType(key);
-		if(e == NO_BUILDING) { err = "unknown building " + key; return JVal(); }
-		o["building"] = LookupBuilding(e);
-	}
-	else if(StartsWith(key, "POLICY_BRANCH_"))
-	{
-		PolicyBranchTypes e = FindPolicyBranchType(key);
-		if(e == NO_POLICY_BRANCH_TYPE) { err = "unknown policy branch " + key; return JVal(); }
-		CvPolicyBranchEntry* info = GC.getPolicyBranchInfo(e);
-		JVal v = NameAndHelp(info->GetDescription(), info->GetHelp());
-		if(info->GetEraPrereq() != NO_ERA) v.get<JObj>()["requires_era"] = J(EraName((EraTypes)info->GetEraPrereq()));
-		o["policy_branch"] = v;
-	}
-	else if(StartsWith(key, "POLICY_"))
-	{
-		PolicyTypes e = FindPolicyType(key);
-		if(e == NO_POLICY) { err = "unknown policy " + key; return JVal(); }
-		CvPolicyEntry* info = GC.getPolicyInfo(e);
-		JVal v = NameAndHelp(info->GetDescription(), info->GetHelp());
-		if(info->GetPolicyBranchType() != NO_POLICY_BRANCH_TYPE)
-			v.get<JObj>()["branch"] = J(GC.getPolicyBranchInfo((PolicyBranchTypes)info->GetPolicyBranchType())->GetDescription());
-		o["policy"] = v;
-	}
-	else if(StartsWith(key, "PROMOTION_"))
-	{
-		PromotionTypes e = FindPromotionType(key);
-		if(e == NO_PROMOTION) { err = "unknown promotion " + key; return JVal(); }
-		CvPromotionEntry* info = GC.getPromotionInfo(e);
-		o["promotion"] = NameAndHelp(info->GetDescription(), info->GetHelp());
-	}
-	else if(StartsWith(key, "IMPROVEMENT_"))
-	{
-		ImprovementTypes e = FindImprovementType(key);
-		if(e == NO_IMPROVEMENT) { err = "unknown improvement " + key; return JVal(); }
-		CvImprovementEntry* info = GC.getImprovementInfo(e);
-		o["improvement"] = NameAndHelp(info->GetDescription(), info->GetHelp());
-	}
-	else if(StartsWith(key, "RESOURCE_"))
-	{
-		ResourceTypes e = FindResourceType(key);
-		if(e == NO_RESOURCE) { err = "unknown resource " + key; return JVal(); }
-		CvResourceInfo* info = GC.getResourceInfo(e);
-		o["resource"] = NameAndHelp(info->GetDescription(), info->GetHelp());
-	}
-	else
-	{
-		err = "unsupported key; use a TECH_, UNIT_, BUILDING_, POLICY_, POLICY_BRANCH_, PROMOTION_, IMPROVEMENT_ or RESOURCE_ type";
-		return JVal();
-	}
 	return JVal(o);
 }

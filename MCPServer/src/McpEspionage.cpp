@@ -78,7 +78,13 @@ MCP_TOOL(ToolSpies)
 		CvEspionageSpy& spy = pE->m_aSpyList[i];
 		JObj s;
 		s["spy_index"] = J(i);
-		s["name"] = J(me->getCivilizationInfo().getSpyNames(spy.m_iName));
+#ifdef MCP_LEKMOD
+		// LEKMOD's spy has no GetSpyName; a name index outside the civilization's list is what crashed the base game.
+		const CvCivilizationInfo& civ = me->getCivilizationInfo();
+		s["name"] = J(spy.m_iName >= 0 && spy.m_iName < civ.getNumSpyNames() ? Localized(civ.getSpyNames(spy.m_iName)) : McpFormat("Spy %d", i + 1));
+#else
+		s["name"] = J(Localized(spy.GetSpyName(me)));
+#endif
 		s["rank"] = J(Localized(pE->GetSpyRankName(spy.m_eRank)));
 		s["state"] = J(SpyStateName(spy.m_eSpyState));
 		if(spy.m_bIsDiplomat) s["diplomat"] = J(true);

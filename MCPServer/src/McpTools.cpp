@@ -1,6 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpTools.h"
 #include "McpToolSupport.h"
+#include "McpRules.h"
 #include "McpSeat.h"
 #include "McpLogText.h"
 #include "McpToolHandlers.h"
@@ -192,7 +193,7 @@ MCP_TOOL(ToolStatus)
 	std::string waiting = McpDiploWaitingNote();
 	if(!waiting.empty()) o["diplomacy_waiting"] = J(waiting);
 	o["ai_processing"] = J(AiProcessing());
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["units_needing_orders"] = J(me->GetCountReadyUnits());
 	std::vector<std::string> chat = McpBridge::Get().TakeChat((int)me->GetID());
 	if(!chat.empty())
@@ -241,7 +242,8 @@ MCP_TOOL(ToolStatus)
 		o["game_settings"] = ToolGameSettings(JObj(), ignored);
 		JVal modsDetail = ToolMods(JObj(), ignored);
 		o["mods"] = modsDetail.get<JObj>()["mods"];
-		o["remember"] = J("store game_settings and mods with your memories for this game_id; they come once per connection and per loaded game");
+		o["your_civilization"] = CivilizationRules(me->getCivilizationType(), me->getLeaderType());
+		o["remember"] = J("store game_settings, mods and your_civilization with your memories for this game_id; they come once per connection and per loaded game");
 	}
 	return JVal(o);
 }
@@ -269,7 +271,7 @@ MCP_TOOL(ToolOverview)
 	o["num_units"] = J(me->getNumUnits());
 	o["military_units"] = J(me->getNumMilitaryUnits());
 	o["units_supported_free"] = J(me->GetNumUnitsSupplied());
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["cities"] = JVal(CitiesJson(me));
 	o["units"] = JVal(UnitsJson(me));
 	return JVal(o);
@@ -495,6 +497,7 @@ MCP_TOOL(ToolCityOptions)
 		}
 		if(bBuy) b["buy_gold"] = J(c->GetPurchaseCost(e));
 		if(bBuyFaith) b["buy_faith"] = J(c->GetFaithPurchaseCost(e));
+		PutBuildingRules(b, e, me);
 		buildings.push_back(JVal(b));
 	}
 	o["buildings"] = JVal(buildings);
@@ -603,9 +606,11 @@ MCP_TOOL(ToolResearchOptions)
 		t["type"] = J(info->GetType());
 		t["name"] = J(info->GetDescription());
 		t["era"] = J(EraName((EraTypes)info->GetEra()));
-		t["cost"] = J(GET_TEAM(me->getTeam()).GetTeamTechs()->GetResearchCost(e));
+		t["cost"] = J(me->GetPlayerTechs()->GetResearchCost(e));
 		t["turns"] = J(me->GetPlayerTechs()->GetResearchTurnsLeft(e, true));
 		t["help"] = J(Localized(info->GetHelp()));
+		JArr leadsTo = TechLeadsTo(e);
+		if(!leadsTo.empty()) t["leads_to"] = JVal(leadsTo);
 		techs.push_back(JVal(t));
 	}
 	o["available"] = JVal(techs);
@@ -641,7 +646,6 @@ MCP_TOOL(ToolMoveUnit)
 			return JVal();
 		}
 	}
-	if(!u->canMove()) { err = "unit has no moves left this turn; the order can be given next turn"; return JVal(); }
 	int iTurns = 0;
 	if(!u->GeneratePath(dest, 0, false, &iTurns))
 	{
@@ -663,12 +667,14 @@ MCP_TOOL(ToolMoveUnit)
 		}
 		JObj o;
 		o["previewed_only"] = J(true);
+		if(!u->canMove()) o["note"] = J("this unit has no moves left this turn; give the order next turn");
 		o["turns"] = J(iTurns);
 		o["path"] = JVal(path);
 		CvPlot* pEnd = u->GetPathEndTurnPlot();
 		if(pEnd) o["this_turn_ends_at"] = J(McpFormat("(%d,%d)", pEnd->getX(), pEnd->getY()));
 		return JVal(o);
 	}
+	if(!RequireMoves(u, err)) return JVal();
 	int fromX = u->getX(), fromY = u->getY();
 	{
 		NetMessageScope scope;
@@ -687,6 +693,25 @@ MCP_TOOL(ToolMoveUnit)
 	return JVal(o);
 }
 
+namespace
+{
+	// An order can use the unit up or get it killed (a missionary's last spread, a great person's improvement, a nuke,
+	// a fighter shot down on a sweep), so the unit is looked up again by id, never read through u afterwards.
+	void PushOrderAndReport(JObj& o, CvPlayer* me, CvUnit* u, MissionTypes eMission, int iData1, int iData2)
+	{
+		int iUnit = u->GetID();
+		std::string name = UnitTypeName(u->getUnitType());
+		{
+			NetMessageScope scope;
+			u->PushMission(eMission, iData1, iData2, 0, false, true);
+		}
+		o["ok"] = J(true);
+		CvUnit* after = me->getUnit(iUnit);
+		if(!after || after->isDelayedDeath() || !after->plot()) o["unit_gone"] = J("the " + name + " is gone");
+		else o["unit"] = UnitJson(after);
+	}
+}
+
 MCP_TOOL(ToolUnitAction)
 {
 	CvPlayer* me = MeActing(err);
@@ -703,10 +728,7 @@ MCP_TOOL(ToolUnitAction)
 		BuildTypes eBuild = FindBuildType(key);
 		if(eBuild == NO_BUILD) { err = "unknown build type '" + key + "' (use unit_options to list builds_here)"; return JVal(); }
 		if(!u->canBuild(p, eBuild)) { err = "cannot do that build on this tile (wrong unit, tech missing, or terrain)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_BUILD(), eBuild, -1, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_BUILD(), eBuild, -1);
 		return JVal(o);
 	}
 
@@ -746,10 +768,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canRebaseAt(p, x, y)) { err = "this unit cannot rebase there (not an aircraft, out of range, or no city or carrier of yours at the tile)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_REBASE(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_REBASE(), x, y);
 		return JVal(o);
 	}
 	if(action == "air_sweep")
@@ -757,10 +776,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canAirSweepAt(x, y)) { err = "this unit cannot sweep that tile (not a fighter, out of range, or it already attacked this turn)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_AIR_SWEEP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_AIR_SWEEP(), x, y);
 		return JVal(o);
 	}
 	if(action == "paradrop")
@@ -768,10 +784,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canParadropAt(p, x, y)) { err = "this unit cannot drop there (not a paratrooper, must start in your territory, target within range and not enemy-held)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_PARADROP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_PARADROP(), x, y);
 		return JVal(o);
 	}
 	if(action == "nuke")
@@ -791,10 +804,7 @@ MCP_TOOL(ToolUnitAction)
 				return JVal();
 			}
 		}
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_NUKE(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_NUKE(), x, y);
 		return JVal(o);
 	}
 	if(action == "disband")
@@ -820,20 +830,9 @@ MCP_TOOL(ToolUnitAction)
 			return JVal();
 		}
 		if(def.needsMoves && !RequireMoves(u, err)) return JVal();
-		{
-			NetMessageScope scope;
-			u->PushMission(def.mission(), -1, -1, 0, false, true);
-		}
-		o["ok"] = J(true);
-		if(action == "found_city")
-		{
-			CvCity* c = p->getPlotCity();
-			if(c) o["city_founded"] = J(c->getName().c_str());
-		}
-		else
-		{
-			o["unit"] = UnitJson(u);
-		}
+		PushOrderAndReport(o, me, u, def.mission(), -1, -1);
+		CvCity* c = (action == "found_city") ? p->getPlotCity() : NULL;
+		if(c) o["city_founded"] = J(c->getName().c_str());
 		return JVal(o);
 	}
 
@@ -896,20 +895,39 @@ MCP_TOOL(ToolSetResearch)
 	std::string key = ArgStr(args, "tech");
 	TechTypes eTech = FindTechType(key);
 	if(eTech == NO_TECH) { err = "unknown tech '" + key + "'; use a name or type from research_options"; return JVal(); }
+	bool bAdd = ArgBool(args, "add_to_queue", false);
+	bool bPreview = ArgBool(args, "preview_only", false);
 	JObj o;
 	if(me->GetNumFreeTechs() > 0)
 	{
+		if(bAdd || bPreview) { err = "claim your free technology first: set_research without add_to_queue or preview_only grants it"; return JVal(); }
 		if(!me->GetPlayerTechs()->CanResearchForFree(eTech)) { err = "that technology cannot be taken as the free one (prerequisites missing or already known)"; return JVal(); }
-		if(me->GetPlayerTechs()->GetCurrentResearch() == eTech) me->clearResearchQueue();
 		GET_TEAM(me->getTeam()).setHasTech(eTech, true, me->GetID(), true, true);
 		me->SetNumFreeTechs(me->GetNumFreeTechs() - 1);
 		o["free_tech_claimed"] = J(TechName(eTech));
 	}
 	else
 	{
-		if(!me->GetPlayerTechs()->CanResearch(eTech)) { err = "cannot research " + key + " now (prerequisites missing or already known)"; return JVal(); }
-		me->clearResearchQueue();
-		me->pushResearch(eTech, true);
+		if(GET_TEAM(me->getTeam()).GetTeamTechs()->HasTech(eTech)) { err = std::string("you already know ") + TechName(eTech); return JVal(); }
+		if(!me->GetPlayerTechs()->CanEverResearch(eTech)) { err = std::string("your civilization can never research ") + TechName(eTech); return JVal(); }
+		if(bAdd && me->GetPlayerTechs()->IsResearchingTech(eTech)) { err = std::string(TechName(eTech)) + " is already in your research queue"; return JVal(); }
+		std::vector<TechTypes> previous;
+		for(const CLLNode<TechTypes>* n = me->headResearchQueueNode(); n; n = me->nextResearchQueueNode(n)) previous.push_back(n->m_data);
+		// pushResearch returns early, queue untouched, for a tech already queued.
+		if(!bAdd) me->clearResearchQueue();
+		bool bQueued = me->pushResearch(eTech, false);
+		if(bQueued && bPreview) o["research_would_be"] = ResearchJson(me);
+		if(!bQueued || bPreview)
+		{
+			me->clearResearchQueue();
+			for(size_t i = 0; i < previous.size(); ++i) me->pushResearch(previous[i]);
+		}
+		if(!bQueued) { err = std::string("cannot research ") + TechName(eTech) + ": a technology on the way to it can never be researched"; return JVal(); }
+		if(bPreview)
+		{
+			o["previewed_only"] = J(true);
+			return JVal(o);
+		}
 	}
 	o["ok"] = J(true);
 	o["research"] = ResearchJson(me);
@@ -922,6 +940,8 @@ MCP_TOOL(ToolEndTurn)
 	if(!me) return JVal();
 	CvGame& g = GC.getGame();
 	bool bForce = ArgBool(args, "force", false);
+	std::string capture = PendingCaptureDecision(me);
+	if(!capture.empty()) { err = "end of turn blocked - " + capture; return JVal(); }
 	EndTurnBlockingTypes eBlock = EndTurnBlocking(me);
 	bool bIdleUnits = (eBlock == ENDTURN_BLOCKING_UNITS);
 	if(eBlock != NO_ENDTURN_BLOCKING_TYPE && !(bIdleUnits && bForce))
@@ -1067,6 +1087,7 @@ MCP_TOOL(ToolTakeSeat)
 		o["next"] = J("call wait_for_my_turn; a city-state's turn comes after every major civilization's");
 		return JVal(o);
 	}
+	o["your_civilization"] = CivilizationRules(GET_PLAYER(e).getCivilizationType(), GET_PLAYER(e).getLeaderType());
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
 	o["next"] = J("call wait_for_my_turn; your turn comes after the human's each round");
 	return JVal(o);
@@ -1192,7 +1213,7 @@ namespace
 		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. A wait over about 55 seconds needs the MCP client's tool timeout raised, or the client gives up first.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolStatus, LOG_NONE, true },
 		{ "briefing",
-		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Optional since_turn widens the event window.",
+		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
 		  "{\"type\":\"object\",\"properties\":{\"since_turn\":{\"type\":\"integer\"}}}", ToolBriefing, LOG_NONE, false },
 		{ "overview",
 		  "Your empire at a glance: treasury, yields, happiness, research, every city and every unit with its activity.",
@@ -1207,13 +1228,13 @@ namespace
 		  "All your cities: population, growth, production, the buildings each already has, focus and per-turn yields.",
 		  SCHEMA_EMPTY, ToolCities, LOG_NONE, false },
 		{ "city_options",
-		  "Everything one city can build or buy right now: units, buildings and projects with production cost and turns, gold and faith prices, and the tiles it can buy. Use the type strings with set_production or buy.",
+		  "Everything one city can build or buy right now: units, buildings and projects with production cost and turns, gold and faith prices, and the tiles it can buy. Buildings also show their upkeep and effects. Use the type strings with set_production or buy.",
 		  SCHEMA_CITY, ToolCityOptions, LOG_NONE, false },
 		{ "map",
 		  "Explored tiles within radius (default 3, max 8) of a point (default: your capital). Hex grid with offset rows: odd rows sit half a tile east of even rows, so use the dist field rather than computing distances. Unexplored tiles are counted, not listed. Only visible_now tiles show units. Compass: y increases NORTHWARD (y=0 is the south edge) and x increases eastward.",
 		  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"},\"radius\":{\"type\":\"integer\"}}}", ToolMap, LOG_NONE, false },
 		{ "research_options",
-		  "Technologies you can research now, with cost, turns and what they give.",
+		  "Technologies you can research now, with cost, turns, what they give and what each leads to.",
 		  SCHEMA_EMPTY, ToolResearchOptions, LOG_NONE, false },
 		{ "policy_options",
 		  "Social policy branches and policies: what is unlocked, adoptable now, and what each does; plus your culture and the next policy cost.",
@@ -1231,7 +1252,7 @@ namespace
 		  "Every civilization and city-state you have met: war or peace, their attitude toward you, friendship levels, relative strength, and known capitals.",
 		  SCHEMA_EMPTY, ToolCivs, LOG_NONE, false },
 		{ "lookup",
-		  "The game's own rules text for a type key: TECH_..., UNIT_..., BUILDING_..., POLICY_..., POLICY_BRANCH_..., PROMOTION_..., IMPROVEMENT_..., RESOURCE_... Includes stats and, for a tech, what it unlocks.",
+		  "The rules of the game being played, read from its data tables as the Civilopedia shows them, mods' changes included. Give a type key: TECH_..., UNIT_..., BUILDING_... (wonders too), POLICY_..., POLICY_BRANCH_..., PROMOTION_..., IMPROVEMENT_..., RESOURCE_..., BELIEF_..., CIVILIZATION_..., TERRAIN_..., FEATURE_... (natural wonders too), SPECIALIST_... or PROJECT_..., or RULES for game-wide numbers such as unhappiness per city, heal rates and city-state influence levels. It gives costs, requirements, upgrades, upkeep and yields, and for a tech what it leads to. Once you hold a seat, costs are this game's and units and buildings are your civilization's own versions. Every item it names carries its key.",
 		  "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"}},\"required\":[\"type\"]}", ToolLookup, LOG_NONE, false },
 		{ "move_unit",
 		  "Order a unit to move to a tile. Multi-turn moves continue when you end each turn (the unit is still in place when your next turn opens); do not re-issue them. Fails with a reason if there is no path. preview_only=true shows the path and turns without moving. To attack, use attack.",
@@ -1273,8 +1294,8 @@ namespace
 		  "Put a citizen to work as a specialist in a building (type from city_citizens.specialists), or take one out with remove=true.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"building\":{\"type\":\"string\"},\"remove\":{\"type\":\"boolean\"}},\"required\":[\"city_id\",\"building\"]}", ToolCitySpecialist, LOG_CITY, false },
 		{ "set_research",
-		  "Choose the technology to research (type string from research_options, e.g. TECH_POTTERY). When you have a free technology to claim, this grants it immediately instead.",
-		  "{\"type\":\"object\",\"properties\":{\"tech\":{\"type\":\"string\"}},\"required\":[\"tech\"]}", ToolSetResearch, LOG_EMPIRE, false },
+		  "Choose the technology to research (type string from research_options, e.g. TECH_POTTERY). A technology further down the tree replaces your queue with the path to it, as clicking it on the tech tree does. add_to_queue=true instead adds it, with any technologies it still needs, to the end of the queue, as a Shift-click does; to reorder the queue, set the first technology, then add the others in the order you want. preview_only=true shows the queue a choice would make without changing anything. research.queued_after lists the queue after the current technology, with the turns each one takes on its own at your current science. When you have a free technology to claim, this grants it immediately instead, but free technologies can only be used for technologies that you are currently able to research immediately (not future techs).",
+		  "{\"type\":\"object\",\"properties\":{\"tech\":{\"type\":\"string\"},\"add_to_queue\":{\"type\":\"boolean\"},\"preview_only\":{\"type\":\"boolean\"}},\"required\":[\"tech\"]}", ToolSetResearch, LOG_EMPIRE, false },
 		{ "adopt_policy",
 		  "Adopt a social policy (POLICY_...) or open a policy branch (POLICY_BRANCH_...) using your culture; see policy_options. Switching to a branch blocked by a rival branch costs a turn of anarchy and needs accept_anarchy=true.",
 		  "{\"type\":\"object\",\"properties\":{\"policy\":{\"type\":\"string\"},\"accept_anarchy\":{\"type\":\"boolean\"}},\"required\":[\"policy\"]}", ToolAdoptPolicy, LOG_EMPIRE, false },
@@ -1366,7 +1387,7 @@ namespace
 		  "TESTING ONLY (needs testing_mode enabled). Ends your turn, ends the on-screen human's turn when it opens, and waits for your next turn (about a minute at most). Returns status plus round_advanced / turn_reopened.",
 		  "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"}}}", NULL, LOG_TURN, false },
 		{ "city_task",
-		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (give a captured city back to its original owner).",
+		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (right after a capture, give the city back to the civilization that founded it, if you took it from someone else).",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"task\":{\"type\":\"string\"}},\"required\":[\"city_id\",\"task\"]}", ToolCityTask, LOG_CITY, false },
 		{ "set_identity",
 		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
@@ -1405,7 +1426,7 @@ namespace
 		  "The Victory Progress screen: which victories are enabled; original capitals held by each civilization (Domination); your spaceship projects (Science); civilizations you are influential over (Culture); votes held and needed (Diplomatic).",
 		  SCHEMA_EMPTY, ToolVictoryProgress, LOG_NONE, false },
 		{ "map_image",
-		  "A picture of the explored tiles within radius (default 5, max 8) of a point (default: your capital), drawn like the game's strategic view. Hexes in rows, odd rows half a hex east, y growing northward; each row's y is written at the left edge and the top row's x values along the top. Terrain by color: greens grass, brown-tan plains, pale yellow desert, grey-blue tundra, white snow, light blue coast, dark blue ocean; darker shade = hills; dark grey hex with MTN in the middle = mountain. Hexes inside someone's borders are covered in a grid of dots in the owner's color, and the territory's outline is a thick line in that color just inside its edge. Inside each hex, three centered rows: its coordinates x,y in bold on top (followed by +N when more units are stacked there than drawn); the city, units or MTN in the middle; and along the bottom what is on the ground: a short resource name (Iron, Oil, Coal, Horses...), a feature letter (F forest, J jungle, M marsh, O oasis, fp flood plains, ice, X fallout, atl atoll, NW natural wonder) with h added for hills (Fh = forest on hills, h alone = bare hills), and an improvement (the first letters of its name: farm, mine, trade, plant...). Bright cyan edges = rivers; dark brown lines with a dot = roads. Cities are labeled boxes in the owner's color (units inside a city are not drawn). Units are circles in the owner's color with a short name; the ring says whose: white yours, green a teammate's, red an enemy's, grey anyone else's; +N when more are stacked than shown. Hatched hexes are explored but out of sight now (no units shown); a dark hex with ? was never explored. The legend names each civilization's color and relation. The text beside the picture lists the cities and units in it with exact coordinates. Use it to see borders, fronts and where armies stand; use map for exact tile details.",
+		  "A picture of the explored tiles within radius (default 5, max 8) of a point (default: your capital), drawn like the game's strategic view. Hexes in rows, odd rows half a hex east, y growing northward; each row's y is written at the left edge and the top row's x values along the top. Terrain by color: greens grass, brown-tan plains, pale yellow desert, grey-blue tundra, white snow, light blue coast, dark blue ocean; darker shade = hills; dark grey hex with MTN in the middle = mountain. Hexes inside someone's borders are covered in a grid of dots in the owner's color, and the territory's outline is a thick line in that color just inside its edge. Inside each hex, three centered rows: its coordinates x,y in bold on top (followed by +N when more units are stacked there than drawn); the city, units or MTN in the middle; and along the bottom what is on the ground: a short resource name (Iron, Oil, Coal, Horses...), a feature letter (F forest, J jungle, M marsh, O oasis, fp flood plains, ice, X fallout, atl atoll, NW natural wonder) with h added for hills (Fh = forest on hills, h alone = bare hills), and an improvement (the first letters of its name: farm, mine, tradi, plant...; ancient ruins show as ruins). Bright cyan edges = rivers; dark brown lines with a dot = roads. Cities are labeled boxes in the owner's color (units inside a city are not drawn). Units are circles in the owner's color with a short name; the ring says whose: white yours, green a teammate's, red an enemy's, grey anyone else's; +N when more are stacked than shown. Hatched hexes are explored but out of sight now (no units shown); a dark hex with ? was never explored. The legend names each civilization's color and relation. The text beside the picture lists the cities and units in it with exact coordinates. Use it to see borders, fronts and where armies stand; use map for exact tile details.",
 		  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"},\"radius\":{\"type\":\"integer\"}}}", ToolMapImage, LOG_NONE, false },
 		{ "known_cities",
 		  "Every city of other civilizations and city-states your civilization has seen, with position, the owner as you last saw it, whether you are at war with that owner, and, while the tile is in sight, population, hit points and strength.",

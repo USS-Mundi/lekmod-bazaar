@@ -18,7 +18,7 @@ using namespace McpTool;
 
 // Religion and the great-person choices the game otherwise asks for on screen.
 
-namespace
+namespace McpTool
 {
 	JVal BeliefJson(BeliefTypes e)
 	{
@@ -26,15 +26,8 @@ namespace
 		JObj o;
 		o["type"] = J(b ? b->GetType() : "");
 		o["name"] = J(b ? Localized(b->getShortDescription()) : std::string());
-		o["effect"] = J(b ? b->GetDescription() : "");
+		o["effect"] = J(b ? StripMarkup(b->GetDescription()) : "");
 		return JVal(o);
-	}
-
-	JArr BeliefsJson(const std::vector<BeliefTypes>& v)
-	{
-		JArr a;
-		for(size_t i = 0; i < v.size(); ++i) a.push_back(BeliefJson(v[i]));
-		return a;
 	}
 
 	BeliefTypes FindBelief(const std::string& key)
@@ -46,6 +39,16 @@ namespace
 			if(b && MatchesKey(b->GetType(), Localized(b->getShortDescription()).c_str(), key)) return (BeliefTypes)i;
 		}
 		return NO_BELIEF;
+	}
+}
+
+namespace
+{
+	JArr BeliefsJson(const std::vector<BeliefTypes>& v)
+	{
+		JArr a;
+		for(size_t i = 0; i < v.size(); ++i) a.push_back(BeliefJson(v[i]));
+		return a;
 	}
 
 	ReligionTypes FindReligion(const std::string& key)
@@ -208,8 +211,9 @@ MCP_TOOL(ToolReligionOptions)
 	o["faith_per_turn"] = J(me->GetTotalFaithPerTurn());
 
 	JObj pantheon;
-	pantheon["have"] = J(pR->HasCreatedPantheon(me->GetID()));
+	pantheon["have"] = J(pR->HasCreatedPantheon(me->GetID()) || pR->HasCreatedReligion(me->GetID()));
 	if(pR->HasCreatedPantheon(me->GetID())) pantheon["belief"] = BeliefJson(pR->GetBeliefInPantheon(me->GetID()));
+	else if(pR->HasCreatedReligion(me->GetID())) pantheon["note"] = J("with a religion founded, a pantheon can no longer be founded");
 	else
 	{
 		pantheon["faith_needed"] = J(pR->GetMinimumFaithNextPantheon());
@@ -287,11 +291,11 @@ MCP_TOOL(ToolFoundPantheon)
 {
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
-	BeliefTypes b = FindBelief(ArgStr(args, "belief"));
-	if(b == NO_BELIEF) { err = "unknown belief; religion_options lists the available ones"; return JVal(); }
 	CvGameReligions* pR = GC.getGame().GetGameReligions();
 	CvGameReligions::FOUNDING_RESULT r = pR->CanCreatePantheon(me->GetID(), true);
 	if(r != CvGameReligions::FOUNDING_OK) { err = std::string("cannot found a pantheon: ") + FoundingResult(r); return JVal(); }
+	BeliefTypes b = FindBelief(ArgStr(args, "belief"));
+	if(b == NO_BELIEF) { err = "unknown belief; religion_options lists the available ones"; return JVal(); }
 #ifdef MCP_LEKMOD
 	if(!pR->IsPantheonBeliefAvailable(b)) { err = "that belief is not available as a pantheon belief"; return JVal(); }
 #else
