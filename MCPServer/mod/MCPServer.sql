@@ -26,7 +26,7 @@ INSERT OR REPLACE INTO McpCityStateDispositions (MinInfluence, Name, Text) VALUE
 INSERT OR REPLACE INTO McpCityStateDispositions (MinInfluence, Name, Text) VALUES (120, 'Devoted ally', 'Their cause is yours. Act for them without waiting to be asked, and turn rival envoys away.');
 INSERT OR REPLACE INTO McpCityStateDispositions (MinInfluence, Name, Text) VALUES (150, 'Sworn', 'You would fall for them. Their enemies are yours, your secrets are theirs, and no rival''s gold moves you.');
 
--- SWITCHED_ON_INFLUENCE_COST: influence the ally loses each turn, on top of the normal decay, while it is on.
+-- SWITCHED_ON_INFLUENCE_COST: influence the ally loses each turn, on top of the normal decay, while a model plays it.
 -- CONTESTED_LEAD / SECURE_LEAD: the ally's lead over the runner-up below which its loyalty is in play, and at which
 -- no one is close. TREND_TURNS / TREND_AMOUNT: a change of this much influence over this many turns reads as rising
 -- or falling.

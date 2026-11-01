@@ -136,9 +136,18 @@ static void AfterGoldGift(CvMinorCivAI* self, PlayerTypes eMajor, int iGold)
 	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("gave them %d gold", iGold));
 }
 
-static void AfterUnitGift(CvMinorCivAI* self, PlayerTypes eMajor, CvUnit* pUnit, bool)
+// The gift can destroy the unit (a gifted great person is killed at once), so its type is read before.
+static UnitTypes s_giftType = NO_UNIT;
+static bool BeforeUnitGift(CvMinorCivAI*, PlayerTypes, CvUnit* pUnit, bool)
 {
-	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("gave them a unit") + (pUnit ? std::string(" (") + McpTool::UnitTypeName(pUnit->getUnitType()) + ")" : std::string()));
+	s_giftType = pUnit ? pUnit->getUnitType() : NO_UNIT;
+	return false;
+}
+
+static void AfterUnitGift(CvMinorCivAI* self, PlayerTypes eMajor, CvUnit*, bool)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("gave them a unit") + (s_giftType != NO_UNIT ? std::string(" (") + McpTool::UnitTypeName(s_giftType) + ")" : std::string()));
+	s_giftType = NO_UNIT;
 }
 
 static void AfterImprovementGift(CvMinorCivAI* self, PlayerTypes eMajor, int iX, int iY)
@@ -224,20 +233,20 @@ static void AfterMinorTurn(CvMinorCivAI* self)
 // checks the pathfinder uses answer alike, or paths and moves disagree. The first test keeps the hot path cheap.
 static bool ReplaceCanEnterTerritory(CivHooks::CvUnit_canEnterTerritory::Original original, const CvUnit* self, TeamTypes eTeam, bool bIgnoreRightOfPassage, bool bIsCity, bool bIsDeclareWarMove)
 {
-	if(GET_PLAYER(self->getOwner()).isMinorCiv() && McpCsMayEnter(self->getOwner(), eTeam)) return true;
+	if(McpCsAnySwitchedOn() && McpCsIsSwitchedOn(self->getOwner()) && McpCsMayEnter(self->getOwner(), eTeam)) return true;
 	return original(self, eTeam, bIgnoreRightOfPassage, bIsCity, bIsDeclareWarMove);
 }
 
 static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam::Original original, const CvTeam* self, TeamTypes eTeam)
 {
-	if(eTeam != NO_TEAM && GET_TEAM(eTeam).isMinorCiv() && McpCsTeamMayEnter(eTeam, self->GetID())) return true;
+	if(McpCsAnySwitchedOn() && McpCsTeamSwitchedOn(eTeam) && McpCsTeamMayEnter(eTeam, self->GetID())) return true;
 	return original(self, eTeam);
 }
 
 // What a switched-on city-state's units see stays uncovered on its ally's map.
 static void AfterUnitSetXY(CvUnit* self, int, int, bool, bool, bool, bool, bool)
 {
-	if(GET_PLAYER(self->getOwner()).isMinorCiv()) McpCsRevealAround(self);
+	if(McpCsAnySwitchedOn() && McpCsIsSwitchedOn(self->getOwner())) McpCsRevealAround(self);
 }
 
 static void AfterRegisterGame(lua_State* L)
@@ -295,6 +304,7 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &AfterGoldGift), "after CvMinorCivAI::DoGoldGiftFromMajor");
+	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &BeforeUnitGift), "before CvMinorCivAI::DoUnitGiftFromMajor");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &AfterUnitGift), "after CvMinorCivAI::DoUnitGiftFromMajor");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTileImprovementGiftFromMajor>(host, &AfterImprovementGift), "after CvMinorCivAI::DoTileImprovementGiftFromMajor");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");

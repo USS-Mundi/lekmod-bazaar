@@ -126,6 +126,8 @@ namespace
 		JArr list;
 		std::string label = McpCurrentLabel();
 		std::vector<PlayerTypes> waiting = McpUnboundSeats();
+		std::vector<PlayerTypes> cityStates = McpCsWaitingForModel();
+		waiting.insert(waiting.end(), cityStates.begin(), cityStates.end());
 		for(size_t i = 0; i < waiting.size(); ++i) list.push_back(J(McpSeatWaitingText(waiting[i], label)));
 		return list;
 	}
@@ -708,6 +710,11 @@ MCP_TOOL(ToolUnitAction)
 		return JVal(o);
 	}
 
+	if(action == "explore" && me->isMinorCiv())
+	{
+		err = "a city-state's units do not wander off on their own: move them with move_unit, within what your ally may have out of your land";
+		return JVal();
+	}
 	if(action == "explore" || action == "automate_work")
 	{
 		bool bExplore = action == "explore";
@@ -1335,7 +1342,7 @@ namespace
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"tech\":{\"type\":\"string\"}},\"required\":[\"civ\",\"tech\"]}", ToolStealTech, LOG_EMPIRE, false },
 		{ "city_state", "City-states you have met (or one, with civ): influence, status, quests for you, and the actions open to you.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}}}", ToolCityState, LOG_NONE, false },
-		{ "city_state_action", "Act toward a city-state: gift_gold (amount), gift_unit (unit_id), bully_gold, bully_worker, pledge_protection, revoke_protection, buyout, make_peace, switch_on (their ally only: ask for their active help, so a model may play them; costs influence each turn), switch_off.",
+		{ "city_state_action", "Act toward a city-state: gift_gold (amount), gift_unit (unit_id), bully_gold, bully_worker, pledge_protection, revoke_protection, buyout, make_peace, switch_on (their ally only: ask for their active help, so a model may play them; costs influence each turn a model does), switch_off.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"amount\":{\"type\":\"integer\"},\"unit_id\":{\"type\":\"integer\"}},\"required\":[\"civ\",\"action\"]}", ToolCityStateAction, LOG_DIPLOMACY, false },
 		{ "tell_city_state", "Write to a city-state you are the ally of. The first message asks for its active help and switches it on (as city_state_action switch_on); while it is on, a model may play it and answer you, its words arriving in your status as messages_from_city_states.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}},\"required\":[\"civ\",\"text\"]}", ToolTellCityState, LOG_DIPLOMACY, false },

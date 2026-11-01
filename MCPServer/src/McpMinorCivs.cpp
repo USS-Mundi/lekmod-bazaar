@@ -200,7 +200,7 @@ namespace
 			o["units_out_now"] = J(McpCsUnitsOut(minor.GetID()));
 			o["its_sight_on_your_map"] = J(tier && tier->revealSight);
 			o["may_enter_your_land"] = J(tier && tier->enterAllyLand);
-			o["extra_influence_cost_per_turn"] = J(McpCsGetSettings().influenceCost);
+			o["extra_influence_cost_per_turn_while_a_model_plays_it"] = J(McpCsGetSettings().influenceCost);
 		}
 		CvCity* cap = minor.getCapitalCity();
 		if(cap) o["city"] = J(McpFormat("%s at (%d,%d)", cap->getName().c_str(), cap->getX(), cap->getY()));

@@ -51,6 +51,12 @@ bool McpCsTeamMayEnter(TeamTypes eMinorTeam, TeamTypes eLandTeam);
 // What a unit of a switched-on city-state sees stays uncovered on its ally's map (from the step that allows it).
 void McpCsRevealAround(const CvUnit* u);
 
+// Lock-free and cheap, for hooks the engine calls constantly and from more than one thread.
+bool McpCsAnySwitchedOn();
+bool McpCsTeamSwitchedOn(TeamTypes eTeam);
+// Switched-on city-states no model has taken yet, for status.seats_waiting_for_a_player.
+std::vector<PlayerTypes> McpCsWaitingForModel();
+
 // Every game update: finishes hand-backs that waited for a turn to end, ends the turn of a city-state whose model is
 // gone (and switches it off), and catches a lost alliance.
 void McpCsTick();

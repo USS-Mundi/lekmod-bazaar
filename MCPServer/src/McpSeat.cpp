@@ -218,7 +218,7 @@ PlayerTypes McpWaitingOpponentSeat()
 	PlayerTypes eFound = NO_PLAYER;
 	for(size_t i = 0; i < waiting.size(); ++i)
 	{
-		if(McpOnScreenTeam(waiting[i])) continue;
+		if(waiting[i] >= MAX_MAJOR_CIVS || McpOnScreenTeam(waiting[i])) continue; // a city-state is nobody's opponent seat
 		if(eFound != NO_PLAYER) return NO_PLAYER;
 		eFound = waiting[i];
 	}

@@ -12,6 +12,8 @@
 #include "CvGameCoreUtils.h"
 #include "CvGlobals.h"
 #include "CvPreGame.h"
+#include "CvCity.h"
+#include "CvTypes.h"
 #include <map>
 
 using namespace McpTool;
@@ -24,17 +26,22 @@ namespace
 	const size_t MCP_CS_DEEDS_KEPT = 30; // deeds of each civ toward each city-state
 	const size_t MCP_CS_DEEDS_SHOWN = 10;
 
+	// on, patron and releaseAfterTurn are read from any thread: the engine asks who is human from its own threads, and
+	// a seated city-state's answer comes from here. The rest is the game thread's alone.
 	struct CsState
 	{
-		bool on;
-		PlayerTypes patron;
-		bool releaseAfterTurn; // switched off during its own turn: its seat is handed back when that turn ends
-		bool turnEnded;        // its model was gone, so the plugin ended this turn for it
+		volatile bool on;
+		volatile PlayerTypes patron;
+		volatile bool releaseAfterTurn; // switched off during its own turn: its seat is handed back when that turn ends
+		bool turnEnded;                 // its model was gone, so the plugin is ending this turn for it
 		std::vector<int> history;
 		CsState() : on(false), patron(NO_PLAYER), releaseAfterTurn(false), turnEnded(false) {}
 	};
 
-	std::map<int, CsState> s_states;
+	// A fixed array, so a reader on another thread never meets an allocation or a rebalance.
+	CsState s_states[MAX_CIV_PLAYERS];
+	volatile long s_switchedOn = 0;        // how many are on: the hot hooks do nothing more while it is 0
+	volatile bool s_teamOn[MAX_CIV_TEAMS]; // the teams of the switched-on city-states
 	std::map<std::pair<int, int>, std::vector<std::string> > s_talk; // (city-state, civ) -> lines, oldest first
 	std::map<std::pair<int, int>, std::vector<std::string> > s_deeds; // (city-state, civ) -> deeds, oldest first
 
@@ -55,8 +62,32 @@ namespace
 
 	CsState* Find(PlayerTypes e)
 	{
-		std::map<int, CsState>::iterator it = s_states.find((int)e);
-		return it == s_states.end() ? NULL : &it->second;
+		return (e >= MAX_MAJOR_CIVS && e < MAX_CIV_PLAYERS) ? &s_states[e] : NULL;
+	}
+
+	void SetTeamOn(PlayerTypes eMinor, bool bOn)
+	{
+		TeamTypes eTeam = GET_PLAYER(eMinor).getTeam();
+		if(eTeam >= 0 && eTeam < MAX_CIV_TEAMS) s_teamOn[eTeam] = bOn;
+	}
+
+	// Out of its own land, or ordered out: a unit whose move ends outside counts as out already.
+	bool IsOut(CvUnit* u, PlayerTypes eOwner)
+	{
+		if(!u->plot()) return false;
+		if(u->plot()->getOwner() != eOwner) return true;
+		const MissionData* m = u->GetHeadMissionData();
+		if(!m || m->eMissionType != CvTypes::getMISSION_MOVE_TO()) return false;
+		CvPlot* to = GC.getMap().plot(m->iData1, m->iData2);
+		return to && to->getOwner() != eOwner;
+	}
+
+	int UnitsOut(CvPlayer& p, int iExceptUnit)
+	{
+		int n = 0, iLoop;
+		for(CvUnit* u = p.firstUnit(&iLoop); u != NULL; u = p.nextUnit(&iLoop))
+			if(u->IsCombatUnit() && u->GetID() != iExceptUnit && IsOut(u, p.GetID())) ++n;
+		return n;
 	}
 
 	// Its slot goes back to the computer, as release_seat does for a major; the session on it loses the seat.
@@ -127,16 +158,22 @@ namespace
 	}
 
 	// The city-state is the only player whose turn is left to a model that may be gone: no other seat ends a turn
-	// on its own, so the game would wait. Gone is the bridge's idle rule (no request for two minutes).
+	// on its own, so the game would wait. Gone is the bridge's idle rule (no request for two minutes). Ending the
+	// turn of a player that is not on screen does nothing while a unit or city is busy, so it is tried again every
+	// update until it holds; a city waiting for a build would block it, so the game's AI picks one.
 	void EndTurnIfGone(PlayerTypes e, CsState& s)
 	{
 		CvPlayer& p = GET_PLAYER(e);
 		if(!p.isTurnActive()) { s.turnEnded = false; return; }
-		if(s.turnEnded || CvPreGame::slotStatus(e) != SS_TAKEN) return;
+		if(CvPreGame::slotStatus(e) != SS_TAKEN || p.isEndTurn()) return;
 		McpSession session;
 		if(McpBridge::Get().SessionForSeat((int)e, session)) return;
+		int iLoop;
+		for(CvCity* c = p.firstCity(&iLoop); c != NULL; c = p.nextCity(&iLoop))
+			if(c->getOrderQueueLength() == 0) c->AI_chooseProduction(false);
 		p.EndTurnsForReadyUnits();
 		p.setEndTurn(true);
+		if(s.turnEnded) return;
 		s.turnEnded = true;
 		if(s.on) McpCsSwitchOff(e, "its player was gone when its turn came");
 	}
@@ -213,12 +250,14 @@ bool McpCsSwitchOn(PlayerTypes eMinor, PlayerTypes ePatron, std::string& err)
 	if(ePatron == NO_PLAYER || GET_PLAYER(eMinor).GetMinorCivAI()->GetAlly() != ePatron) { err = "only their ally can ask for their active help"; return false; }
 	CsState& s = s_states[(int)eMinor];
 	if(s.on && s.patron == ePatron) return true;
-	s.on = true;
+	if(!s.on) ++s_switchedOn;
 	s.patron = ePatron;
 	s.releaseAfterTurn = false;
 	s.history.clear();
 	s.history.push_back(GET_PLAYER(eMinor).GetMinorCivAI()->GetEffectiveFriendshipWithMajor(ePatron));
-	TellPatron(ePatron, CivName(eMinor) + " answers your call for its active help. A model may now play it; until one does, the game's AI keeps playing it.");
+	s.on = true;
+	SetTeamOn(eMinor, true);
+	TellPatron(ePatron, CivName(eMinor) + " answers your call for its active help. A model may now play it; until one does, the game's AI keeps playing it, and the extra influence cost starts only when a model takes its seat.");
 	return true;
 }
 
@@ -228,6 +267,8 @@ void McpCsSwitchOff(PlayerTypes eMinor, const std::string& why)
 	if(!s || !s->on) return;
 	PlayerTypes ePatron = s->patron;
 	s->on = false;
+	--s_switchedOn;
+	SetTeamOn(eMinor, false);
 	s->patron = NO_PLAYER;
 	s->history.clear();
 	if(CvPreGame::slotStatus(eMinor) == SS_TAKEN)
@@ -277,15 +318,24 @@ int McpCsSendCapFor(PlayerTypes eMinor)
 int McpCsUnitsOut(PlayerTypes eMinor)
 {
 	if(!IsLiveMinor(eMinor)) return 0;
-	return MilitaryUnits(GET_PLAYER(eMinor), true);
+	return UnitsOut(GET_PLAYER(eMinor), -1);
+}
+
+bool McpCsAnySwitchedOn() { return s_switchedOn > 0; }
+
+bool McpCsTeamSwitchedOn(TeamTypes eTeam)
+{
+	return eTeam >= 0 && eTeam < MAX_CIV_TEAMS && s_teamOn[eTeam];
 }
 
 std::string McpCsMoveRefusal(const CvUnit* u, const CvPlot* dest)
 {
 	if(!u || !dest || !u->IsCombatUnit()) return "";
 	PlayerTypes e = u->getOwner();
-	if(!McpCsIsSwitchedOn(e) || !u->plot() || u->plot()->getOwner() != e || dest->getOwner() == e) return "";
-	int cap = McpCsSendCapFor(e), out = McpCsUnitsOut(e);
+	if(!McpIsCityStateSeat(e) || !u->plot() || u->plot()->getOwner() != e || dest->getOwner() == e) return "";
+	// Switched off but not yet handed back (the rest of its own turn): nothing more leaves its land.
+	if(!McpCsIsSwitchedOn(e)) return "you have been switched off: your units stay in your land until the game's AI takes you back";
+	int cap = McpCsSendCapFor(e), out = UnitsOut(GET_PLAYER(e), u->GetID());
 	if(out < cap) return "";
 	return McpFormat("at %d influence your ally can have %d of your units outside your land, and %d are out already; bring one home or wait for more influence", McpCsInfluence(e), cap, out);
 }
@@ -323,10 +373,11 @@ void McpCsRevealAround(const CvUnit* u)
 
 void McpCsTick()
 {
-	for(std::map<int, CsState>::iterator it = s_states.begin(); it != s_states.end(); ++it)
+	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
 	{
-		PlayerTypes e = (PlayerTypes)it->first;
-		CsState& s = it->second;
+		PlayerTypes e = (PlayerTypes)i;
+		CsState& s = s_states[i];
+		if(!s.on && !s.releaseAfterTurn) continue;
 		if(!IsLiveMinor(e))
 		{
 			if(s.on) McpCsSwitchOff(e, "it no longer exists");
@@ -373,9 +424,21 @@ std::vector<std::string> McpCsDeeds(PlayerTypes eMinor, PlayerTypes eCiv)
 
 bool McpIsCityStateSeat(PlayerTypes e)
 {
-	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS || CvPreGame::slotStatus(e) != SS_TAKEN || !GET_PLAYER(e).isMinorCiv()) return false;
-	CsState* s = Find(e);
-	return s && (s->on || s->releaseAfterTurn);
+	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS) return false;
+	const CsState& s = s_states[e];
+	return (s.on || s.releaseAfterTurn) && CvPreGame::slotStatus(e) == SS_TAKEN && GET_PLAYER(e).isMinorCiv();
+}
+
+std::vector<PlayerTypes> McpCsWaitingForModel()
+{
+	std::vector<PlayerTypes> out;
+	McpSession session;
+	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
+	{
+		PlayerTypes e = (PlayerTypes)i;
+		if(s_states[i].on && IsLiveMinor(e) && CvPreGame::slotStatus(e) != SS_TAKEN && !McpBridge::Get().SessionForSeat(i, session)) out.push_back(e);
+	}
+	return out;
 }
 
 std::string McpCsToolRefusal(const std::string& tool)
@@ -441,7 +504,16 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 
 void McpCsResetForNewGame()
 {
-	s_states.clear();
+	for(int i = 0; i < MAX_CIV_PLAYERS; ++i)
+	{
+		s_states[i].on = false;
+		s_states[i].patron = NO_PLAYER;
+		s_states[i].releaseAfterTurn = false;
+		s_states[i].turnEnded = false;
+		s_states[i].history.clear();
+	}
+	for(int t = 0; t < MAX_CIV_TEAMS; ++t) s_teamOn[t] = false;
+	s_switchedOn = 0;
 	s_talk.clear();
 	s_deeds.clear();
 	McpCsLoadSettings();
@@ -468,7 +540,8 @@ void McpCsAfterMinorTurn(PlayerTypes eMinor)
 	CsState* s = Find(eMinor);
 	if(!s || !s->on || !IsLiveMinor(eMinor)) return;
 	CvMinorCivAI* ai = GET_PLAYER(eMinor).GetMinorCivAI();
-	if(s_settings.influenceCost != 0) ai->ChangeFriendshipWithMajor(s->patron, -s_settings.influenceCost);
+	// The ally pays for help it is getting: only while a model holds the seat.
+	if(s_settings.influenceCost != 0 && CvPreGame::slotStatus(eMinor) == SS_TAKEN) ai->ChangeFriendshipWithMajor(s->patron, -s_settings.influenceCost);
 	s->history.push_back(ai->GetEffectiveFriendshipWithMajor(s->patron));
 	if(s->history.size() > MCP_CS_HISTORY) s->history.erase(s->history.begin());
 }
