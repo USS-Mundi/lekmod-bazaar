@@ -23,8 +23,9 @@ namespace
 		bool on;
 		PlayerTypes patron;
 		bool releaseAfterTurn; // switched off during its own turn: its seat is handed back when that turn ends
+		bool turnEnded;        // its model was gone, so the plugin ended this turn for it
 		std::vector<int> history;
-		CsState() : on(false), patron(NO_PLAYER), releaseAfterTurn(false) {}
+		CsState() : on(false), patron(NO_PLAYER), releaseAfterTurn(false), turnEnded(false) {}
 	};
 
 	std::map<int, CsState> s_states;
@@ -68,6 +69,61 @@ namespace
 			++n;
 		}
 		return n;
+	}
+
+	const char* PersonalityName(MinorCivPersonalityTypes e)
+	{
+		switch(e)
+		{
+		case MINOR_CIV_PERSONALITY_FRIENDLY: return "friendly";
+		case MINOR_CIV_PERSONALITY_NEUTRAL: return "neutral";
+		case MINOR_CIV_PERSONALITY_HOSTILE: return "hostile";
+		case MINOR_CIV_PERSONALITY_IRRATIONAL: return "irrational";
+		default: return "unknown";
+		}
+	}
+
+	const char* TraitName(MinorCivTraitTypes e)
+	{
+		switch(e)
+		{
+		case MINOR_CIV_TRAIT_CULTURED: return "cultured";
+		case MINOR_CIV_TRAIT_MILITARISTIC: return "militaristic";
+		case MINOR_CIV_TRAIT_MARITIME: return "maritime";
+		case MINOR_CIV_TRAIT_MERCANTILE: return "mercantile";
+		case MINOR_CIV_TRAIT_RELIGIOUS: return "religious";
+		default: return "unknown";
+		}
+	}
+
+	// The strongest influence any other major civ has with it.
+	int RunnerUp(PlayerTypes eMinor, PlayerTypes ePatron)
+	{
+		int best = 0;
+		CvMinorCivAI* ai = GET_PLAYER(eMinor).GetMinorCivAI();
+		for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+		{
+			PlayerTypes e = (PlayerTypes)i;
+			if(e == ePatron || !GET_PLAYER(e).isAlive()) continue;
+			int v = ai->GetEffectiveFriendshipWithMajor(e);
+			if(v > best) best = v;
+		}
+		return best;
+	}
+
+	// The city-state is the only player whose turn is left to a model that may be gone: no other seat ends a turn
+	// on its own, so the game would wait. Gone is the bridge's idle rule (no request for two minutes).
+	void EndTurnIfGone(PlayerTypes e, CsState& s)
+	{
+		CvPlayer& p = GET_PLAYER(e);
+		if(!p.isTurnActive()) { s.turnEnded = false; return; }
+		if(s.turnEnded || CvPreGame::slotStatus(e) != SS_TAKEN) return;
+		McpSession session;
+		if(McpBridge::Get().SessionForSeat((int)e, session)) return;
+		p.EndTurnsForReadyUnits();
+		p.setEndTurn(true);
+		s.turnEnded = true;
+		if(s.on) McpCsSwitchOff(e, "its player was gone when its turn came");
 	}
 
 	bool ReadTiers(std::vector<McpCsTier>& out)
@@ -223,12 +279,72 @@ void McpCsTick()
 			continue;
 		}
 		if(s.on && GET_PLAYER(e).GetMinorCivAI()->GetAlly() != s.patron) McpCsAfterSetAlly(e, GET_PLAYER(e).GetMinorCivAI()->GetAlly());
+		if(s.on || s.releaseAfterTurn) EndTurnIfGone(e, s);
 		if(s.releaseAfterTurn && !GET_PLAYER(e).isTurnActive())
 		{
 			s.releaseAfterTurn = false;
 			HandBack(e);
 		}
 	}
+}
+
+bool McpIsCityStateSeat(PlayerTypes e)
+{
+	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS || CvPreGame::slotStatus(e) != SS_TAKEN || !GET_PLAYER(e).isMinorCiv()) return false;
+	CsState* s = Find(e);
+	return s && (s->on || s->releaseAfterTurn);
+}
+
+std::string McpCsToolRefusal(const std::string& tool)
+{
+	static const char* const REFUSED[] =
+	{
+		"declare_war", "make_peace", "set_research", "research_options", "adopt_policy", "policy_options",
+		"choose_ideology", "switch_ideology", "found_pantheon", "found_religion", "enhance_religion",
+		"add_reformation_belief", "deal_options", "propose_deal", "answer_deal", "demand", "discuss",
+		"respond_to_request", "congress", "propose_resolution", "vote_resolution", "abstain", "spies", "move_spy",
+		"stage_coup", "steal_tech", "launch_spaceship", "establish_trade_route", "city_state_action",
+		"tell_city_state", "choose_great_person"
+	};
+	for(size_t i = 0; i < sizeof(REFUSED) / sizeof(REFUSED[0]); ++i)
+		if(tool == REFUSED[i]) return "a city-state does not do that: " + tool + " is decided by the game's rules for city-states";
+	return "";
+}
+
+picojson::value McpCsSeatView(PlayerTypes eMinor)
+{
+	JObj o;
+	if(!IsLiveMinor(eMinor)) return JVal(o);
+	CvMinorCivAI* ai = GET_PLAYER(eMinor).GetMinorCivAI();
+	PlayerTypes ePatron = McpCsPatron(eMinor);
+	o["personality"] = J(PersonalityName(ai->GetPersonality()));
+	o["kind"] = J(TraitName(ai->GetTrait()));
+	if(ePatron == NO_PLAYER)
+	{
+		o["ally"] = J("none: you have been switched off, and the game's AI takes you back when this turn ends");
+		return JVal(o);
+	}
+	int influence = McpCsInfluence(eMinor);
+	o["ally"] = J(CivName(ePatron));
+	o["ally_influence"] = J(influence);
+	const McpCsDisposition* d = McpCsDispositionFor(s_dispositions, influence);
+	if(d)
+	{
+		o["ally_standing"] = J(d->name);
+		o["how_you_see_them"] = J(d->text);
+	}
+	CsState* s = Find(eMinor);
+	JArr notes;
+	std::vector<std::string> mods = McpCsModifiers(s_settings, influence, RunnerUp(eMinor, ePatron), s ? s->history : std::vector<int>());
+	for(size_t i = 0; i < mods.size(); ++i) notes.push_back(J(mods[i]));
+	if(!notes.empty()) o["notes"] = JVal(notes);
+	const McpCsTier* tier = McpCsCurrentTier(eMinor);
+	o["units_you_may_send_out_of_your_land"] = J(McpCsSendCapFor(eMinor));
+	o["units_out_now"] = J(McpCsUnitsOut(eMinor));
+	o["your_sight_on_their_map"] = J(tier && tier->revealSight);
+	o["you_may_enter_their_land"] = J(tier && tier->enterAllyLand);
+	o["what_you_play"] = J("every unit and your city's builds; the game's rules decide your wars, peace, research and policies, and your alliance follows influence as always");
+	return JVal(o);
 }
 
 void McpCsResetForNewGame()

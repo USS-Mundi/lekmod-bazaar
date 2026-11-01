@@ -4,6 +4,7 @@
 
 #include <string>
 #include "McpCityStateRules.h"
+#include "picojson.h"
 
 // Reads the settings tables from the game's database; a missing table is reported in the log and its defaults apply.
 void McpCsLoadSettings();
@@ -23,7 +24,15 @@ const McpCsTier* McpCsCurrentTier(PlayerTypes eMinor);
 int McpCsSendCapFor(PlayerTypes eMinor);
 int McpCsUnitsOut(PlayerTypes eMinor);   // its military units outside its own land
 
-// Every game update: finishes hand-backs that waited for a turn to end, and catches a lost alliance.
+// A switched-on city-state a model has taken (or one switched off during its own turn, until that turn ends).
+bool McpIsCityStateSeat(PlayerTypes e);
+// "" when a city-state's player may use the tool; otherwise why not.
+std::string McpCsToolRefusal(const std::string& tool);
+// What a city-state's player sees in status: its ally, what the alliance buys, its own character.
+picojson::value McpCsSeatView(PlayerTypes eMinor);
+
+// Every game update: finishes hand-backs that waited for a turn to end, ends the turn of a city-state whose model is
+// gone (and switches it off), and catches a lost alliance.
 void McpCsTick();
 // A new or loaded game: forgets every switched-on city-state and reloads the settings.
 void McpCsResetForNewGame();

@@ -4,6 +4,7 @@
 #include "McpSeat.h"
 #include "McpLogText.h"
 #include "McpToolHandlers.h"
+#include "McpCityStates.h"
 #include "McpMapImage.h"
 #include "McpBridge.h"
 #include "McpDiplomacy.h"
@@ -206,6 +207,12 @@ MCP_TOOL(ToolStatus)
 		for(size_t i = 0; i < teammates.size(); ++i) mates.push_back(J(CivName(teammates[i])));
 		o["teammate_civs_you_could_play"] = JVal(mates);
 		o["opponent_civs_you_could_play"] = J((int)ClaimableCivs(false).size());
+	}
+	else if(me->isMinorCiv())
+	{
+		o["seat"] = J("claimed: a city-state its ally switched on");
+		o["role"] = J("city-state: you play " + CivName(me->GetID()) + " for your ally; talk to them with chat");
+		o["city_state"] = McpCsSeatView(me->GetID());
 	}
 	else
 	{
@@ -1035,6 +1042,12 @@ MCP_TOOL(ToolTakeSeat)
 	JObj o;
 	o["ok"] = J(true);
 	o["playing"] = J(CivName(e));
+	if(GET_PLAYER(e).isMinorCiv())
+	{
+		o["city_state"] = McpCsSeatView(e);
+		o["next"] = J("call wait_for_my_turn; a city-state's turn comes after every major civilization's");
+		return JVal(o);
+	}
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
 	o["next"] = J("call wait_for_my_turn; your turn comes after the human's each round");
 	return JVal(o);
@@ -1324,7 +1337,7 @@ namespace
 		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
 		  "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"provider\",\"model\",\"version\"]}", ToolSetIdentity, LOG_TURN, false },
 		{ "take_seat",
-		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back a seat from status.seats_waiting_for_a_player (civ=opponent takes the one opponent seat waiting, without naming it). civ=human plays the civilization on screen instead.",
+		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back a seat from status.seats_waiting_for_a_player (civ=opponent takes the one opponent seat waiting, without naming it). civ=human plays the civilization on screen instead. A city-state can be taken by name while its ally has switched it on (status.seats_waiting_for_a_player lists them); you then play it for that ally.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}},\"required\":[\"civ\"]}", ToolTakeSeat, LOG_TURN, false },
 		{ "release_seat",
 		  "Hand the claimed civilization back to the game's AI.",

@@ -829,6 +829,11 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	const char* szCategory = bLogged ? McpLogCategory(*pTool, pJob->args) : "";
 	McpSession before = McpBridge::Get().Current();
 	PlayerTypes ePlayerBefore = McpPlayerOf(before);
+	if(ePlayerBefore >= MAX_MAJOR_CIVS)
+	{
+		std::string why = McpCsToolRefusal(pJob->tool);
+		if(!why.empty()) { pJob->error = why; return false; }
+	}
 	if(bLogged && bFirstTry && ePlayerBefore != NO_PLAYER) Append((int)ePlayerBefore, McpIdentityLabel(before.identity), szCategory, McpDescribeCall(*pTool, pJob->args));
 	McpCrashSetContext((pJob->tool + " " + picojson::value(pJob->args).serialize()).c_str());
 	s_retryRequested = false;

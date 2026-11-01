@@ -4,6 +4,7 @@
 extern "C" __declspec(dllimport) HRESULT __stdcall CoCreateGuid(GUID* pguid);
 #include "McpSeat.h"
 #include "McpBridge.h"
+#include "McpCityStates.h"
 #include "McpDiplomacy.h"
 #include "McpLogText.h"
 #include "McpPopups.h"
@@ -24,6 +25,7 @@ namespace
 	// The log is readable on screen, so an opponent's civilization is not named in it.
 	std::string SeatNameForScreen(PlayerTypes e)
 	{
+		if(GET_PLAYER(e).isMinorCiv()) return GET_PLAYER(e).getCivilizationShortDescription();
 		return McpOnScreenTeam(e) ? GET_PLAYER(e).getCivilizationShortDescription() : "an opponent civilization";
 	}
 
@@ -60,12 +62,13 @@ bool McpIsSeat(PlayerTypes e)
 	// In a single-player game the only human slot besides the one on screen is a seat.
 	CvGame& game = GC.getGame();
 	if(game.isNetworkMultiPlayer() || game.isHotSeat() || game.isPbem()) return false;
+	if(e >= MAX_MAJOR_CIVS) return McpIsCityStateSeat(e);
 	return e != NO_PLAYER && e < MAX_MAJOR_CIVS && e != game.getActivePlayer() && CvPreGame::slotStatus(e) == SS_TAKEN;
 }
 
 bool McpAnySeat()
 {
-	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+	for(int i = 0; i < MAX_CIV_PLAYERS; ++i)
 		if(McpIsSeat((PlayerTypes)i)) return true;
 	return false;
 }
@@ -74,7 +77,7 @@ std::vector<PlayerTypes> McpUnboundSeats()
 {
 	std::vector<PlayerTypes> out;
 	McpSession s;
-	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+	for(int i = 0; i < MAX_CIV_PLAYERS; ++i)
 		if(McpIsSeat((PlayerTypes)i) && !McpBridge::Get().SessionForSeat(i, s)) out.push_back((PlayerTypes)i);
 	return out;
 }
@@ -91,6 +94,13 @@ std::string McpSeatWaitingText(PlayerTypes e, const std::string& label)
 {
 	std::string last = Nickname(e);
 	std::string by = last.empty() ? "" : " (last played by " + last + ")";
+	if(GET_PLAYER(e).isMinorCiv())
+	{
+		std::string name = GET_PLAYER(e).getCivilizationShortDescription();
+		PlayerTypes ePatron = McpCsPatron(e);
+		std::string patron = ePatron == NO_PLAYER ? std::string("nobody now") : McpTool::CivName(ePatron);
+		return name + " (a city-state, switched on by " + patron + by + "): take_seat civ=" + name;
+	}
 	if(McpSeatLabelMatches(e, label)) return std::string(GET_PLAYER(e).getCivilizationShortDescription()) + " (yours: take it back with take_seat)";
 	if(McpOnScreenTeam(e)) return std::string(GET_PLAYER(e).getCivilizationShortDescription()) + by;
 	return "an opponent civilization" + by + ": only the model that played it, or take_seat civ=opponent, can take it";
@@ -139,10 +149,24 @@ bool McpClaimSeat(PlayerTypes ePlayer, std::string& err, bool bAssignedOpponent)
 		err = std::string("already playing ") + GET_PLAYER((PlayerTypes)mine.seat).getCivilizationShortDescription() + "; call release_seat first";
 		return false;
 	}
-	if(ePlayer == NO_PLAYER || ePlayer >= MAX_MAJOR_CIVS) { err = "that is not a major civilization"; return false; }
+	if(ePlayer == NO_PLAYER || ePlayer >= MAX_CIV_PLAYERS) { err = "that is not a civilization"; return false; }
 	CvPlayer& p = GET_PLAYER(ePlayer);
 	if(!p.isAlive()) { err = "that civilization is not alive"; return false; }
+	bool bCityState = ePlayer >= MAX_MAJOR_CIVS;
+	if(bCityState && (!p.isMinorCiv() || !McpCsIsSwitchedOn(ePlayer)))
+	{
+		err = "a city-state can be played only while its ally has switched it on (city_state_action switch_on, or writing to it in the in-game log window)";
+		return false;
+	}
 	std::string label = McpCurrentLabel();
+	if(bCityState && McpIsSeat(ePlayer))
+	{
+		// Any model may take a switched-on city-state its last player left.
+		McpSession other;
+		if(bridge.SessionForSeat(ePlayer, other)) { err = NOT_AVAILABLE; return false; }
+		Bind(ePlayer, label, "is back on");
+		return true;
+	}
 	if(McpIsSeat(ePlayer))
 	{
 		// A seat another model left: the model's own comes back to it; one on the on-screen
@@ -159,7 +183,7 @@ bool McpClaimSeat(PlayerTypes ePlayer, std::string& err, bool bAssignedOpponent)
 	CvPreGame::setSlotStatus(ePlayer, SS_TAKEN);
 	PlayerTypes eActive = game.getActivePlayer();
 	if(eActive != NO_PLAYER) CvPreGame::setHandicap(ePlayer, CvPreGame::handicap(eActive));
-	DealHumanStartingUnits(p);
+	if(!bCityState) DealHumanStartingUnits(p);
 	Bind(ePlayer, label, "now plays");
 	return true;
 }
@@ -172,6 +196,13 @@ bool McpReleaseSeat(std::string& err)
 	if(e == NO_PLAYER || !McpIsSeat(e)) { err = "you hold no seat"; return false; }
 	if(GET_PLAYER(e).isTurnActive()) { err = "end your turn first; the seat can be released while another player's turn is running"; return false; }
 	bridge.LogLineFor(e, MCP_LOG_TURN, "The game's AI now plays " + SeatNameForScreen(e));
+	if(e >= MAX_MAJOR_CIVS)
+	{
+		// Letting go of a city-state switches it off; that hands its slot back to the computer.
+		McpCsSwitchOff(e, "its player let go");
+		bridge.SetCurrentSeat(MCP_SEAT_LOST);
+		return true;
+	}
 	CvPreGame::setSlotStatus(e, SS_COMPUTER);
 	CvPreGame::setNickname(e, CvString(""));
 	CvPreGame::setLeaderName(e, CvString(""));

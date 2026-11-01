@@ -85,7 +85,7 @@ namespace
 
 	bool SeatTurnOpen()
 	{
-		for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+		for(int i = 0; i < MAX_CIV_PLAYERS; ++i)
 			if(McpIsSeat((PlayerTypes)i) && GET_PLAYER((PlayerTypes)i).isTurnActive()) return true;
 		return false;
 	}
