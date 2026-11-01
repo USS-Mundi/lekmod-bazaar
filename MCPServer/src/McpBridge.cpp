@@ -24,7 +24,9 @@
 #define MCP_GAME_IDLE_MS 3000
 #define MCP_MAX_CHAT_WAITING 50
 #define MCP_WAIT_DEFAULT_SECONDS 25.0
-#define MCP_WAIT_MAX_SECONDS 55.0
+#define MCP_WAIT_MAX_SECONDS 3600.0
+#define MCP_JOB_NUDGE "nudge"
+#define MCP_NUDGE_COOLDOWN_MS (2 * 60 * 1000) // one early wake per civilization in this long, so chat cannot chain wakes
 #define MCP_MAX_LOG_ENTRIES 2000
 #define MCP_MAX_POPUPS 200                     // kept per player
 #define MCP_SESSION_IDLE_MS (2 * 60 * 1000)    // no request for this long: the model has most likely gone
@@ -107,9 +109,10 @@ struct McpBridge::Impl
 		int diploSeq; // grows when a new request reaches the session's civilization
 		int diploCount;
 		bool chatWaiting; // the human's messages to the session's seat await a status
+		int nudgeSeq; // grows when POST /nudge names the session's civilization
 		DWORD lastSeenMs; // a time read before taking the lock can be older than this, and now - lastSeenMs then wraps
 		int seatBeforeLoad;
-		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), lastSeenMs(0), seatBeforeLoad(-1) {}
+		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), lastSeenMs(0), seatBeforeLoad(-1) {}
 		bool Idle(DWORD now) const { return now - lastSeenMs > MCP_SESSION_IDLE_MS; }
 	};
 
@@ -133,6 +136,8 @@ struct McpBridge::Impl
 	unsigned int gameSeed;
 	volatile bool gameLoaded;
 	std::map<int, std::vector<std::string> > chat;         // per seat: the human's messages no status has delivered yet
+	std::map<int, int> nudges;                             // per player: how many early wakes POST /nudge has asked for
+	std::map<int, DWORD> lastNudgeMs;                      // per player: when the last one was let through
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
 	int unreadReplies;
 	int totalReplies;
@@ -154,6 +159,7 @@ struct McpBridge::Impl
 	void Shutdown();
 	void UpdateSessions();
 	bool RunJob(McpJob* pJob); // true: run it again on a later frame
+	picojson::value Nudge(const picojson::object& args);
 	void Append(int player, const std::string& who, const char* category, const std::string& text);
 	void DrainPopups();
 	void DrainChat();
@@ -178,7 +184,8 @@ struct McpBridge::Impl
 	picojson::value CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError);
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunOnGameThread(const std::string& token, const std::string& tool, const picojson::object& args, std::string& error);
-	bool SessionWakes(const std::string& token, int iDiploSeqAtStart);
+	bool SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart);
+	int NudgeSeq(const std::string& token); // the session's nudge count; 0 when it no longer exists
 };
 
 McpBridge& McpBridge::Get()
@@ -584,6 +591,8 @@ void McpBridge::Impl::UpdateSessions()
 		s.myTurn = ePlayer != NO_PLAYER && McpIsPlayerTurn(GET_PLAYER(ePlayer));
 		std::map<int, std::vector<std::string> >::const_iterator c = chat.find((int)ePlayer);
 		s.chatWaiting = c != chat.end() && !c->second.empty();
+		std::map<int, int>::const_iterator n = nudges.find((int)ePlayer);
+		s.nudgeSeq = (n == nudges.end()) ? 0 : n->second;
 		int iRequests = ePlayer != NO_PLAYER ? McpCountDiploRequestsFor(ePlayer) : 0;
 		if(iRequests > s.diploCount) ++s.diploSeq;
 		s.diploCount = iRequests;
@@ -774,6 +783,11 @@ void McpBridge::RetryLater() { s_retryRequested = true; }
 // line comes before anything the call causes.
 bool McpBridge::Impl::RunJob(McpJob* pJob)
 {
+	if(pJob->tool == MCP_JOB_NUDGE)
+	{
+		pJob->result = Nudge(pJob->args);
+		return false;
+	}
 	if(pJob->tool == MCP_JOB_GAME_REFERENCE)
 	{
 		McpCrashSetContext(MCP_JOB_GAME_REFERENCE);
@@ -922,6 +936,31 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 			return;
 		}
 		res.body = text.get<std::string>();
+		return;
+	}
+	if(req.path == "/nudge")
+	{
+		// Wakes a waiting session of the named civilization early, as a new diplomacy request does: for a chat
+		// that runs outside the game. Body: {"civ": "<short name, adjective or CIVILIZATION_ type>"}.
+		picojson::value body;
+		if(req.method != "POST" || !picojson::parse(body, req.body).empty() || !body.is<picojson::object>()
+			|| !body.get("civ").is<std::string>())
+		{
+			res.status = 400;
+			res.body = "{\"error\":\"POST {\\\"civ\\\": \\\"<civilization>\\\"}\"}";
+			return;
+		}
+		std::string error;
+		picojson::value result = RunOnGameThread("", MCP_JOB_NUDGE, body.get<picojson::object>(), error);
+		if(!error.empty())
+		{
+			picojson::object o;
+			o["error"] = picojson::value(error);
+			res.status = 503;
+			res.body = picojson::value(o).serialize();
+			return;
+		}
+		res.body = result.serialize();
 		return;
 	}
 	if(req.path != "/mcp")
@@ -1117,14 +1156,71 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 	return JsonRpcError(id, -32601, "method not found: " + method);
 }
 
-// Whether the session's turn is open, a new diplomacy request reached it, or it has no
+// Whether the session's turn is open, a new diplomacy request or a nudge reached it, or it has no
 // civilization to wait for (status then says what to do).
-bool McpBridge::Impl::SessionWakes(const std::string& token, int iDiploSeqAtStart)
+bool McpBridge::Impl::SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart)
 {
 	bool bMyTurn = false, bChatWaiting = false;
 	int iDiploSeq = 0, iSeat = MCP_SEAT_SCREEN;
 	if(!Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat)) return true;
-	return bMyTurn || iDiploSeq != iDiploSeqAtStart || bChatWaiting || iSeat == MCP_SEAT_LOST || iSeat == MCP_SEAT_UNDECIDED;
+	return bMyTurn || iDiploSeq != iDiploSeqAtStart || bChatWaiting || iSeat == MCP_SEAT_LOST || iSeat == MCP_SEAT_UNDECIDED
+		|| NudgeSeq(token) != iNudgeSeqAtStart;
+}
+
+int McpBridge::Impl::NudgeSeq(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::const_iterator it = sessions.find(token);
+	int iSeq = (it == sessions.end()) ? 0 : it->second.nudgeSeq;
+	LeaveCriticalSection(&lock);
+	return iSeq;
+}
+
+namespace
+{
+	// Lower case, letters and digits only: "New Zealand" and CIVILIZATION_NEW_ZEALAND both become newzealand.
+	std::string CivKey(std::string s)
+	{
+		if(s.compare(0, 13, "CIVILIZATION_") == 0) s = s.substr(13);
+		std::string out;
+		for(size_t i = 0; i < s.size(); ++i)
+			if(isalnum((unsigned char)s[i])) out += (char)tolower((unsigned char)s[i]);
+		return out;
+	}
+}
+
+// Game thread: counts an early wake for each living major civilization the name matches, unless one was let
+// through for it less than MCP_NUDGE_COOLDOWN_MS ago.
+picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
+{
+	picojson::object::const_iterator it = args.find("civ");
+	std::string want = CivKey(it != args.end() && it->second.is<std::string>() ? it->second.get<std::string>() : "");
+	picojson::object o;
+	o["civ"] = picojson::value(want);
+	double fMatched = 0, fNudged = 0;
+	DWORD now = GetTickCount();
+	for(int i = 0; i < MAX_MAJOR_CIVS && !want.empty(); ++i)
+	{
+		CvPlayer& kPlayer = GET_PLAYER((PlayerTypes)i);
+		if(!kPlayer.isAlive()) continue;
+		const CvCivilizationInfo* pInfo = GC.getCivilizationInfo(kPlayer.getCivilizationType());
+		if(want != CivKey(kPlayer.getCivilizationShortDescription()) && want != CivKey(kPlayer.getCivilizationAdjective())
+			&& !(pInfo && want == CivKey(pInfo->GetType())))
+			continue;
+		++fMatched;
+		EnterCriticalSection(&lock);
+		std::map<int, DWORD>::const_iterator last = lastNudgeMs.find(i);
+		if(last == lastNudgeMs.end() || now - last->second >= MCP_NUDGE_COOLDOWN_MS)
+		{
+			++nudges[i];
+			lastNudgeMs[i] = now;
+			++fNudged;
+		}
+		LeaveCriticalSection(&lock);
+	}
+	o["matched"] = picojson::value(fMatched);
+	o["woken"] = picojson::value(fNudged);
+	return picojson::value(o);
 }
 
 picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError)
@@ -1149,6 +1245,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		return picojson::value("no bridge handler for " + name);
 	}
 
+	int iNudgeAtStart = 0;
 	if(pTool->waitsForTurn)
 	{
 		double timeout = MCP_WAIT_DEFAULT_SECONDS;
@@ -1161,10 +1258,19 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		bool bMyTurn = false, bChatWaiting = false;
 		int iSeqAtStart = 0, iSeat = 0;
 		Flags(token, bMyTurn, iSeqAtStart, bChatWaiting, iSeat);
-		while(!shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
+		iNudgeAtStart = NudgeSeq(token);
+		bool bClientGone = false;
+		while(!shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
 		{
 			Sleep(250);
+			// A client that went away stops being kept alive, so its seat frees as any idle session's does.
+			if(McpHttpClientGone()) { bClientGone = true; break; }
 			Touch(token);
+		}
+		if(bClientGone)
+		{
+			bIsError = true;
+			return picojson::value("the client closed the connection while waiting");
 		}
 	}
 
@@ -1175,6 +1281,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		bIsError = true;
 		return picojson::value(error);
 	}
+	if(pTool->waitsForTurn && NudgeSeq(token) != iNudgeAtStart && result.is<picojson::object>())
+		result.get<picojson::object>()["woken_by_message"] = picojson::value(true);
 	return result;
 }
 

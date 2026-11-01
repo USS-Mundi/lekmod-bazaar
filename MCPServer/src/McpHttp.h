@@ -28,6 +28,9 @@ struct McpHttpResponse
 
 typedef void (*McpHttpHandler)(const McpHttpRequest& req, McpHttpResponse& res);
 
+// Called from inside a request handler: whether the client has closed the connection it sent the request on.
+bool McpHttpClientGone();
+
 class McpHttpServer
 {
 public:

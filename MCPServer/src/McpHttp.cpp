@@ -11,6 +11,9 @@ namespace
 {
 	const unsigned int NO_SOCKET = (unsigned int)INVALID_SOCKET;
 
+	// The socket of the request the current thread is handling, plus one; 0 outside a handler.
+	const DWORD s_requestSocketTls = TlsAlloc();
+
 	std::string ToLower(const std::string& s)
 	{
 		std::string r(s);
@@ -309,6 +312,7 @@ void McpHttpServer::ServeConnection(unsigned int socket)
 		return;
 	}
 
+	TlsSetValue(s_requestSocketTls, (LPVOID)((UINT_PTR)s + 1));
 	try
 	{
 		m_handler(req, res);
@@ -319,5 +323,24 @@ void McpHttpServer::ServeConnection(unsigned int socket)
 		res.contentType = "application/json";
 		res.body = "{\"error\":\"unhandled exception in request handler\"}";
 	}
+	TlsSetValue(s_requestSocketTls, NULL);
 	WriteResponse(s, res);
+}
+
+bool McpHttpClientGone()
+{
+	UINT_PTR value = (UINT_PTR)TlsGetValue(s_requestSocketTls);
+	if(value == 0) return false;
+	SOCKET s = (SOCKET)(value - 1);
+	fd_set readable;
+	FD_ZERO(&readable);
+	FD_SET(s, &readable);
+	timeval now = {0, 0};
+	int ready = select(0, &readable, NULL, NULL, &now);
+	if(ready == SOCKET_ERROR) return true;
+	if(ready == 0) return false;
+	// Readable while the client waits for our answer: a closed connection reads as 0 bytes or an error.
+	char c;
+	int n = recv(s, &c, 1, MSG_PEEK);
+	return n == 0 || (n == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK);
 }
