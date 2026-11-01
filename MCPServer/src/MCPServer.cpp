@@ -20,6 +20,7 @@ namespace CivHooks
 #include "CvDllPreGame.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
+#include "McpCrashLog.h"
 #include "McpToolSupport.h"
 #include "McpDiplomacy.h"
 #include "McpLua.h"
@@ -53,14 +54,30 @@ static void Check(int result, const char* hook)
 		Log("could not register %s (result %d)", hook, result);
 }
 
+// The pathfinder hooks below are entered from more than one thread; how often two are inside at once is reported here,
+// on the game thread, while the count keeps rising (at most every 30 s).
+static void ReportPathHookOverlaps()
+{
+	static long s_reported = 0;
+	static DWORD s_reportedAt = 0;
+	long overlaps = McpPathHookOverlaps();
+	if(overlaps == s_reported || GetTickCount() - s_reportedAt < 30000) return;
+	s_reported = overlaps;
+	s_reportedAt = GetTickCount();
+	Log("pathfinder hooks: %ld calls so far entered while another thread was inside; at most %ld threads at once", overlaps, McpPathHookMostAtOnce());
+}
+
 static bool BeforeGameUpdate(CvGame* self)
 {
 	McpBridge::Get().Tick();
+	ReportPathHookOverlaps();
 	return false;
 }
 
 static void AfterGameRead(CvGame* self, FDataStream& kStream)
 {
+	McpCrashLogInstall();
+	McpTrail("game loaded");
 	McpBridge::Get().NoteGameLoaded();
 }
 
@@ -128,6 +145,7 @@ static void AfterSetAlly(CvMinorCivAI* self, PlayerTypes eNewAlly)
 	if(s_allyBefore != NO_PLAYER && s_allyBefore != eNewAlly)
 		McpCsNoteDeed(eMinor, s_allyBefore, eNewAlly == NO_PLAYER ? std::string("lost their alliance") : "lost their alliance to " + McpTool::CivName(eNewAlly));
 	if(eNewAlly != NO_PLAYER && eNewAlly != s_allyBefore) McpCsNoteDeed(eMinor, eNewAlly, "became their ally");
+	McpTrail("city-state ally changed", eMinor, eNewAlly);
 	McpCsAfterSetAlly(eMinor, eNewAlly);
 }
 
@@ -209,6 +227,7 @@ static bool BeforeQuestsDone(CvMinorCivAI* self)
 
 static void AfterQuestsDone(CvMinorCivAI* self)
 {
+	McpTrail("city-state quests checked", self->GetPlayer()->GetID());
 	for(int i = 0; i < MAX_MAJOR_CIVS; ++i) NoteQuestsDone(self, (PlayerTypes)i);
 }
 #else
@@ -220,25 +239,37 @@ static bool BeforeQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQue
 
 static void AfterQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQuestTypes)
 {
+	McpTrail("city-state quests checked", self->GetPlayer()->GetID(), eMajor);
 	NoteQuestsDone(self, eMajor);
 }
 #endif
 
 static void AfterMinorTurn(CvMinorCivAI* self)
 {
+	McpTrail("city-state turn: plugin begins", self->GetPlayer()->GetID());
 	McpCsAfterMinorTurn(self->GetPlayer()->GetID());
+	McpTrail("city-state turn: plugin done", self->GetPlayer()->GetID());
 }
+
+// Counts the pathfinder hooks' calls that overlap across threads, for the overlap report and a crash report.
+struct PathHookCall
+{
+	PathHookCall() { McpPathHookEnter(); }
+	~PathHookCall() { McpPathHookLeave(); }
+};
 
 // A switched-on city-state's units may enter its ally's land (from the influence step that allows it). Both border
 // checks the pathfinder uses answer alike, or paths and moves disagree. The first test keeps the hot path cheap.
 static bool ReplaceCanEnterTerritory(CivHooks::CvUnit_canEnterTerritory::Original original, const CvUnit* self, TeamTypes eTeam, bool bIgnoreRightOfPassage, bool bIsCity, bool bIsDeclareWarMove)
 {
+	PathHookCall call;
 	if(McpCsAnySwitchedOn() && McpCsIsSwitchedOn(self->getOwner()) && McpCsMayEnter(self->getOwner(), eTeam)) return true;
 	return original(self, eTeam, bIgnoreRightOfPassage, bIsCity, bIsDeclareWarMove);
 }
 
 static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam::Original original, const CvTeam* self, TeamTypes eTeam)
 {
+	PathHookCall call;
 	if(McpCsAnySwitchedOn() && McpCsTeamSwitchedOn(eTeam) && McpCsTeamMayEnter(eTeam, self->GetID())) return true;
 	return original(self, eTeam);
 }
@@ -287,6 +318,7 @@ static void DealResolved(int fromPlayer, int toPlayer, int actingPlayer, bool ac
 PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin)
 {
 	s_host = host;
+	McpCrashLogInstall();
 	// VC++ 2008 doesn't guard a function's static, and the game and UI threads could both build it on first use.
 	McpBridge::Get();
 	plugin->name = "MCP Server for Bazaar";
@@ -330,6 +362,7 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_NOTIFICATION_ADDED, (void*)static_cast<CivNotificationAddedFn>(&NotificationAdded)), "NotificationAdded");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_DEAL_RESOLVED, (void*)static_cast<CivDealResolvedFn>(&DealResolved)), "DealResolved");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_UNIT_ORDERS_CANCELLED, (void*)static_cast<CivUnitOrdersCancelledFn>(&UnitOrdersCancelled)), "UnitOrdersCancelled");
+	Log("if the game crashes, a report and a dump go to Logs\\MCPServer-crash-<time>.txt and .dmp");
 	return true;
 }
 

@@ -107,6 +107,14 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpCrashLog.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpCrashLog.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpCulture.cpp"
 			>
 		</File>
