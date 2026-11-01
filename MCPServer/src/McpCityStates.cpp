@@ -21,6 +21,8 @@ namespace
 	const size_t MCP_CS_HISTORY = 10; // turns of the patron's influence kept for the rising and falling notes
 	const size_t MCP_CS_TALK_KEPT = 40; // lines of each city-state's conversation with each civ
 	const size_t MCP_CS_TALK_SHOWN = 20; // ...of which its player sees the latest in status
+	const size_t MCP_CS_DEEDS_KEPT = 30; // deeds of each civ toward each city-state
+	const size_t MCP_CS_DEEDS_SHOWN = 10;
 
 	struct CsState
 	{
@@ -34,6 +36,14 @@ namespace
 
 	std::map<int, CsState> s_states;
 	std::map<std::pair<int, int>, std::vector<std::string> > s_talk; // (city-state, civ) -> lines, oldest first
+	std::map<std::pair<int, int>, std::vector<std::string> > s_deeds; // (city-state, civ) -> deeds, oldest first
+
+	JArr Latest(const std::vector<std::string>& lines, size_t n)
+	{
+		JArr out;
+		for(size_t i = lines.size() > n ? lines.size() - n : 0; i < lines.size(); ++i) out.push_back(J(lines[i]));
+		return out;
+	}
 	std::vector<McpCsTier> s_tiers = McpCsDefaultTiers();
 	std::vector<McpCsDisposition> s_dispositions = McpCsDefaultDispositions();
 	McpCsSettings s_settings = McpCsDefaultSettings();
@@ -347,6 +357,20 @@ std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
 	return it == s_talk.end() ? std::vector<std::string>() : it->second;
 }
 
+void McpCsNoteDeed(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& what)
+{
+	if(eMinor < MAX_MAJOR_CIVS || eCiv == NO_PLAYER || eCiv >= MAX_MAJOR_CIVS) return;
+	std::vector<std::string>& lines = s_deeds[std::make_pair((int)eMinor, (int)eCiv)];
+	lines.push_back(McpFormat("turn %d: ", GC.getGame().getGameTurn()) + what);
+	if(lines.size() > MCP_CS_DEEDS_KEPT) lines.erase(lines.begin());
+}
+
+std::vector<std::string> McpCsDeeds(PlayerTypes eMinor, PlayerTypes eCiv)
+{
+	std::map<std::pair<int, int>, std::vector<std::string> >::const_iterator it = s_deeds.find(std::make_pair((int)eMinor, (int)eCiv));
+	return it == s_deeds.end() ? std::vector<std::string>() : it->second;
+}
+
 bool McpIsCityStateSeat(PlayerTypes e)
 {
 	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS || CvPreGame::slotStatus(e) != SS_TAKEN || !GET_PLAYER(e).isMinorCiv()) return false;
@@ -403,12 +427,14 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 	o["your_sight_on_their_map"] = J(tier && tier->revealSight);
 	o["you_may_enter_their_land"] = J(tier && tier->enterAllyLand);
 	std::vector<std::string> talk = McpCsConversation(eMinor, ePatron);
-	if(!talk.empty())
+	if(!talk.empty()) o["conversation_with_your_ally"] = JVal(Latest(talk, MCP_CS_TALK_SHOWN));
+	JObj deeds;
+	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
 	{
-		JArr lines;
-		for(size_t i = talk.size() > MCP_CS_TALK_SHOWN ? talk.size() - MCP_CS_TALK_SHOWN : 0; i < talk.size(); ++i) lines.push_back(J(talk[i]));
-		o["conversation_with_your_ally"] = JVal(lines);
+		std::vector<std::string> d = McpCsDeeds(eMinor, (PlayerTypes)i);
+		if(!d.empty()) deeds[CivName((PlayerTypes)i)] = JVal(Latest(d, MCP_CS_DEEDS_SHOWN));
 	}
+	if(!deeds.empty()) o["what_each_civ_did_for_you"] = JVal(deeds);
 	o["what_you_play"] = J("every unit and your city's builds; the game's rules decide your wars, peace, research and policies, and your alliance follows influence as always");
 	return JVal(o);
 }
@@ -417,6 +443,7 @@ void McpCsResetForNewGame()
 {
 	s_states.clear();
 	s_talk.clear();
+	s_deeds.clear();
 	McpCsLoadSettings();
 	// Switching on is not kept in a save: a city-state seated when the game was saved goes back to the game's AI,
 	// or the game would wait on a turn no model is there to play.

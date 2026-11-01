@@ -185,6 +185,13 @@ namespace
 			std::string playedBy = McpCsPlayedBy(minor.GetID());
 			o["played_by"] = J(playedBy.empty() ? std::string("the game's AI, until a model takes its seat") : playedBy);
 		}
+		std::vector<std::string> deeds = McpCsDeeds(minor.GetID(), e);
+		if(!deeds.empty())
+		{
+			JArr lines;
+			for(size_t i = deeds.size() > 10 ? deeds.size() - 10 : 0; i < deeds.size(); ++i) lines.push_back(J(deeds[i]));
+			o["what_you_did_for_them"] = JVal(lines);
+		}
 		if(ePatron == e)
 		{
 			const McpCsTier* tier = McpCsCurrentTier(minor.GetID());
@@ -260,6 +267,8 @@ MCP_TOOL(ToolCityState)
 	o["city_states"] = JVal(all);
 	return JVal(o);
 }
+
+const char* McpMinorQuestName(MinorCivQuestTypes e) { return QuestName(e); }
 
 MCP_TOOL(ToolTellCityState)
 {

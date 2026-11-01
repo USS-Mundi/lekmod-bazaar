@@ -29,6 +29,12 @@ int McpCsUnitsOut(PlayerTypes eMinor);   // its military units outside its own l
 void McpCsNoteLine(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& line);
 std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv);
 
+// What each civ has done for and to each city-state, from the start of the game (since it was loaded: not kept in a
+// save yet), the last 30 per civ, each line "turn N: what". Recorded for every city-state, switched on or not.
+void McpCsNoteDeed(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& what);
+std::vector<std::string> McpCsDeeds(PlayerTypes eMinor, PlayerTypes eCiv);
+const char* McpMinorQuestName(MinorCivQuestTypes e); // McpMinorCivs.cpp
+
 // A switched-on city-state a model has taken (or one switched off during its own turn, until that turn ends).
 bool McpIsCityStateSeat(PlayerTypes e);
 // "" when a city-state's player may use the tool; otherwise why not.

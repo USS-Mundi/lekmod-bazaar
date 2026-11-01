@@ -20,6 +20,7 @@ namespace CivHooks
 #include "CvDllPreGame.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
+#include "McpToolSupport.h"
 #include "McpDiplomacy.h"
 #include "McpLua.h"
 #include "McpMapDraw.h"
@@ -113,9 +114,77 @@ static bool ReplaceIsDealWithHumanAcceptable(CivHooks::CvDealAI_IsDealWithHumanA
 	return original(self, pDeal, McpEqualizingWith(eOtherPlayer), iTotalValueToMe, iValueImOffering, iValueTheyreOffering, iAmountOverWeWillRequest, iAmountUnderWeWillOffer, bCantMatchOffer);
 }
 
+// What each civ does for and to a city-state is recorded for whoever plays it later.
+static PlayerTypes s_allyBefore = NO_PLAYER;
+static bool BeforeSetAlly(CvMinorCivAI* self, PlayerTypes)
+{
+	s_allyBefore = self->GetAlly();
+	return false;
+}
+
 static void AfterSetAlly(CvMinorCivAI* self, PlayerTypes eNewAlly)
 {
-	McpCsAfterSetAlly(self->GetPlayer()->GetID(), eNewAlly);
+	PlayerTypes eMinor = self->GetPlayer()->GetID();
+	if(s_allyBefore != NO_PLAYER && s_allyBefore != eNewAlly)
+		McpCsNoteDeed(eMinor, s_allyBefore, eNewAlly == NO_PLAYER ? std::string("lost their alliance") : "lost their alliance to " + McpTool::CivName(eNewAlly));
+	if(eNewAlly != NO_PLAYER && eNewAlly != s_allyBefore) McpCsNoteDeed(eMinor, eNewAlly, "became their ally");
+	McpCsAfterSetAlly(eMinor, eNewAlly);
+}
+
+static void AfterGoldGift(CvMinorCivAI* self, PlayerTypes eMajor, int iGold)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("gave them %d gold", iGold));
+}
+
+static void AfterUnitGift(CvMinorCivAI* self, PlayerTypes eMajor, CvUnit* pUnit, bool)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("gave them a unit") + (pUnit ? std::string(" (") + McpTool::UnitTypeName(pUnit->getUnitType()) + ")" : std::string()));
+}
+
+static void AfterImprovementGift(CvMinorCivAI* self, PlayerTypes eMajor, int iX, int iY)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("built an improvement for them at (%d,%d)", iX, iY));
+}
+
+static void AfterBullyGold(CvMinorCivAI* self, PlayerTypes eMajor, int iGold)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("took %d gold from them by threat", iGold));
+}
+
+static void AfterBullyUnit(CvMinorCivAI* self, PlayerTypes eMajor, UnitTypes eUnit)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("took a ") + McpTool::UnitTypeName(eUnit) + " from them by threat");
+}
+
+static void AfterProtection(CvMinorCivAI* self, PlayerTypes eMajor, bool bProtect, bool)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, bProtect ? "pledged to protect them" : "withdrew their pledge of protection");
+}
+
+static void AfterWarOnMinor(CvMinorCivAI* self, TeamTypes eTeam)
+{
+	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+		if(GET_PLAYER((PlayerTypes)i).isAlive() && GET_PLAYER((PlayerTypes)i).getTeam() == eTeam) McpCsNoteDeed(self->GetPlayer()->GetID(), (PlayerTypes)i, "declared war on them");
+}
+
+static void AfterBuyout(CvMinorCivAI* self, PlayerTypes eMajor, bool)
+{
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, "bought them out");
+}
+
+// A quest finished during DoCompletedQuestsForPlayer is one active before it and gone after it.
+static bool s_questsBefore[NUM_MINOR_CIV_QUEST_TYPES];
+static bool BeforeQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQuestTypes)
+{
+	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q) s_questsBefore[q] = self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q);
+	return false;
+}
+
+static void AfterQuestsDone(CvMinorCivAI* self, PlayerTypes eMajor, MinorCivQuestTypes)
+{
+	for(int q = 0; q < NUM_MINOR_CIV_QUEST_TYPES; ++q)
+		if(s_questsBefore[q] && !self->IsActiveQuestForPlayer(eMajor, (MinorCivQuestTypes)q))
+			McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("completed their quest: ") + McpMinorQuestName((MinorCivQuestTypes)q));
 }
 
 static void AfterMinorTurn(CvMinorCivAI* self)
@@ -195,7 +264,18 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &AfterEqualizeDeal), "after CvDealAI::DoEqualizeDealWithHuman");
 	Check(CivRegisterReplace<CivHooks::CvDealAI_IsDealWithHumanAcceptable>(host, &ReplaceIsDealWithHumanAcceptable), "replace CvDealAI::IsDealWithHumanAcceptable");
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
+	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &AfterGoldGift), "after CvMinorCivAI::DoGoldGiftFromMajor");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &AfterUnitGift), "after CvMinorCivAI::DoUnitGiftFromMajor");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTileImprovementGiftFromMajor>(host, &AfterImprovementGift), "after CvMinorCivAI::DoTileImprovementGiftFromMajor");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTeamDeclaredWarOnMe>(host, &AfterWarOnMinor), "after CvMinorCivAI::DoTeamDeclaredWarOnMe");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
+	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuestsForPlayer");
+	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuestsForPlayer");
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
 	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
 	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
