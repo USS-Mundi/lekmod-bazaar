@@ -17,6 +17,8 @@ using namespace McpTool;
 namespace
 {
 	const size_t MCP_CS_HISTORY = 10; // turns of the patron's influence kept for the rising and falling notes
+	const size_t MCP_CS_TALK_KEPT = 40; // lines of each city-state's conversation with each civ
+	const size_t MCP_CS_TALK_SHOWN = 20; // ...of which its player sees the latest in status
 
 	struct CsState
 	{
@@ -29,6 +31,7 @@ namespace
 	};
 
 	std::map<int, CsState> s_states;
+	std::map<std::pair<int, int>, std::vector<std::string> > s_talk; // (city-state, civ) -> lines, oldest first
 	std::vector<McpCsTier> s_tiers = McpCsDefaultTiers();
 	std::vector<McpCsDisposition> s_dispositions = McpCsDefaultDispositions();
 	McpCsSettings s_settings = McpCsDefaultSettings();
@@ -288,6 +291,19 @@ void McpCsTick()
 	}
 }
 
+void McpCsNoteLine(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& line)
+{
+	std::vector<std::string>& lines = s_talk[std::make_pair((int)eMinor, (int)eCiv)];
+	lines.push_back(line);
+	if(lines.size() > MCP_CS_TALK_KEPT) lines.erase(lines.begin());
+}
+
+std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
+{
+	std::map<std::pair<int, int>, std::vector<std::string> >::const_iterator it = s_talk.find(std::make_pair((int)eMinor, (int)eCiv));
+	return it == s_talk.end() ? std::vector<std::string>() : it->second;
+}
+
 bool McpIsCityStateSeat(PlayerTypes e)
 {
 	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS || CvPreGame::slotStatus(e) != SS_TAKEN || !GET_PLAYER(e).isMinorCiv()) return false;
@@ -343,6 +359,13 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 	o["units_out_now"] = J(McpCsUnitsOut(eMinor));
 	o["your_sight_on_their_map"] = J(tier && tier->revealSight);
 	o["you_may_enter_their_land"] = J(tier && tier->enterAllyLand);
+	std::vector<std::string> talk = McpCsConversation(eMinor, ePatron);
+	if(!talk.empty())
+	{
+		JArr lines;
+		for(size_t i = talk.size() > MCP_CS_TALK_SHOWN ? talk.size() - MCP_CS_TALK_SHOWN : 0; i < talk.size(); ++i) lines.push_back(J(talk[i]));
+		o["conversation_with_your_ally"] = JVal(lines);
+	}
 	o["what_you_play"] = J("every unit and your city's builds; the game's rules decide your wars, peace, research and policies, and your alliance follows influence as always");
 	return JVal(o);
 }
@@ -350,6 +373,7 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 void McpCsResetForNewGame()
 {
 	s_states.clear();
+	s_talk.clear();
 	McpCsLoadSettings();
 	// Switching on is not kept in a save: a city-state seated when the game was saved goes back to the game's AI,
 	// or the game would wait on a turn no model is there to play.

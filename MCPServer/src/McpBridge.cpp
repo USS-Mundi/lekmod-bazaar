@@ -10,6 +10,7 @@
 #include "McpPopups.h"
 #include "McpSeat.h"
 #include "McpCityStates.h"
+#include "CvMinorCivAI.h"
 #include "McpDiplomacy.h"
 #include "McpGameReference.h"
 #include "McpLogText.h"
@@ -137,6 +138,7 @@ struct McpBridge::Impl
 	unsigned int gameSeed;
 	volatile bool gameLoaded;
 	std::map<int, std::vector<std::string> > chat;         // per seat: the human's messages no status has delivered yet
+	std::map<int, std::vector<std::string> > csMessages;   // per seat: its city-states' words no status has delivered yet
 	std::map<int, int> nudges;                             // per player: how many early wakes POST /nudge has asked for
 	std::map<int, DWORD> lastNudgeMs;                      // per player: when the last one was let through
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
@@ -164,6 +166,7 @@ struct McpBridge::Impl
 	void Append(int player, const std::string& who, const char* category, const std::string& text);
 	void DrainPopups();
 	void DrainChat();
+	void DrainCityStateChat(PlayerTypes eMinor, const std::string& text);
 	void ResetForNewGame();
 	Session* CurrentSession(); // under lock
 
@@ -421,6 +424,44 @@ void McpBridge::ReplyChat(const std::string& text)
 	LeaveCriticalSection(&m_pImpl->lock);
 }
 
+void McpBridge::DeliverChat(int player, const std::string& text)
+{
+	EnterCriticalSection(&m_pImpl->lock);
+	std::vector<std::string>& waiting = m_pImpl->chat[player];
+	if(waiting.size() >= MCP_MAX_CHAT_WAITING) waiting.erase(waiting.begin());
+	waiting.push_back(McpFormat("turn %d: ", GC.getGame().getGameTurn()) + text);
+	LeaveCriticalSection(&m_pImpl->lock);
+}
+
+void McpBridge::ReplyChatFromCityState(const std::string& cityState, const std::string& text)
+{
+	PlayerTypes eHuman = GC.getGame().getActivePlayer();
+	m_pImpl->Append((int)eHuman, "", MCP_LOG_CHAT, cityState + ": " + text);
+	EnterCriticalSection(&m_pImpl->lock);
+	++m_pImpl->unreadReplies;
+	++m_pImpl->totalReplies;
+	LeaveCriticalSection(&m_pImpl->lock);
+}
+
+void McpBridge::QueueCityStateMessage(int toPlayer, const std::string& text)
+{
+	EnterCriticalSection(&m_pImpl->lock);
+	std::vector<std::string>& waiting = m_pImpl->csMessages[toPlayer];
+	if(waiting.size() >= MCP_MAX_CHAT_WAITING) waiting.erase(waiting.begin());
+	waiting.push_back(text);
+	LeaveCriticalSection(&m_pImpl->lock);
+}
+
+std::vector<std::string> McpBridge::TakeCityStateMessages(int player)
+{
+	std::vector<std::string> out;
+	EnterCriticalSection(&m_pImpl->lock);
+	std::map<int, std::vector<std::string> >::iterator it = m_pImpl->csMessages.find(player);
+	if(it != m_pImpl->csMessages.end()) out.swap(it->second);
+	LeaveCriticalSection(&m_pImpl->lock);
+	return out;
+}
+
 void McpBridge::NotePopup(int player, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text, bool bOnScreen)
 {
 	McpPendingPopup p;
@@ -591,7 +632,8 @@ void McpBridge::Impl::UpdateSessions()
 		PlayerTypes ePlayer = McpPlayerOf(s.info);
 		s.myTurn = ePlayer != NO_PLAYER && McpIsPlayerTurn(GET_PLAYER(ePlayer));
 		std::map<int, std::vector<std::string> >::const_iterator c = chat.find((int)ePlayer);
-		s.chatWaiting = c != chat.end() && !c->second.empty();
+		std::map<int, std::vector<std::string> >::const_iterator m = csMessages.find((int)ePlayer);
+		s.chatWaiting = (c != chat.end() && !c->second.empty()) || (m != csMessages.end() && !m->second.empty());
 		std::map<int, int>::const_iterator n = nudges.find((int)ePlayer);
 		s.nudgeSeq = (n == nudges.end()) ? 0 : n->second;
 		int iRequests = ePlayer != NO_PLAYER ? McpCountDiploRequestsFor(ePlayer) : 0;
@@ -725,6 +767,11 @@ void McpBridge::Impl::DrainChat()
 	for(size_t i = 0; i < pending.size(); ++i)
 	{
 		PlayerTypes e = (PlayerTypes)pending[i].first;
+		if(e >= MAX_MAJOR_CIVS && e < MAX_CIV_PLAYERS)
+		{
+			DrainCityStateChat(e, pending[i].second);
+			continue;
+		}
 		if(e < 0 || e >= MAX_MAJOR_CIVS || !McpIsSeat(e) || !McpOnScreenTeam(e) || !GET_PLAYER(e).isAlive())
 		{
 			Append(-1, "", MCP_LOG_CHAT, "Not sent, that seat is no longer a teammate: " + pending[i].second);
@@ -741,6 +788,25 @@ void McpBridge::Impl::DrainChat()
 	}
 }
 
+// The human writes to a city-state from the log window: only its ally may, and the first message switches it on.
+void McpBridge::Impl::DrainCityStateChat(PlayerTypes eMinor, const std::string& text)
+{
+	PlayerTypes eHuman = GC.getGame().getActivePlayer();
+	CvPlayer& minor = GET_PLAYER(eMinor);
+	std::string err;
+	if(eHuman == NO_PLAYER || !minor.isAlive() || !minor.isMinorCiv() || minor.GetMinorCivAI()->GetAlly() != eHuman || !McpCsSwitchOn(eMinor, eHuman, err))
+	{
+		Append((int)eHuman, "", MCP_LOG_CHAT, "Not sent, you are not their ally now: " + text);
+		return;
+	}
+	std::string name = McpTool::CivName(eMinor);
+	Append((int)eHuman, "", MCP_LOG_CHAT, "You to " + name + ": " + text);
+	McpCsNoteLine(eMinor, eHuman, McpFormat("turn %d, %s: ", GC.getGame().getGameTurn(), McpTool::CivName(eHuman).c_str()) + text);
+	McpSession s;
+	if(!McpBridge::Get().SessionForSeat((int)eMinor, s)) Append((int)eHuman, "", MCP_LOG_CHAT, "(no model plays " + name + " yet; it reads this when one takes its seat)");
+	McpBridge::Get().DeliverChat((int)eMinor, text);
+}
+
 // Keeps pendingPopups: the UI may already have reported the first popups of the game just
 // started or loaded. Sessions keep their names but lose their seats: the slots belong to that game.
 void McpBridge::Impl::ResetForNewGame()
@@ -752,6 +818,7 @@ void McpBridge::Impl::ResetForNewGame()
 	popupSeq = 0;
 	dialogsToClose.clear();
 	chat.clear();
+	csMessages.clear();
 	pendingChat.clear();
 	unreadReplies = 0;
 	testingMode = false;

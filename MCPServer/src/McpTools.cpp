@@ -197,7 +197,14 @@ MCP_TOOL(ToolStatus)
 	{
 		JArr messages;
 		for(size_t i = 0; i < chat.size(); ++i) messages.push_back(J(chat[i]));
-		o["messages_from_your_teammate"] = JVal(messages);
+		o[me->isMinorCiv() ? "messages_from_your_ally" : "messages_from_your_teammate"] = JVal(messages);
+	}
+	std::vector<std::string> fromCityStates = McpBridge::Get().TakeCityStateMessages((int)me->GetID());
+	if(!fromCityStates.empty())
+	{
+		JArr messages;
+		for(size_t i = 0; i < fromCityStates.size(); ++i) messages.push_back(J(fromCityStates[i]));
+		o["messages_from_city_states"] = JVal(messages);
 	}
 	if(McpSeatOnScreen())
 	{
@@ -1108,6 +1115,20 @@ MCP_TOOL(ToolChat)
 	if(!me) return JVal();
 	std::string text = ArgStr(args, "text");
 	if(text.empty()) { err = "text is required"; return JVal(); }
+	if(me->isMinorCiv())
+	{
+		// A city-state talks to its ally only: the human on screen reads it in the log window, a seat in its status.
+		PlayerTypes eAlly = McpCsPatron(me->GetID());
+		if(eAlly == NO_PLAYER) { err = "you have no ally to talk to now"; return JVal(); }
+		std::string line = McpFormat("turn %d, %s: ", GC.getGame().getGameTurn(), CivName(me->GetID()).c_str()) + text;
+		McpCsNoteLine(me->GetID(), eAlly, line);
+		if(eAlly == GC.getGame().getActivePlayer() && !McpIsSeat(eAlly)) McpBridge::Get().ReplyChatFromCityState(CivName(me->GetID()), text);
+		else McpBridge::Get().QueueCityStateMessage((int)eAlly, line);
+		JObj o;
+		o["ok"] = J(true);
+		o["to"] = J(CivName(eAlly));
+		return JVal(o);
+	}
 	if(McpSeatOnScreen() || !McpOnScreenTeam(me->GetID())) { err = "chat is for a seat with a human teammate; you have none"; return JVal(); }
 	McpBridge::Get().ReplyChat(text);
 	JObj o;
@@ -1311,6 +1332,8 @@ namespace
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}}}", ToolCityState, LOG_NONE, false },
 		{ "city_state_action", "Act toward a city-state: gift_gold (amount), gift_unit (unit_id), bully_gold, bully_worker, pledge_protection, revoke_protection, buyout, make_peace, switch_on (their ally only: ask for their active help, so a model may play them; costs influence each turn), switch_off.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"amount\":{\"type\":\"integer\"},\"unit_id\":{\"type\":\"integer\"}},\"required\":[\"civ\",\"action\"]}", ToolCityStateAction, LOG_DIPLOMACY, false },
+		{ "tell_city_state", "Write to a city-state you are the ally of. The first message asks for its active help and switches it on (as city_state_action switch_on); while it is on, a model may play it and answer you, its words arriving in your status as messages_from_city_states.",
+		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}},\"required\":[\"civ\",\"text\"]}", ToolTellCityState, LOG_DIPLOMACY, false },
 		{ "choose_ideology", "Pick your ideology (Freedom, Order or Autocracy) when the game allows it; without ideology it lists them and whether you can choose now.",
 		  "{\"type\":\"object\",\"properties\":{\"ideology\":{\"type\":\"string\"}}}", ToolChooseIdeology, LOG_EMPIRE, false },
 		{ "switch_ideology", "Give in to public opinion and switch to the ideology your people prefer (costs turns of anarchy).",

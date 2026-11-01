@@ -149,6 +149,13 @@ public:
 	// human's log keeps every line.
 	std::vector<std::string> TakeChat(int player);
 	void ReplyChat(const std::string& text);
+	// City-states and their allies. Game thread. A seat's message to the city-state it leads is held like the
+	// human's; a city-state's word to its ally lands in the human's log, or is held for an ally's seat until its
+	// status takes it (both wake a waiting model).
+	void DeliverChat(int player, const std::string& text);
+	void ReplyChatFromCityState(const std::string& cityState, const std::string& text);
+	void QueueCityStateMessage(int toPlayer, const std::string& text);
+	std::vector<std::string> TakeCityStateMessages(int player);
 
 	// Game thread. Popups shown to one player.
 	std::vector<McpPopup> GetPopupsSince(int player, int iTurn);

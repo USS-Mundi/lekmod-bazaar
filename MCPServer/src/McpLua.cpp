@@ -5,6 +5,7 @@
 #include "McpSeat.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
+#include "CvMinorCivAI.h"
 #include "CvGlobals.h"
 
 namespace
@@ -103,10 +104,18 @@ namespace
 	int lGetLLMTeammates(lua_State* L)
 	{
 		std::vector<PlayerTypes> seats = McpTeammateSeats();
+		// City-states the human leads join the list: writing to one asks for its active help.
+		PlayerTypes eHuman = GC.getGame().getActivePlayer();
+		size_t nSeats = seats.size();
+		for(int m = MAX_MAJOR_CIVS; eHuman != NO_PLAYER && m < MAX_CIV_PLAYERS; ++m)
+		{
+			CvPlayer& minor = GET_PLAYER((PlayerTypes)m);
+			if(minor.isAlive() && minor.isMinorCiv() && minor.GetMinorCivAI()->GetAlly() == eHuman) seats.push_back((PlayerTypes)m);
+		}
 		lua_createtable(L, (int)seats.size(), 0);
 		for(size_t i = 0; i < seats.size(); ++i)
 		{
-			std::string name = McpSeatLabel(seats[i]);
+			std::string name = i < nSeats ? McpSeatLabel(seats[i]) : std::string(GET_PLAYER(seats[i]).getCivilizationShortDescription()) + " (city-state)";
 			if(name.empty()) name = GET_PLAYER(seats[i]).getCivilizationShortDescription();
 			lua_createtable(L, 0, 2);
 			lua_pushinteger(L, (int)seats[i]);

@@ -24,6 +24,11 @@ const McpCsTier* McpCsCurrentTier(PlayerTypes eMinor);
 int McpCsSendCapFor(PlayerTypes eMinor);
 int McpCsUnitsOut(PlayerTypes eMinor);   // its military units outside its own land
 
+// The conversation between a city-state and a civ, kept for the whole game (the last 40 lines), so a city-state that
+// is switched on again, or whose alliance comes back, picks up where it left off.
+void McpCsNoteLine(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& line);
+std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv);
+
 // A switched-on city-state a model has taken (or one switched off during its own turn, until that turn ends).
 bool McpIsCityStateSeat(PlayerTypes e);
 // "" when a city-state's player may use the tool; otherwise why not.

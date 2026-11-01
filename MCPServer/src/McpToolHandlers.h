@@ -89,6 +89,7 @@ MCP_TOOL(ToolStealTech);
 // McpMinorCivs.cpp
 MCP_TOOL(ToolCityState);
 MCP_TOOL(ToolCityStateAction);
+MCP_TOOL(ToolTellCityState);
 
 // McpCulture.cpp
 MCP_TOOL(ToolChooseIdeology);

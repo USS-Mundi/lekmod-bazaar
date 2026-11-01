@@ -2,6 +2,9 @@
 #include "McpToolSupport.h"
 #include "McpToolHandlers.h"
 #include "McpCityStates.h"
+#include "McpBridge.h"
+#include "McpLogText.h"
+#include "McpSeat.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -255,6 +258,26 @@ MCP_TOOL(ToolCityState)
 	}
 	JObj o;
 	o["city_states"] = JVal(all);
+	return JVal(o);
+}
+
+MCP_TOOL(ToolTellCityState)
+{
+	if(!RequireIdentity(err)) return JVal();
+	CvPlayer* me = Me(err);
+	if(!me) return JVal();
+	CvPlayer* minor = MinorFromArgs(me, args, err);
+	if(!minor) return JVal();
+	std::string text = ArgStr(args, "text");
+	if(text.empty()) { err = "text is required"; return JVal(); }
+	if(MinorAI(*minor)->GetAlly() != me->GetID()) { err = "only their ally can talk to them"; return JVal(); }
+	if(!McpCsSwitchOn(minor->GetID(), me->GetID(), err)) return JVal();
+	McpCsNoteLine(minor->GetID(), me->GetID(), McpFormat("turn %d, %s: ", GC.getGame().getGameTurn(), CivName(me->GetID()).c_str()) + text);
+	McpBridge::Get().DeliverChat((int)minor->GetID(), CivName(me->GetID()) + ": " + text);
+	JObj o;
+	o["ok"] = J(true);
+	std::string playedBy = McpCsPlayedBy(minor->GetID());
+	o["played_by"] = J(playedBy.empty() ? std::string("the game's AI for now: it reads this when a model takes its seat") : playedBy);
 	return JVal(o);
 }
 
