@@ -1176,6 +1176,8 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		    "your provider (Claude, ChatGPT, Gemini...), model (Opus, Fable, GPT...) and version (5.5...); actions are refused until you do, "
 		    "and you must do it again after every reconnect. Then call wait_for_my_turn until it is your turn, "
 		    "use the query tools, act, write your reasoning with log, and finish with end_turn and a short summary of what you did. "
+		    "Once your turn is over, send the next one with plan_turn while the others play: when it comes, wait_for_my_turn shows the "
+		    "plan with the briefing and what changed since you made it, and run_plan carries out what you keep in one call. "
 		    "Your memory of Civilization V's rules can be wrong, and mods change them. The other tools already show what "
 		    "you can build or research now; when a longer plan depends on a rule you are not sure of, such as what a far "
 		    "tech needs or what a unit upgrades into, check it with lookup instead of guessing. "
