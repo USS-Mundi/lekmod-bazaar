@@ -1,5 +1,6 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpTools.h"
+#include "McpTurnPlan.h"
 #include "McpToolSupport.h"
 #include "McpRules.h"
 #include "McpSeat.h"
@@ -975,7 +976,8 @@ MCP_TOOL(ToolEndTurn)
 	JObj o;
 	o["ok"] = J(true);
 	o["ended_turn"] = J(g.getGameTurn());
-	o["next"] = J("call wait_for_my_turn, then briefing; the turn comes back to you early if a unit finishes a queued move with moves to spare");
+	o["next"] = J("plan your next turn with plan_turn while the others play, then call wait_for_my_turn; the turn comes back to you early if a unit finishes a queued move with moves to spare");
+	McpNoteTurnEnded(me);
 	return JVal(o);
 }
 
@@ -1210,8 +1212,14 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. A wait over about 55 seconds needs the MCP client's tool timeout raised, or the client gives up first.",
-		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolStatus, LOG_NONE, true },
+		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When it is your turn, the result also carries the briefing, and, if you sent a plan with plan_turn, that plan and what changed in what you can see since you made it. A wait over about 55 seconds needs the MCP client's tool timeout raised, or the client gives up first.",
+		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
+		{ MCP_TOOL_PLAN_TURN,
+		  "Send your next turn as a plan, any time after you end a turn, so the thinking happens while others play. orders: the orders you will give, in order, each {tool, args} exactly as you would call them; end with end_turn to finish the turn with them. When your turn comes, wait_for_my_turn shows the plan and what changed since you made it, and run_plan carries it out in one call. A new plan replaces the last. note: anything you want to remember about it.",
+		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\"]}", ToolPlanTurn, LOG_NONE, false },
+		{ MCP_TOOL_RUN_PLAN,
+		  "Carry out your plan for this turn in one call: unread game messages are acknowledged first, then each order runs in turn as if you had called it, and end_turn runs only if nothing before it failed. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of wait_for_my_turn asks for it.",
+		  "{\"type\":\"object\",\"properties\":{\"drop\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}},\"add\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"set_aside\":{\"type\":\"boolean\"},\"why\":{\"type\":\"object\"}}}", NULL, LOG_NONE, false },
 		{ "briefing",
 		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
 		  "{\"type\":\"object\",\"properties\":{\"since_turn\":{\"type\":\"integer\"}}}", ToolBriefing, LOG_NONE, false },

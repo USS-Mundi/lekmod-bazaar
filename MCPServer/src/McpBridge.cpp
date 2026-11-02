@@ -10,6 +10,8 @@
 #include "McpPopups.h"
 #include "McpSeat.h"
 #include "McpCityStates.h"
+#include "McpPlanJournal.h"
+#include "McpTurnPlan.h"
 #include "CvMinorCivAI.h"
 #include "McpDiplomacy.h"
 #include "McpGameReference.h"
@@ -189,6 +191,7 @@ struct McpBridge::Impl
 	picojson::value HandleRpc(const picojson::value& request, const std::string& token, bool& bIsNotification);
 	picojson::value CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError);
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
+	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunOnGameThread(const std::string& token, const std::string& tool, const picojson::object& args, std::string& error);
 	bool SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart);
 	int NudgeSeq(const std::string& token); // the session's nudge count; 0 when it no longer exists
@@ -856,6 +859,7 @@ void McpBridge::Impl::ResetForNewGame()
 	McpResetDiploRequests();
 	McpResetBriefing();
 	McpCsResetForNewGame();
+	McpTurnPlanReset();
 }
 
 namespace
@@ -893,6 +897,22 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 		{
 			McpDiagLog("the game reference threw an exception");
 			pJob->error = "the game reference could not be built";
+		}
+		McpCrashSetContext("");
+		return false;
+	}
+
+	if(pJob->tool == MCP_JOB_PLAN_TAKE)
+	{
+		McpCrashSetContext(MCP_JOB_PLAN_TAKE);
+		try
+		{
+			pJob->result = McpTakePlan(pJob->args, pJob->error);
+		}
+		catch(...)
+		{
+			McpDiagLog("taking a plan threw an exception");
+			pJob->error = "the plan could not be read; play this turn with the other tools";
 		}
 		McpCrashSetContext("");
 		return false;
@@ -1348,6 +1368,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	if(pTool->handler == NULL)
 	{
 		if(name == MCP_TOOL_ADVANCE_ROUND) return AdvanceRound(token, args, bIsError);
+		if(name == MCP_TOOL_RUN_PLAN) return RunPlan(token, args, bIsError);
 		bIsError = true;
 		return picojson::value("no bridge handler for " + name);
 	}
@@ -1437,6 +1458,83 @@ picojson::value McpBridge::Impl::AdvanceRound(const std::string& token, const pi
 		o["turn_reopened"] = picojson::value(gameTurn == iTurnBefore && bReopened);
 	}
 	return r;
+}
+
+namespace
+{
+	// One order's outcome for run_plan's result and the journal: the tool, and what the game said, cut short.
+	picojson::value Outcome(const std::string& tool, const picojson::value& result, bool bIsError)
+	{
+		picojson::object o;
+		o["tool"] = picojson::value(tool);
+		std::string text = result.is<std::string>() ? result.get<std::string>() : result.serialize();
+		if(text.size() > 300) text = text.substr(0, 300) + "...";
+		o[bIsError ? "error" : "result"] = picojson::value(text);
+		return picojson::value(o);
+	}
+}
+
+// run_plan: the plan is taken on the game thread, then each order goes through CallTool, exactly as the model's own call
+// would, with its checks, its line in the in-game log and its retries. end_turn runs only if nothing before it failed.
+picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojson::object& args, bool& bIsError)
+{
+	std::string error;
+	picojson::value taken = RunOnGameThread(token, MCP_JOB_PLAN_TAKE, args, error);
+	if(!error.empty() || !taken.is<picojson::object>())
+	{
+		bIsError = true;
+		return picojson::value(error.empty() ? std::string("the plan could not be read") : error);
+	}
+	picojson::object& t = taken.get<picojson::object>();
+	picojson::array results;
+	bool bFailed = false, bEnded = false;
+	if(t["acknowledge_first"].is<bool>() && t["acknowledge_first"].get<bool>())
+	{
+		bool bErr = false;
+		picojson::object none;
+		picojson::value r = CallTool(token, "acknowledge_messages", none, bErr);
+		results.push_back(Outcome("acknowledge_messages", r, bErr));
+		bFailed = bErr;
+	}
+	if(t["orders"].is<picojson::array>())
+	{
+		const picojson::array& orders = t["orders"].get<picojson::array>();
+		for(size_t i = 0; i < orders.size(); ++i)
+		{
+			if(!orders[i].is<picojson::object>()) continue;
+			const picojson::object& order = orders[i].get<picojson::object>();
+			picojson::object::const_iterator ti = order.find("tool"), ai = order.find("args");
+			std::string tool = (ti != order.end() && ti->second.is<std::string>()) ? ti->second.get<std::string>() : "";
+			picojson::object a = (ai != order.end() && ai->second.is<picojson::object>()) ? ai->second.get<picojson::object>() : picojson::object();
+			if(tool == MCP_TOOL_END_TURN && bFailed)
+			{
+				results.push_back(Outcome(tool, picojson::value("not run: an order before it failed, so the turn is still yours"), true));
+				continue;
+			}
+			bool bErr = false;
+			picojson::value r = CallTool(token, tool, a, bErr);
+			results.push_back(Outcome(tool, r, bErr));
+			if(bErr) bFailed = true;
+			else if(tool == MCP_TOOL_END_TURN) bEnded = true;
+		}
+	}
+	bool bJournal = t["journal_on"].is<bool>() && t["journal_on"].get<bool>();
+	if(bJournal && t["journal"].is<picojson::object>())
+	{
+		picojson::object& journal = t["journal"].get<picojson::object>();
+		journal["results"] = picojson::value(results);
+		journal["turn_ended"] = picojson::value(bEnded);
+		McpPlanJournalAppend(picojson::value(journal).serialize());
+	}
+	picojson::object out;
+	out["ran"] = picojson::value(results);
+	out["turn_ended"] = picojson::value(bEnded);
+	out["next"] = picojson::value(std::string(bEnded ? "plan your next turn with plan_turn, then call wait_for_my_turn"
+		: bFailed ? "some orders failed (see ran): deal with them, then end_turn"
+		: "the plan did not end the turn: finish it, then end_turn"));
+	if(bJournal && t["why_missing"].is<bool>() && t["why_missing"].get<bool>())
+		out["debug"] = picojson::value(std::string("the debug journal is on and the plan changed without a why; give one next time"));
+	return picojson::value(out);
 }
 
 picojson::value McpBridge::Impl::RunOnGameThread(const std::string& token, const std::string& tool, const picojson::object& args, std::string& error)

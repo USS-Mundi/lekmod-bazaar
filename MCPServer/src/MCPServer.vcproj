@@ -115,6 +115,30 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpPlanJournal.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpPlanJournal.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpTurnCycle.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpTurnCycle.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpTurnPlan.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpTurnPlan.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpCulture.cpp"
 			>
 		</File>
