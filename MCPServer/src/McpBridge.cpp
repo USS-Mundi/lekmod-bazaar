@@ -1505,6 +1505,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 	}
 	picojson::object& t = taken.get<picojson::object>();
 	picojson::array results;
+	picojson::object planning;
 	bool bFailed = false, bEnded = false;
 	if(t["acknowledge_first"].is<bool>() && t["acknowledge_first"].get<bool>())
 	{
@@ -1533,7 +1534,18 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 			picojson::value r = CallTool(token, tool, a, bErr);
 			results.push_back(Outcome(tool, r, bErr));
 			if(bErr) bFailed = true;
-			else if(tool == MCP_TOOL_END_TURN) bEnded = true;
+			else if(tool == MCP_TOOL_END_TURN)
+			{
+				bEnded = true;
+				// What end_turn gives to plan from goes back whole, not cut short with the other results.
+				if(r.is<picojson::object>())
+				{
+					const picojson::object& ended = r.get<picojson::object>();
+					picojson::object::const_iterator ci = ended.find("coming"), gi = ended.find("your_game_plan");
+					if(ci != ended.end()) planning["coming"] = ci->second;
+					if(gi != ended.end()) planning["your_game_plan"] = gi->second;
+				}
+			}
 		}
 	}
 	bool bJournal = t["journal_on"].is<bool>() && t["journal_on"].get<bool>();
@@ -1547,6 +1559,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 	picojson::object out;
 	out["ran"] = picojson::value(results);
 	out["turn_ended"] = picojson::value(bEnded);
+	for(picojson::object::const_iterator pi = planning.begin(); pi != planning.end(); ++pi) out[pi->first] = pi->second;
 	out["next"] = picojson::value(std::string(bEnded ? "plan your next turn with plan_turn, then call wait_for_my_turn"
 		: bFailed ? "some orders failed (see ran): deal with them, then end_turn"
 		: "the plan did not end the turn: finish it, then end_turn"));

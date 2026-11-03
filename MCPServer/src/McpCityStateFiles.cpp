@@ -28,7 +28,7 @@ namespace
 	}
 
 	// The folder, made on the way if it is missing.
-	std::wstring Folder(const std::string& gameId)
+	std::wstring Folder(const std::string& gameId, const char* sub)
 	{
 		wchar_t docs[MAX_PATH];
 		if(gameId.empty() || FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return L"";
@@ -36,14 +36,14 @@ namespace
 		CreateDirectoryW(dir.c_str(), NULL);
 		dir += L"\\" + Wide(gameId);
 		CreateDirectoryW(dir.c_str(), NULL);
-		dir += L"\\city-states";
+		dir += L"\\" + Wide(sub);
 		CreateDirectoryW(dir.c_str(), NULL);
 		return dir;
 	}
 
-	std::wstring PathOf(const std::string& gameId, const std::string& fileName)
+	std::wstring PathOf(const std::string& gameId, const std::string& fileName, const char* sub = "city-states")
 	{
-		std::wstring dir = Folder(gameId);
+		std::wstring dir = Folder(gameId, sub);
 		return dir.empty() ? dir : dir + L"\\" + Wide(fileName);
 	}
 }
@@ -90,4 +90,29 @@ std::string McpCsFilePath(const std::string& gameId, const std::string& fileName
 		}
 	}
 	return Utf8(path);
+}
+
+std::string McpGameFileRead(const std::string& gameId, const char* sub, const std::string& fileName)
+{
+	std::wstring path = PathOf(gameId, fileName, sub);
+	FILE* f = path.empty() ? NULL : _wfopen(path.c_str(), L"rb");
+	if(!f) return "";
+	std::string content;
+	char buf[4096];
+	size_t n;
+	while((n = fread(buf, 1, sizeof(buf), f)) > 0) content.append(buf, n);
+	fclose(f);
+	return content;
+}
+
+void McpGameFileAppend(const std::string& gameId, const char* sub, const std::string& fileName, const std::string& headerIfNew, const std::string& line)
+{
+	std::wstring path = PathOf(gameId, fileName, sub);
+	if(path.empty()) return;
+	bool bNew = GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES;
+	FILE* f = _wfopen(path.c_str(), L"ab");
+	if(!f) return;
+	if(bNew) fputs(headerIfNew.c_str(), f);
+	fputs(line.c_str(), f);
+	fclose(f);
 }

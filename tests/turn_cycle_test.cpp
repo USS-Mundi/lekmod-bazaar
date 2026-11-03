@@ -1,6 +1,7 @@
 // Native tests for the turn cycle's game-free parts (no game needed): tests/run_turn_cycle_test.sh
 #include "McpTurnCycle.h"
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -119,17 +120,46 @@ namespace
 	void TestNumbers()
 	{
 		McpView now = View();
-		now.gold = 95;
+		now.gold = 70;
 		now.happiness = -2;
 		std::vector<std::string> c = McpViewChanges(View(), now, 25);
-		CHECK(Has(c, "gold 95 (was 130)"));
+		CHECK(Has(c, "gold 70 (was 130)"));
 		CHECK(Has(c, "happiness -2 (was 1)"));
+	}
+
+	void TestSmallTicksAreLeftOut()
+	{
+		McpView now = View();
+		now.gold = 118;
+		now.happiness = 3;
+		CHECK(McpViewChanges(View(), now, 25).empty());
+		McpView empty = View();
+		empty.gold = 0;
+		CHECK(Has(McpViewChanges(View(), empty, 25), "gold 0 (was 130)"));
+		McpView lower = View();
+		lower.happiness = 5;
+		McpView dropped = View();
+		dropped.happiness = 1;
+		CHECK(Has(McpViewChanges(lower, dropped, 25), "happiness 1 (was 5)"));
+	}
+
+	void TestCityStateUnitsPassingAreLeftOut()
+	{
+		McpView now = View();
+		McpSeenUnit passing = Unit(60, "Zurich", "Pikeman", 34, 31, 100, false, 1, "your Archer");
+		passing.cityState = true;
+		now.theirs.push_back(passing);
+		CHECK(McpViewChanges(View(), now, 25).empty());
+		McpSeenUnit hostile = Unit(61, "Zurich", "Archer", 35, 31, 100, true, 1, "your Archer");
+		hostile.cityState = true;
+		now.theirs.push_back(hostile);
+		CHECK(Has(McpViewChanges(View(), now, 25), "new in sight: enemy Zurich Archer at (35,31), 1 tile from your Archer"));
 	}
 
 	void TestMostUrgentFirstAndCapped()
 	{
 		McpView now = View();
-		now.gold = 95;
+		now.gold = 70;
 		now.theirs.push_back(Unit(70, "Barbarians", "Spearman", 40, 40, 100, true, 9, "Edinburgh"));
 		now.theirs.push_back(Unit(71, "Barbarians", "Archer", 35, 31, 100, true, 1, "your Archer"));
 		now.atWarWith.push_back("Rome");
@@ -140,7 +170,7 @@ namespace
 			CHECK(c[0] == "now at war with Rome");
 			CHECK(c[1] == "new in sight: enemy Barbarians Archer at (35,31), 1 tile from your Archer");
 			CHECK(c[2] == "new in sight: enemy Barbarians Spearman at (40,40), 9 tiles from Edinburgh");
-			CHECK(c[3] == "gold 95 (was 130)");
+			CHECK(c[3] == "gold 70 (was 130)");
 		}
 		std::vector<std::string> two = McpViewChanges(View(), now, 2);
 		CHECK(two.size() == 3 && two[2] == "...and 2 more");
@@ -182,6 +212,75 @@ namespace
 		CHECK(!McpIsWhyKind("vibes"));
 		CHECK(McpWhyKinds().find("opportunity") != std::string::npos);
 	}
+	std::map<std::string, std::string> Fields(const char* k1, const char* v1, const char* k2 = NULL, const char* v2 = NULL)
+	{
+		std::map<std::string, std::string> m;
+		m[k1] = v1;
+		if(k2) m[k2] = v2;
+		return m;
+	}
+
+	void TestFirstPlanNeedsArcAndThrust()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		CHECK(!McpGamePlanApply(plan, Fields("arc", "land first"), "", 5, err, warn) && err.find("thrust") != std::string::npos);
+		err.clear();
+		CHECK(McpGamePlanApply(plan, Fields("arc", "land first", "thrust", "settler by T14"), "", 5, err, warn));
+		CHECK(plan.turn == 5 && plan.sections["arc"] == "land first" && plan.log.size() == 1 && plan.log[0] == "T5: first plan");
+	}
+
+	void TestChangesNeedWhyAndKeepTheRest()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		McpGamePlanApply(plan, Fields("arc", "land first", "thrust", "settler by T14"), "", 5, err, warn);
+		CHECK(!McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "", 9, err, warn) && err.find("why") != std::string::npos);
+		err.clear();
+		CHECK(McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "Turkish army at the border", 9, err, warn));
+		CHECK(plan.sections["arc"] == "land first" && plan.sections["thrust"] == "walls in Antium");
+		CHECK(plan.turn == 9 && plan.log.size() == 2 && plan.log[1] == "T9: Turkish army at the border");
+		CHECK(McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "", 10, err, warn) && plan.log.size() == 2 && plan.turn == 9);
+	}
+
+	void TestUnknownHeadingAndLongPlan()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		CHECK(!McpGamePlanApply(plan, Fields("arc", "x", "dreams", "y"), "", 1, err, warn) && err.find("dreams") != std::string::npos);
+		std::string longText;
+		for(int i = 0; i < 460; ++i) longText += "word ";
+		err.clear();
+		CHECK(McpGamePlanApply(plan, Fields("arc", longText.c_str(), "thrust", "t"), "", 1, err, warn));
+		CHECK(warn.size() == 1 && warn[0].find("words") != std::string::npos);
+	}
+
+	void TestPlanText()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		std::map<std::string, std::string> f;
+		f["read"] = "3rd in score"; f["arc"] = "science"; f["thrust"] = "universities"; f["rivals"] = "Canada: culture"; f["tripwires"] = "Sistine built";
+		McpGamePlanApply(plan, f, "", 40, err, warn);
+		std::string full = McpGamePlanText(plan, true), head = McpGamePlanText(plan, false);
+		CHECK(full.find("Read: 3rd in score") != std::string::npos && full.find("Rivals: Canada: culture") != std::string::npos);
+		CHECK(full.find("T40: first plan") != std::string::npos);
+		CHECK(head.find("Arc: science") != std::string::npos && head.find("Thrust: universities") != std::string::npos);
+		CHECK(head.find("Tripwires: Sistine built") != std::string::npos && head.find("Read:") == std::string::npos);
+	}
+
+	void TestTurnsToAfford()
+	{
+		CHECK(McpTurnsToAfford(300, 320, 10) == 0);
+		CHECK(McpTurnsToAfford(390, 302, 49) == 2);
+		CHECK(McpTurnsToAfford(390, 351, 49) == 1);
+		CHECK(McpTurnsToAfford(390, 302, 0) == -1);
+		CHECK(McpTurnsToAfford(390, 302, -5) == -1);
+	}
 }
 
 int main()
@@ -195,9 +294,16 @@ int main()
 	TestLostCity();
 	TestWarAndPeace();
 	TestNumbers();
+	TestSmallTicksAreLeftOut();
+	TestCityStateUnitsPassingAreLeftOut();
 	TestMostUrgentFirstAndCapped();
 	TestOrdersToRun();
 	TestWhyKinds();
+	TestFirstPlanNeedsArcAndThrust();
+	TestChangesNeedWhyAndKeepTheRest();
+	TestUnknownHeadingAndLongPlan();
+	TestPlanText();
+	TestTurnsToAfford();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
 	return 0;

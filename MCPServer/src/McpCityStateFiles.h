@@ -11,3 +11,7 @@ std::string McpCsFileRead(const std::string& gameId, const std::string& fileName
 void McpCsFileAppend(const std::string& gameId, const std::string& fileName, const std::string& headerIfNew, const std::string& line);
 // The file's path as a reader on this machine opens it: under Wine the Unix path, so an agent on the Mac can read it.
 std::string McpCsFilePath(const std::string& gameId, const std::string& fileName);
+
+// The same, for another folder of the game's: My Games\Sid Meier's Civilization 5\MCP\<game id>\<sub>\<file>.
+std::string McpGameFileRead(const std::string& gameId, const char* sub, const std::string& fileName);
+void McpGameFileAppend(const std::string& gameId, const char* sub, const std::string& fileName, const std::string& headerIfNew, const std::string& line);

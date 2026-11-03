@@ -18,6 +18,8 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o);
 // run_plan's first step, as a game-thread job: the orders to carry out (the plan is used up), whether unread game
 // messages must be acknowledged first, and the debug journal's entry so far. Fills err when there is nothing to run.
 picojson::value McpTakePlan(const picojson::object& args, std::string& err);
+// What the agent plans from once its turn is over: what the next turns bring and its whole game plan.
+void McpAddPlanningView(CvPlayer* me, picojson::object& o);
 // end_turn without run_plan: a plan due this turn was set aside.
 void McpNoteTurnEnded(CvPlayer* me);
 // A new or loaded game: plans are not kept.

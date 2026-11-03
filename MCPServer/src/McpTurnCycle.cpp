@@ -4,7 +4,9 @@
 
 namespace
 {
-	const int NEAR = 5; // anyone else's unit within this many tiles of yours is worth a line
+	const int NEAR = 5;            // another civilization's unit within this many tiles of yours is worth a line
+	const int GOLD_SHOWN = 50;     // a smaller move in the treasury is a turn's income or upkeep, not news
+	const int HAPPINESS_SHOWN = 3;
 
 	const char* const WHY_KINDS[] = { "enemy", "attack", "numbers", "tile", "refused", "opportunity", "mistake", "other" };
 
@@ -86,7 +88,7 @@ std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& n
 	for(size_t i = 0; i < now.theirs.size(); ++i)
 	{
 		const McpSeenUnit& u = now.theirs[i];
-		if(!u.enemy && (u.nearDist < 0 || u.nearDist > NEAR)) continue;
+		if(!u.enemy && (u.cityState || u.nearDist < 0 || u.nearDist > NEAR)) continue;
 		const McpSeenUnit* before = FindUnit(planned.theirs, u.id);
 		Sighting s;
 		s.dist = u.nearDist;
@@ -99,8 +101,11 @@ std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& n
 	std::stable_sort(seen.begin(), seen.end(), Sooner);
 	for(size_t i = 0; i < seen.size(); ++i) out.push_back(seen[i].line);
 
-	if(now.gold != planned.gold) out.push_back("gold " + Num(now.gold) + " (was " + Num(planned.gold) + ")");
-	if(now.happiness != planned.happiness) out.push_back("happiness " + Num(now.happiness) + " (was " + Num(planned.happiness) + ")");
+	int goldMoved = now.gold - planned.gold, happyMoved = now.happiness - planned.happiness;
+	if((now.gold == 0 && planned.gold > 0) || goldMoved >= GOLD_SHOWN || -goldMoved >= GOLD_SHOWN)
+		out.push_back("gold " + Num(now.gold) + " (was " + Num(planned.gold) + ")");
+	if((now.happiness < 0) != (planned.happiness < 0) || happyMoved >= HAPPINESS_SHOWN || -happyMoved >= HAPPINESS_SHOWN)
+		out.push_back("happiness " + Num(now.happiness) + " (was " + Num(planned.happiness) + ")");
 
 	if(out.size() > limit)
 	{
@@ -140,4 +145,111 @@ std::string McpWhyKinds()
 	std::string s;
 	for(size_t i = 0; i < sizeof(WHY_KINDS) / sizeof(WHY_KINDS[0]); ++i) s += (i ? ", " : "") + std::string(WHY_KINDS[i]);
 	return s;
+}
+
+const std::vector<std::string>& McpGamePlanHeadings()
+{
+	static std::vector<std::string> headings;
+	if(headings.empty())
+	{
+		const char* const names[] = { "read", "arc", "thrust", "rivals", "tripwires" };
+		headings.assign(names, names + sizeof(names) / sizeof(names[0]));
+	}
+	return headings;
+}
+
+namespace
+{
+	const int PLAN_WORDS_SHOWN = 450;
+	const size_t PLAN_LOG_SHOWN = 8;
+	const size_t PLAN_LOG_KEPT = 40;
+
+	int Words(const std::string& s)
+	{
+		int n = 0;
+		bool in = false;
+		for(size_t i = 0; i < s.size(); ++i)
+		{
+			bool space = s[i] == ' ' || s[i] == '\n' || s[i] == '\t' || s[i] == '\r';
+			if(!space && !in) ++n;
+			in = !space;
+		}
+		return n;
+	}
+
+	std::string Title(const std::string& heading)
+	{
+		std::string t = heading;
+		if(!t.empty() && t[0] >= 'a' && t[0] <= 'z') t[0] = (char)(t[0] - 'a' + 'A');
+		return t;
+	}
+}
+
+bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string>& changes, const std::string& why,
+	int turn, std::string& err, std::vector<std::string>& warnings)
+{
+	const std::vector<std::string>& headings = McpGamePlanHeadings();
+	for(std::map<std::string, std::string>::const_iterator it = changes.begin(); it != changes.end(); ++it)
+		if(std::find(headings.begin(), headings.end(), it->first) == headings.end())
+		{
+			err = "'" + it->first + "' is not a heading of the plan; use read, arc, thrust, rivals and tripwires";
+			return false;
+		}
+	McpGamePlan next = plan;
+	bool bChanged = false;
+	for(std::map<std::string, std::string>::const_iterator it = changes.begin(); it != changes.end(); ++it)
+	{
+		if(next.sections[it->first] == it->second) continue;
+		next.sections[it->first] = it->second;
+		bChanged = true;
+	}
+	if(!bChanged) return true;
+	bool bFirst = plan.turn < 0;
+	if(bFirst && (next.sections["arc"].empty() || next.sections["thrust"].empty()))
+	{
+		err = "a first plan needs at least arc (how you mean to win from here) and thrust (what you are doing about it now)";
+		return false;
+	}
+	if(!bFirst && why.empty())
+	{
+		err = "changing the plan needs why: what made you change it, in a few words; it goes into the plan's log";
+		return false;
+	}
+	next.turn = turn;
+	next.log.push_back("T" + Num(turn) + ": " + (bFirst && why.empty() ? std::string("first plan") : why));
+	if(next.log.size() > PLAN_LOG_KEPT) next.log.erase(next.log.begin(), next.log.end() - PLAN_LOG_KEPT);
+	int words = 0;
+	for(size_t i = 0; i < headings.size(); ++i) words += Words(next.sections[headings[i]]);
+	if(words > PLAN_WORDS_SHOWN)
+		warnings.push_back("the plan is " + Num(words) + " words; past about " + Num(PLAN_WORDS_SHOWN) + " it stops being read every turn");
+	plan = next;
+	return true;
+}
+
+std::string McpGamePlanText(const McpGamePlan& plan, bool bFull)
+{
+	std::string out;
+	const std::vector<std::string>& headings = McpGamePlanHeadings();
+	for(size_t i = 0; i < headings.size(); ++i)
+	{
+		const std::string& h = headings[i];
+		if(!bFull && h != "arc" && h != "thrust" && h != "tripwires") continue;
+		std::map<std::string, std::string>::const_iterator it = plan.sections.find(h);
+		if(it == plan.sections.end() || it->second.empty()) continue;
+		out += Title(h) + ": " + it->second + "\n";
+	}
+	if(bFull && !plan.log.empty())
+	{
+		out += "Log:\n";
+		size_t from = plan.log.size() > PLAN_LOG_SHOWN ? plan.log.size() - PLAN_LOG_SHOWN : 0;
+		for(size_t i = from; i < plan.log.size(); ++i) out += "  " + plan.log[i] + "\n";
+	}
+	return out;
+}
+
+int McpTurnsToAfford(int cost, int gold, int rate)
+{
+	if(gold >= cost) return 0;
+	if(rate <= 0) return -1;
+	return (cost - gold + rate - 1) / rate;
 }

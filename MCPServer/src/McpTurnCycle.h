@@ -4,6 +4,7 @@
 // the clock (plan_turn); when the turn comes it is shown what changed in what it can see since it planned, decides,
 // and run_plan carries out the orders it keeps. McpTurnPlan.cpp reads the game into these shapes.
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -17,9 +18,10 @@ struct McpSeenUnit
 	int x, y;
 	int hp;
 	bool enemy;        // its owner is at war with the player, or barbarian
+	bool cityState;    // its owner is a city-state
 	int nearDist;
 	std::string nearWhat;
-	McpSeenUnit() : id(-1), owner(-1), x(-1), y(-1), hp(0), enemy(false), nearDist(-1) {}
+	McpSeenUnit() : id(-1), owner(-1), x(-1), y(-1), hp(0), enemy(false), cityState(false), nearDist(-1) {}
 };
 
 struct McpSeenCity
@@ -43,8 +45,9 @@ struct McpView
 };
 
 // What changed between the view a plan was made in and now, most urgent first: wars, losses, damage, others' units
-// by distance (an enemy anywhere in sight, anyone else within 5 tiles), then the numbers. Past limit lines, the rest
-// are counted in one last line.
+// by distance (an enemy anywhere in sight, another civilization's within 5 tiles; a city-state's only when at war),
+// then gold when it emptied or moved by 50 or more and happiness when it crossed zero or moved by 3 or more. Past
+// limit lines, the rest are counted in one last line.
 std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& now, size_t limit);
 
 // One order of a plan: a tool and its arguments as JSON text.
@@ -62,3 +65,25 @@ std::vector<McpPlannedOrder> McpOrdersToRun(const std::vector<McpPlannedOrder>& 
 // The kinds a changed plan's reason can be, for the debug journal.
 bool McpIsWhyKind(const std::string& kind);
 std::string McpWhyKinds();
+
+// The game plan a seat keeps across turns: fixed headings so the game can show and track it, the seat's own words
+// under each, and a log of why it changed.
+struct McpGamePlan
+{
+	std::map<std::string, std::string> sections; // heading -> text
+	std::vector<std::string> log;                // "T<turn>: <why>", oldest first
+	int turn;                                    // the turn it last changed, -1 before the first plan
+	McpGamePlan() : turn(-1) {}
+};
+
+// read, arc, thrust, rivals, tripwires: the order they are shown in.
+const std::vector<std::string>& McpGamePlanHeadings();
+// Replaces the headings given; the others stay. A first plan needs arc and thrust; a later change needs why, which
+// goes into the log. Giving a heading its current text is no change. warnings: what does not stop the change (a plan
+// past 450 words). False, with err, when the change is refused.
+bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string>& changes, const std::string& why,
+	int turn, std::string& err, std::vector<std::string>& warnings);
+// The plan as text: every heading and the last 8 log lines, or only arc, thrust and tripwires.
+std::string McpGamePlanText(const McpGamePlan& plan, bool bFull);
+// Turns until gold reaches cost at rate a turn: 0 if it already has, -1 if it never will.
+int McpTurnsToAfford(int cost, int gold, int rate);
