@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "McpBridge.h"
 #include "McpCrash.h"
+#include "McpCrashLog.h"
 #include "McpHttp.h"
 #include "McpTools.h"
 #include "McpToolSupport.h"
@@ -569,6 +570,7 @@ void McpBridge::Impl::Shutdown()
 {
 	shuttingDown = true;
 	McpUninstallCrashHandler();
+	McpHeapWatchStop();
 	if(pServer)
 	{
 		EnterCriticalSection(&lock);

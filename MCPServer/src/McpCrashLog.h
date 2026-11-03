@@ -14,6 +14,9 @@ void McpTrail(const char* what, int a = -1, int b = -1);
 // report says when it was last found whole or first found damaged. Damage found before any crash writes
 // Logs\MCPServer-heap-damaged-<time>.txt once, with the trail, and the watch ends there. Starting again does nothing.
 void McpHeapWatchStart(void* heap);
+// Ends the watch and waits for its thread, so the plugin can be unloaded and loaded again (the game reloads plugins
+// between setting up a game and playing it). The next McpHeapWatchStart starts it again.
+void McpHeapWatchStop();
 // How long to wait before the next check, given how long the last took: about 5% of the time at most, never more
 // often than every half second. 0 when one check took too long to keep watching.
 inline unsigned long McpHeapCheckEveryMs(unsigned long lastCheckMs)

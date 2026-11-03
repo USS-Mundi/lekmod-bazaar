@@ -31,6 +31,8 @@ namespace
 	enum HeapWatch { HEAP_NOT_WATCHED, HEAP_WATCHED, HEAP_DAMAGED, HEAP_TOO_SLOW };
 	HANDLE s_heap = NULL;
 	volatile LONG s_heapWatchStarted = 0;
+	HANDLE s_heapThread = NULL;
+	HANDLE s_heapStop = NULL;     // set when the plugin shuts down, so the watch never outlives it
 	volatile LONG s_heapState = HEAP_NOT_WATCHED;
 	volatile DWORD s_heapChecks = 0;
 	volatile DWORD s_heapSlowestMs = 0;
@@ -194,7 +196,7 @@ namespace
 				s_heapState = HEAP_TOO_SLOW;
 				return 0;
 			}
-			Sleep(wait);
+			if(WaitForSingleObject(s_heapStop, wait) == WAIT_OBJECT_0) return 0;
 		}
 	}
 }
@@ -204,9 +206,28 @@ void McpHeapWatchStart(void* heap)
 	if(!heap || InterlockedCompareExchange(&s_heapWatchStarted, 1, 0) != 0) return;
 	s_heap = (HANDLE)heap;
 	s_heapState = HEAP_WATCHED;
-	HANDLE thread = CreateThread(NULL, 0, &WatchHeap, NULL, 0, NULL);
-	if(thread) CloseHandle(thread);
-	else s_heapState = HEAP_NOT_WATCHED;
+	if(!s_heapStop) s_heapStop = CreateEventA(NULL, TRUE, FALSE, NULL);
+	ResetEvent(s_heapStop);
+	s_heapThread = s_heapStop ? CreateThread(NULL, 0, &WatchHeap, NULL, 0, NULL) : NULL;
+	if(!s_heapThread)
+	{
+		s_heapState = HEAP_NOT_WATCHED;
+		InterlockedExchange(&s_heapWatchStarted, 0);
+	}
+}
+
+void McpHeapWatchStop()
+{
+	if(!s_heapThread) return;
+	SetEvent(s_heapStop);
+	// One check takes at most about 200 ms; a thread still inside one after this is left, as before.
+	if(WaitForSingleObject(s_heapThread, 2000) == WAIT_OBJECT_0)
+	{
+		CloseHandle(s_heapThread);
+		s_heapThread = NULL;
+		s_heapState = HEAP_NOT_WATCHED;
+		InterlockedExchange(&s_heapWatchStarted, 0);
+	}
 }
 
 void McpCrashLogInstall()
