@@ -85,9 +85,6 @@ bool McpScreenIsObserver();
 // makes the engine wait for a hotseat hand-over, holding playback and the camera the whole
 // turn. The game core itself keeps seeing seats as human, so their play is unchanged.
 bool McpEngineSeesAsHuman(PlayerTypes e);
-// When a game starts or loads: simultaneous turns on or off as McpAgentsTogetherOn says, in a single-player game only.
-// The game core plays a seat as a human player, so with it on the seats take their turns at the same time as the human.
-void McpApplyTurnMode();
 
 // Game thread. Records a popup the game only shows to the player on screen, when
 // it is for a seat. Same arguments as the game's popup info.

@@ -3,7 +3,6 @@
 // From objbase.h, which does not compile under the precompiled header's trimmed Windows headers.
 extern "C" __declspec(dllimport) HRESULT __stdcall CoCreateGuid(GUID* pguid);
 #include "McpSeat.h"
-#include "McpPlanJournal.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
 #include "McpDiplomacy.h"
@@ -379,17 +378,6 @@ bool McpScreenIsObserver()
 {
 	PlayerTypes eActive = GC.getGame().getActivePlayer();
 	return eActive != NO_PLAYER && CvPreGame::slotStatus(eActive) == SS_OBSERVER;
-}
-
-void McpApplyTurnMode()
-{
-	CvGame& game = GC.getGame();
-	if(game.isNetworkMultiPlayer() || game.isHotSeat() || game.isPbem()) return;
-	bool bTogether = McpAgentsTogetherOn();
-	if(game.isOption(GAMEOPTION_SIMULTANEOUS_TURNS) == bTogether) return;
-	game.setOption(GAMEOPTION_SIMULTANEOUS_TURNS, bTogether);
-	McpBridge::Get().LogLineFor(-1, MCP_LOG_ALWAYS, bTogether ? "Model seats take their turns at the same time as the human (MCPServer-agents-together.on)"
-		: "Turns are taken one player at a time again");
 }
 
 bool McpEngineSeesAsHuman(PlayerTypes e)

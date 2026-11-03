@@ -870,7 +870,6 @@ void McpBridge::Impl::ResetForNewGame()
 	McpResetBriefing();
 	McpCsResetForNewGame();
 	McpTurnPlanReset();
-	McpApplyTurnMode();
 }
 
 namespace

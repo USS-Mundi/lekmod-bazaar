@@ -53,10 +53,6 @@ A city-state's ally, the human or a model's seat, can ask for its active help. T
 - **Kept on disk:** every deed toward a city-state and every line of its conversations also go to a file for that game, `My Games\Sid Meier's Civilization 5\MCP\<game id>\city-states\<city-state>.md`, read back after a reload. Its player's `status` names the file (`whole_history_file`); the lists in `status` show only the latest.
 - **Switching on is not kept in a save yet:** after a reload every city-state goes back to the game's AI.
 
-## Seats moving at the same time as you (experimental)
-
-With `MCPServer-agents-together.on` in the game's `Logs` folder (under My Games), a single-player game with model seats switches to simultaneous turns when it starts or loads: the game's own computer players move first, then the human and every model seat take their turns at the same time, and the round ends when all of them have ended theirs. Delete the file and the next start or load goes back to one player at a time. It needs the LEKMOD for Bazaar game core with `patches/lekmod-simultaneous-single-player.patch`, which lets a single-player game use simultaneous turns at all.
-
 ## Making a release
 
 Run `python tools/release.py check`, then `build`, then `publish --notes FILE`. Publishing needs the GitHub CLI, `gh`, logged in. The steps around them are in `.claude/skills/release/SKILL.md`.
