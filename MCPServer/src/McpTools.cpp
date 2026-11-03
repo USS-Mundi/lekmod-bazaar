@@ -1083,15 +1083,20 @@ MCP_TOOL(ToolTakeSeat)
 	JObj o;
 	o["ok"] = J(true);
 	o["playing"] = J(CivName(e));
+	// Sitting down between turns, the seat has no plan for its next one yet: its first wait asks for it.
+	bool bTurnNow = McpIsPlayerTurn(GET_PLAYER(e));
+	if(!bTurnNow) McpOwePlan(e);
+	const char* plan = bTurnNow ? "it is your turn: call wait_for_my_turn for the briefing and play it; "
+		: "you have no plan yet: send your next turn with plan_turn now, then call wait_for_my_turn; ";
 	if(GET_PLAYER(e).isMinorCiv())
 	{
 		o["city_state"] = McpCsSeatView(e);
-		o["next"] = J("call wait_for_my_turn; a city-state's turn comes after every major civilization's");
+		o["next"] = J(std::string(plan) + "a city-state's turn comes after every major civilization's");
 		return JVal(o);
 	}
 	o["your_civilization"] = CivilizationRules(GET_PLAYER(e).getCivilizationType(), GET_PLAYER(e).getLeaderType());
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
-	o["next"] = J("call wait_for_my_turn; your turn comes after the human's each round");
+	o["next"] = J(std::string(plan) + "your turn comes after the human's each round");
 	return JVal(o);
 }
 

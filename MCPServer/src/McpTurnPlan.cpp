@@ -35,6 +35,7 @@ namespace
 	};
 
 	std::map<int, SeatPlan> s_plans;
+	volatile LONG s_owesPlan[MAX_PLAYERS] = { 0 };
 
 	// Waiting, planning and the seat's own housekeeping are not orders.
 	bool Plannable(const std::string& tool)
@@ -194,6 +195,7 @@ MCP_TOOL(ToolPlanTurn)
 	plan.view = Capture(me);
 	bool bReplaced = s_plans.count((int)me->GetID()) > 0;
 	s_plans[(int)me->GetID()] = plan;
+	InterlockedExchange(&s_owesPlan[me->GetID()], 0);
 	JObj o;
 	o["ok"] = J(true);
 	o["orders"] = J((int)plan.orders.size());
@@ -291,6 +293,7 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err)
 
 void McpNoteTurnEnded(CvPlayer* me)
 {
+	McpOwePlan(me->GetID());
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second)) return;
 	if(McpPlanJournalOn())
@@ -313,4 +316,16 @@ void McpNoteTurnEnded(CvPlayer* me)
 void McpTurnPlanReset()
 {
 	s_plans.clear();
+	for(int i = 0; i < MAX_PLAYERS; ++i) InterlockedExchange(&s_owesPlan[i], 0);
+}
+
+void McpOwePlan(int seat)
+{
+	if(seat >= 0 && seat < MAX_PLAYERS) InterlockedExchange(&s_owesPlan[seat], 1);
+}
+
+bool McpTakePlanReminder(int seat, bool bMyTurn)
+{
+	if(seat < 0 || seat >= MAX_PLAYERS) return false;
+	return InterlockedExchange(&s_owesPlan[seat], 0) != 0 && !bMyTurn;
 }

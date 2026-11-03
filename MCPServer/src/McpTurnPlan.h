@@ -22,3 +22,8 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err);
 void McpNoteTurnEnded(CvPlayer* me);
 // A new or loaded game: plans are not kept.
 void McpTurnPlanReset();
+// A seat that ended its turn, or sat down before its turn, owes a plan for the next one, until it sends one.
+void McpOwePlan(int seat);
+// For its wait: true once per owed plan, so that wait returns at once and asks for the plan. A seat whose turn has come
+// owes none. Any thread.
+bool McpTakePlanReminder(int seat, bool bMyTurn);

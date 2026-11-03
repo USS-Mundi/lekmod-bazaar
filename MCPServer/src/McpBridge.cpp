@@ -1384,6 +1384,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	}
 
 	int iNudgeAtStart = 0;
+	bool bPlanFirst = false;
 	if(pTool->waitsForTurn)
 	{
 		double timeout = MCP_WAIT_DEFAULT_SECONDS;
@@ -1397,8 +1398,10 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		int iSeqAtStart = 0, iSeat = 0;
 		Flags(token, bMyTurn, iSeqAtStart, bChatWaiting, iSeat);
 		iNudgeAtStart = NudgeSeq(token);
+		// A seat that owes a plan for its next turn is asked for it before it waits.
+		bPlanFirst = McpTakePlanReminder(iSeat, bMyTurn);
 		bool bClientGone = false;
-		while(!shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
+		while(!bPlanFirst && !shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
 		{
 			Sleep(250);
 			// A client that went away stops being kept alive, so its seat frees as any idle session's does.
@@ -1421,6 +1424,9 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	}
 	if(pTool->waitsForTurn && NudgeSeq(token) != iNudgeAtStart && result.is<picojson::object>())
 		result.get<picojson::object>()["woken_by_message"] = picojson::value(true);
+	if(bPlanFirst && result.is<picojson::object>())
+		result.get<picojson::object>()["plan_first"] = picojson::value(std::string("You have no plan for your next turn. "
+			"Send it now with plan_turn, while the others play; then call wait_for_my_turn again."));
 	return result;
 }
 
