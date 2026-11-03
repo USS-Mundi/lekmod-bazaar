@@ -28,6 +28,15 @@ namespace
 	volatile LONG s_crashed = 0;
 	LPTOP_LEVEL_EXCEPTION_FILTER s_previous = NULL;
 
+	enum HeapWatch { HEAP_NOT_WATCHED, HEAP_WATCHED, HEAP_DAMAGED, HEAP_TOO_SLOW };
+	HANDLE s_heap = NULL;
+	volatile LONG s_heapWatchStarted = 0;
+	volatile LONG s_heapState = HEAP_NOT_WATCHED;
+	volatile DWORD s_heapChecks = 0;
+	volatile DWORD s_heapSlowestMs = 0;
+	volatile DWORD s_heapWholeTick = 0;
+	volatile DWORD s_heapDamagedTick = 0;
+
 	volatile LONG s_threadsInside = 0;
 	volatile LONG s_overlaps = 0;
 	volatile LONG s_mostAtOnce = 0;
@@ -56,6 +65,46 @@ namespace
 		return base ? base + 1 : name;
 	}
 
+	std::string Stamp()
+	{
+		SYSTEMTIME t;
+		GetLocalTime(&t);
+		char when[32];
+		_snprintf_s(when, sizeof(when), _TRUNCATE, "%04d%02d%02d-%02d%02d%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+		return when;
+	}
+
+	void WriteHeapLine(FILE* f, DWORD now)
+	{
+		switch(s_heapState)
+		{
+		case HEAP_WATCHED:
+			fprintf(f, "The game's UI object heap was whole at its last check, %lu ms before this (%lu checks, slowest %lu ms).\n",
+				now - s_heapWholeTick, s_heapChecks, s_heapSlowestMs);
+			break;
+		case HEAP_DAMAGED:
+			fprintf(f, "The game's UI object heap was found damaged %lu ms before this; it was last whole %lu ms before (%lu checks, slowest %lu ms).\n",
+				now - s_heapDamagedTick, s_heapWholeTick ? now - s_heapWholeTick : 0, s_heapChecks, s_heapSlowestMs);
+			break;
+		case HEAP_TOO_SLOW:
+			fprintf(f, "The game's UI object heap stopped being watched: one check took %lu ms.\n", s_heapSlowestMs);
+			break;
+		default:
+			fprintf(f, "The game's UI object heap was not being watched.\n");
+		}
+	}
+
+	void WriteTrail(FILE* f, DWORD now)
+	{
+		fprintf(f, "\nThe plugin's last steps, oldest first (ms before, thread, step, values):\n");
+		LONG last = s_next;
+		for(LONG i = (last > STEPS ? last - STEPS : 0); i < last; ++i)
+		{
+			const Step& s = s_steps[i % STEPS];
+			fprintf(f, "  -%6lu  thread %5lu  %-40s %d %d\n", now - s.tick, s.thread, s.what, s.a, s.b);
+		}
+	}
+
 	void WriteReport(EXCEPTION_POINTERS* ep, const std::string& stem)
 	{
 		FILE* f = fopen((stem + ".txt").c_str(), "w");
@@ -75,14 +124,9 @@ namespace
 #endif
 		fprintf(f, "Pathfinder hooks: %ld calls entered while another thread was inside; at most %ld threads at once.\n",
 			(long)s_overlaps, (long)s_mostAtOnce);
-		fprintf(f, "\nThe plugin's last steps, oldest first (ms before the crash, thread, step, values):\n");
 		DWORD now = GetTickCount();
-		LONG last = s_next;
-		for(LONG i = (last > STEPS ? last - STEPS : 0); i < last; ++i)
-		{
-			const Step& s = s_steps[i % STEPS];
-			fprintf(f, "  -%6lu  thread %5lu  %-40s %d %d\n", now - s.tick, s.thread, s.what, s.a, s.b);
-		}
+		WriteHeapLine(f, now);
+		WriteTrail(f, now);
 		fclose(f);
 	}
 
@@ -105,16 +149,64 @@ namespace
 	{
 		if(InterlockedExchange(&s_crashed, 1) == 0)
 		{
-			SYSTEMTIME t;
-			GetLocalTime(&t);
-			char when[32];
-			_snprintf_s(when, sizeof(when), _TRUNCATE, "%04d%02d%02d-%02d%02d%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
-			std::string stem = LogsFolder() + "MCPServer-crash-" + when;
+			std::string stem = LogsFolder() + "MCPServer-crash-" + Stamp();
 			WriteReport(ep, stem);
 			WriteDump(ep, stem);
 		}
 		return s_previous ? s_previous(ep) : EXCEPTION_CONTINUE_SEARCH;
 	}
+
+	// A damaged heap can send the walk through a bad pointer: that counts as damage, not a crash.
+	bool HeapWhole(HANDLE heap)
+	{
+		__try { return HeapValidate(heap, 0, NULL) != FALSE; }
+		__except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+	}
+
+	DWORD WINAPI WatchHeap(LPVOID)
+	{
+		for(;;)
+		{
+			if(s_crashed) return 0;
+			DWORD start = GetTickCount();
+			bool whole = HeapWhole(s_heap);
+			DWORD now = GetTickCount();
+			DWORD took = now - start;
+			++s_heapChecks;
+			if(took > s_heapSlowestMs) s_heapSlowestMs = took;
+			if(!whole)
+			{
+				s_heapDamagedTick = now;
+				s_heapState = HEAP_DAMAGED;
+				if(s_crashed) return 0;
+				FILE* f = fopen((LogsFolder() + "MCPServer-heap-damaged-" + Stamp() + ".txt").c_str(), "w");
+				if(!f) return 0;
+				fprintf(f, "No crash yet.\n");
+				WriteHeapLine(f, now);
+				WriteTrail(f, now);
+				fclose(f);
+				return 0;
+			}
+			s_heapWholeTick = now;
+			unsigned long wait = McpHeapCheckEveryMs(took);
+			if(!wait)
+			{
+				s_heapState = HEAP_TOO_SLOW;
+				return 0;
+			}
+			Sleep(wait);
+		}
+	}
+}
+
+void McpHeapWatchStart(void* heap)
+{
+	if(!heap || InterlockedCompareExchange(&s_heapWatchStarted, 1, 0) != 0) return;
+	s_heap = (HANDLE)heap;
+	s_heapState = HEAP_WATCHED;
+	HANDLE thread = CreateThread(NULL, 0, &WatchHeap, NULL, 0, NULL);
+	if(thread) CloseHandle(thread);
+	else s_heapState = HEAP_NOT_WATCHED;
 }
 
 void McpCrashLogInstall()

@@ -37,8 +37,12 @@ const char* McpMinorQuestName(int eQuest); // a MinorCivQuestTypes; McpMinorCivs
 
 // A switched-on city-state a model has taken (or one switched off during its own turn, until that turn ends).
 bool McpIsCityStateSeat(PlayerTypes e);
-// "" when a city-state's player may use the tool; otherwise why not.
-std::string McpCsToolRefusal(const std::string& tool);
+// Live sight: a sharing unit sees for its city-state's ally as the ally's own units do, until it stops sharing, dies,
+// the city-state is switched off or the ally's standing falls below the sight step.
+bool McpCsShareSight(CvUnit* u, bool bOn, std::string& err);
+std::vector<int> McpCsSharingUnits(PlayerTypes eMinor);
+void McpCsSightAfterMove(const CvUnit* u);
+void McpCsSightBeforeKill(const CvUnit* u);
 // What a city-state's player sees in status: its ally, what the alliance buys, its own character.
 picojson::value McpCsSeatView(PlayerTypes eMinor);
 

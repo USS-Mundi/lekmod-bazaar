@@ -10,6 +10,18 @@ void McpCrashLogInstall();
 // One step of the trail the report ends with: the latest 128 are kept.
 void McpTrail(const char* what, int a = -1, int b = -1);
 
+// Watches the heap the game keeps the objects it hands the UI in: a background thread checks it is whole, and the
+// report says when it was last found whole or first found damaged. Damage found before any crash writes
+// Logs\MCPServer-heap-damaged-<time>.txt once, with the trail, and the watch ends there. Starting again does nothing.
+void McpHeapWatchStart(void* heap);
+// How long to wait before the next check, given how long the last took: about 5% of the time at most, never more
+// often than every half second. 0 when one check took too long to keep watching.
+inline unsigned long McpHeapCheckEveryMs(unsigned long lastCheckMs)
+{
+	if(lastCheckMs > 200) return 0;
+	return lastCheckMs * 20 > 500 ? lastCheckMs * 20 : 500;
+}
+
 // Counts calls that enter the pathfinder hooks while another thread is inside them. Enter and leave pair up per call.
 void McpPathHookEnter();
 void McpPathHookLeave();

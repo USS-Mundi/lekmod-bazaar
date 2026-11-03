@@ -1,5 +1,8 @@
 #include "McpCityStateRules.h"
+#include <cctype>
+#include <cstdlib>
 #include <cstddef>
+#include <sstream>
 
 namespace
 {
@@ -76,6 +79,88 @@ int McpCsSendCap(const McpCsTier* tier, int militaryUnits)
 	return cap < 0 ? 0 : cap;
 }
 
+McpCsNextSteps McpCsNextStepsFor(const std::vector<McpCsTier>& tiers, int influence, int militaryUnits)
+{
+	const McpCsTier* now = McpCsTierFor(tiers, influence);
+	int cap = McpCsSendCap(now, militaryUnits);
+	McpCsNextSteps next = { -1, -1, -1 };
+	for(size_t i = 0; i < tiers.size(); ++i)
+	{
+		const McpCsTier& t = tiers[i];
+		if(t.minInfluence <= influence) continue;
+		if(McpCsSendCap(&t, militaryUnits) > cap && (next.moreUnitsOut < 0 || t.minInfluence < next.moreUnitsOut)) next.moreUnitsOut = t.minInfluence;
+		if(t.revealSight && !(now && now->revealSight) && (next.sight < 0 || t.minInfluence < next.sight)) next.sight = t.minInfluence;
+		if(t.enterAllyLand && !(now && now->enterAllyLand) && (next.enterAllyLand < 0 || t.minInfluence < next.enterAllyLand)) next.enterAllyLand = t.minInfluence;
+	}
+	return next;
+}
+
+bool McpCsIsDismissal(const std::string& text)
+{
+	size_t a = text.find_first_not_of(" \t\r\n"), b = text.find_last_not_of(" \t\r\n");
+	if(a == std::string::npos) return false;
+	std::string word;
+	for(size_t i = a; i <= b; ++i) word += (char)std::tolower((unsigned char)text[i]);
+	return word == "dismiss" || word == "/dismiss";
+}
+
+namespace
+{
+	const char* SIGHT_TAG = "mcp-sight 1|";
+
+	bool ReadInt(const std::string& s, size_t& i, int& out)
+	{
+		size_t start = i;
+		if(i < s.size() && s[i] == '-') ++i;
+		while(i < s.size() && s[i] >= '0' && s[i] <= '9') ++i;
+		if(i == start || (i == start + 1 && s[start] == '-')) return false;
+		out = std::atoi(s.substr(start, i - start).c_str());
+		return true;
+	}
+}
+
+std::string McpCsSightLedgerWrite(const McpCsSightLedger& ledger)
+{
+	if(ledger.team < 0 || ledger.unitPlots.empty()) return "";
+	std::ostringstream out;
+	out << SIGHT_TAG << ledger.team << "|";
+	for(std::map<int, std::vector<int> >::const_iterator it = ledger.unitPlots.begin(); it != ledger.unitPlots.end(); ++it)
+	{
+		if(it != ledger.unitPlots.begin()) out << ";";
+		out << it->first << ":";
+		for(size_t k = 0; k < it->second.size(); ++k) out << (k ? "," : "") << it->second[k];
+	}
+	return out.str();
+}
+
+bool McpCsSightLedgerRead(const std::string& text, McpCsSightLedger& ledger)
+{
+	ledger = McpCsSightLedger();
+	if(text.empty()) return true;
+	std::string tag(SIGHT_TAG);
+	if(text.compare(0, tag.size(), tag) != 0) return false;
+	size_t i = tag.size();
+	McpCsSightLedger read;
+	if(!ReadInt(text, i, read.team) || i >= text.size() || text[i++] != '|') return false;
+	while(i < text.size())
+	{
+		int unit = 0;
+		if(!ReadInt(text, i, unit) || i >= text.size() || text[i++] != ':') return false;
+		std::vector<int>& plots = read.unitPlots[unit];
+		for(;;)
+		{
+			int plot = 0;
+			if(!ReadInt(text, i, plot)) return false;
+			plots.push_back(plot);
+			if(i >= text.size() || text[i] == ';') break;
+			if(text[i++] != ',') return false;
+		}
+		if(i < text.size()) ++i;
+	}
+	ledger = read;
+	return true;
+}
+
 const char* McpCsModifierText(McpCsModifier modifier)
 {
 	switch(modifier)
@@ -103,4 +188,26 @@ std::vector<std::string> McpCsModifiers(const McpCsSettings& settings, int allyI
 		else if(change <= -settings.trendAmount) out.push_back(McpCsModifierText(MCP_CS_FALLING));
 	}
 	return out;
+}
+
+std::string McpCsToolRefusal(const std::string& tool, const std::string& action, const std::string& item)
+{
+	static const char* const REFUSED[] =
+	{
+		"declare_war", "make_peace", "set_research", "research_options", "adopt_policy", "policy_options",
+		"choose_ideology", "switch_ideology", "found_pantheon", "found_religion", "enhance_religion",
+		"add_reformation_belief", "deal_options", "propose_deal", "answer_deal", "demand", "discuss",
+		"respond_to_request", "congress", "propose_resolution", "vote_resolution", "abstain", "spies", "move_spy",
+		"stage_coup", "steal_tech", "launch_spaceship", "establish_trade_route", "city_state_action",
+		"tell_city_state", "choose_great_person"
+	};
+	for(size_t i = 0; i < sizeof(REFUSED) / sizeof(REFUSED[0]); ++i)
+		if(tool == REFUSED[i]) return "a city-state does not do that: " + tool + " is decided by the game's rules for city-states";
+	if(tool == "economic_overview")
+		return "a city-state's treasury is the game's to keep: it never falls below zero, so it is not yours to balance";
+	if(tool == "unit_action" && action == "disband")
+		return "a city-state does not disband its units: the game takes your city back with the forces it gave you, and running short of gold costs you nothing";
+	if(tool == "set_production" && item.compare(0, 8, "PROCESS_") == 0)
+		return "a city-state's city builds things rather than turning its work into gold or research: your treasury never falls below zero, so running short costs you nothing";
+	return "";
 }

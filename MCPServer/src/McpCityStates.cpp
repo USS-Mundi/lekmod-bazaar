@@ -151,6 +151,11 @@ namespace
 		return n;
 	}
 
+	McpCsNextSteps NextSteps(PlayerTypes eMinor)
+	{
+		return McpCsNextStepsFor(s_tiers, McpCsInfluence(eMinor), MilitaryUnits(GET_PLAYER(eMinor), false));
+	}
+
 	const char* PersonalityName(MinorCivPersonalityTypes e)
 	{
 		switch(e)
@@ -258,6 +263,68 @@ namespace
 		}
 		return n > 0;
 	}
+
+	// Live sight: the plots each sharing unit lit for its ally's team, mirrored into the city-state player's script
+	// data on every change, so a save holds exactly what its visibility counts carry.
+	McpCsSightLedger s_sight[MAX_CIV_PLAYERS];
+
+	void LightPlots(TeamTypes eTeam, const std::vector<int>& plots, int iChange)
+	{
+		for(size_t i = 0; i < plots.size(); ++i)
+		{
+			CvPlot* p = GC.getMap().plotByIndex(plots[i]);
+			if(p) p->changeVisibilityCount(eTeam, iChange, NO_INVISIBLE, iChange > 0, false);
+		}
+	}
+
+	std::vector<int> SightPlots(const CvUnit* u)
+	{
+		std::vector<int> out;
+		CvPlot* here = u->plot();
+		if(!here) return out;
+		int range = u->visibilityRange();
+		for(int dx = -range; dx <= range; ++dx)
+		{
+			for(int dy = -range; dy <= range; ++dy)
+			{
+				CvPlot* p = plotXYWithRangeCheck(u->getX(), u->getY(), dx, dy, range);
+				if(p && here->canSeePlot(p, u->getTeam(), range, NO_DIRECTION)) out.push_back((int)p->GetPlotIndex());
+			}
+		}
+		return out;
+	}
+
+	void SaveSight(PlayerTypes eMinor)
+	{
+		GET_PLAYER(eMinor).setScriptData(McpCsSightLedgerWrite(s_sight[eMinor]));
+	}
+
+	void DropSight(PlayerTypes eMinor, int iUnit)
+	{
+		McpCsSightLedger& l = s_sight[eMinor];
+		std::map<int, std::vector<int> >::iterator it = l.unitPlots.find(iUnit);
+		if(it == l.unitPlots.end()) return;
+		LightPlots((TeamTypes)l.team, it->second, -1);
+		l.unitPlots.erase(it);
+		if(l.unitPlots.empty()) l.team = -1;
+		SaveSight(eMinor);
+	}
+
+	void ClearSight(PlayerTypes eMinor)
+	{
+		std::vector<int> units;
+		for(std::map<int, std::vector<int> >::const_iterator it = s_sight[eMinor].unitPlots.begin(); it != s_sight[eMinor].unitPlots.end(); ++it) units.push_back(it->first);
+		for(size_t i = 0; i < units.size(); ++i) DropSight(eMinor, units[i]);
+	}
+
+	// A save carries the counts its ledger lit; a load takes them off, since switching on does not survive it.
+	void UnlightLoadedSight(PlayerTypes eMinor)
+	{
+		McpCsSightLedger l;
+		if(!McpCsSightLedgerRead(GET_PLAYER(eMinor).getScriptData(), l) || l.team < 0) return;
+		for(std::map<int, std::vector<int> >::const_iterator it = l.unitPlots.begin(); it != l.unitPlots.end(); ++it) LightPlots((TeamTypes)l.team, it->second, -1);
+		GET_PLAYER(eMinor).setScriptData("");
+	}
 }
 
 void McpCsLoadSettings()
@@ -299,6 +366,7 @@ void McpCsSwitchOff(PlayerTypes eMinor, const std::string& why)
 {
 	CsState* s = Find(eMinor);
 	if(!s || !s->on) return;
+	ClearSight(eMinor);
 	PlayerTypes ePatron = s->patron;
 	s->on = false;
 	--s_switchedOn;
@@ -371,7 +439,9 @@ std::string McpCsMoveRefusal(const CvUnit* u, const CvPlot* dest)
 	if(!McpCsIsSwitchedOn(e)) return "you have been switched off: your units stay in your land until the game's AI takes you back";
 	int cap = McpCsSendCapFor(e), out = UnitsOut(GET_PLAYER(e), u->GetID());
 	if(out < cap) return "";
-	return McpFormat("at %d influence your ally can have %d of your units outside your land, and %d are out already; bring one home or wait for more influence", McpCsInfluence(e), cap, out);
+	int more = NextSteps(e).moreUnitsOut;
+	std::string wait = more > 0 ? McpFormat(", or wait until your ally's influence reaches %d", more) : "";
+	return McpFormat("at %d influence your ally can have %d of your units outside your land, and %d are out already; bring one home", McpCsInfluence(e), cap, out) + wait;
 }
 
 bool McpCsMayEnter(PlayerTypes eMinor, TeamTypes eTeam)
@@ -405,6 +475,59 @@ void McpCsRevealAround(const CvUnit* u)
 	}
 }
 
+bool McpCsShareSight(CvUnit* u, bool bOn, std::string& err)
+{
+	PlayerTypes e = u->getOwner();
+	if(!McpIsCityStateSeat(e) || !McpCsIsSwitchedOn(e)) { err = "only a switched-on city-state shares its units' sight"; return false; }
+	McpCsSightLedger& l = s_sight[e];
+	if(!bOn) { DropSight(e, u->GetID()); return true; }
+	const McpCsTier* tier = McpCsCurrentTier(e);
+	if(!tier || !tier->revealSight)
+	{
+		McpCsNextSteps next = NextSteps(e);
+		err = next.sight > 0 ? McpFormat("your ally's influence must reach %d before your units' sight can reach them", next.sight) : "your ally's influence does not open your sight to them";
+		return false;
+	}
+	if(l.unitPlots.count(u->GetID())) return true;
+	std::vector<int> plots = SightPlots(u);
+	if(plots.empty()) { err = "this unit sees nothing from where it stands"; return false; }
+	l.team = GET_PLAYER(McpCsPatron(e)).getTeam();
+	LightPlots((TeamTypes)l.team, plots, 1);
+	l.unitPlots[u->GetID()] = plots;
+	SaveSight(e);
+	return true;
+}
+
+std::vector<int> McpCsSharingUnits(PlayerTypes eMinor)
+{
+	std::vector<int> out;
+	if(eMinor < 0 || eMinor >= MAX_CIV_PLAYERS) return out;
+	for(std::map<int, std::vector<int> >::const_iterator it = s_sight[eMinor].unitPlots.begin(); it != s_sight[eMinor].unitPlots.end(); ++it) out.push_back(it->first);
+	return out;
+}
+
+void McpCsSightAfterMove(const CvUnit* u)
+{
+	PlayerTypes e = u->getOwner();
+	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS) return;
+	McpCsSightLedger& l = s_sight[e];
+	std::map<int, std::vector<int> >::iterator it = l.unitPlots.find(u->GetID());
+	if(it == l.unitPlots.end()) return;
+	std::vector<int> plots = SightPlots(u);
+	LightPlots((TeamTypes)l.team, plots, 1);
+	LightPlots((TeamTypes)l.team, it->second, -1);
+	it->second = plots;
+	if(plots.empty()) { l.unitPlots.erase(it); if(l.unitPlots.empty()) l.team = -1; }
+	SaveSight(e);
+}
+
+void McpCsSightBeforeKill(const CvUnit* u)
+{
+	PlayerTypes e = u->getOwner();
+	if(e < MAX_MAJOR_CIVS || e >= MAX_CIV_PLAYERS || s_sight[e].unitPlots.empty()) return;
+	DropSight(e, u->GetID());
+}
+
 void McpCsTick()
 {
 	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
@@ -420,6 +543,11 @@ void McpCsTick()
 			continue;
 		}
 		if(s.on && GET_PLAYER(e).GetMinorCivAI()->GetAlly() != s.patron) McpCsAfterSetAlly(e, GET_PLAYER(e).GetMinorCivAI()->GetAlly());
+		if(s.on && !s_sight[i].unitPlots.empty())
+		{
+			const McpCsTier* tier = McpCsCurrentTier(e);
+			if(!tier || !tier->revealSight) ClearSight(e);
+		}
 		if(s.on || s.releaseAfterTurn) EndTurnIfGone(e, s);
 		if(s.releaseAfterTurn && !GET_PLAYER(e).isTurnActive())
 		{
@@ -473,22 +601,6 @@ std::vector<PlayerTypes> McpCsWaitingForModel()
 	return out;
 }
 
-std::string McpCsToolRefusal(const std::string& tool)
-{
-	static const char* const REFUSED[] =
-	{
-		"declare_war", "make_peace", "set_research", "research_options", "adopt_policy", "policy_options",
-		"choose_ideology", "switch_ideology", "found_pantheon", "found_religion", "enhance_religion",
-		"add_reformation_belief", "deal_options", "propose_deal", "answer_deal", "demand", "discuss",
-		"respond_to_request", "congress", "propose_resolution", "vote_resolution", "abstain", "spies", "move_spy",
-		"stage_coup", "steal_tech", "launch_spaceship", "establish_trade_route", "city_state_action",
-		"tell_city_state", "choose_great_person"
-	};
-	for(size_t i = 0; i < sizeof(REFUSED) / sizeof(REFUSED[0]); ++i)
-		if(tool == REFUSED[i]) return "a city-state does not do that: " + tool + " is decided by the game's rules for city-states";
-	return "";
-}
-
 picojson::value McpCsSeatView(PlayerTypes eMinor)
 {
 	JObj o;
@@ -521,6 +633,19 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 	o["units_out_now"] = J(McpCsUnitsOut(eMinor));
 	o["your_sight_on_their_map"] = J(tier && tier->revealSight);
 	o["you_may_enter_their_land"] = J(tier && tier->enterAllyLand);
+	if(tier && tier->revealSight)
+	{
+		JArr sharing;
+		std::vector<int> units = McpCsSharingUnits(eMinor);
+		for(size_t i = 0; i < units.size(); ++i) sharing.push_back(J(units[i]));
+		o["units_sharing_live_sight"] = JVal(sharing);
+	}
+	McpCsNextSteps next = NextSteps(eMinor);
+	JObj opens;
+	if(next.moreUnitsOut > 0) opens["more_units_out"] = J(next.moreUnitsOut);
+	if(next.sight > 0) opens["your_sight_on_their_map"] = J(next.sight);
+	if(next.enterAllyLand > 0) opens["entering_their_land"] = J(next.enterAllyLand);
+	if(!opens.empty()) o["next_opens_at_influence"] = JVal(opens);
 	std::vector<std::string> talk = McpCsConversation(eMinor, ePatron);
 	if(!talk.empty()) o["conversation_with_your_ally"] = JVal(Latest(talk, MCP_CS_TALK_SHOWN));
 	JObj deeds;
@@ -548,6 +673,11 @@ void McpCsResetForNewGame()
 	}
 	for(int t = 0; t < MAX_CIV_TEAMS; ++t) s_teamOn[t] = false;
 	s_switchedOn = 0;
+	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
+	{
+		s_sight[i] = McpCsSightLedger();
+		if(GET_PLAYER((PlayerTypes)i).isMinorCiv()) UnlightLoadedSight((PlayerTypes)i);
+	}
 	s_talk.clear();
 	s_deeds.clear();
 	for(int i = 0; i < MAX_CIV_PLAYERS; ++i) s_historyRead[i] = false;

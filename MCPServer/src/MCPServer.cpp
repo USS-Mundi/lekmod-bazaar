@@ -18,6 +18,7 @@ namespace CivHooks
 #include "CvUnit.h"
 #include "CvDllPlayer.h"
 #include "CvDllPreGame.h"
+#include "CvDllContext.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
 #include "McpCrashLog.h"
@@ -71,6 +72,8 @@ static bool BeforeGameUpdate(CvGame* self)
 {
 	McpBridge::Get().Tick();
 	ReportPathHookOverlaps();
+	CvDllGameContext* pContext = CvDllGameContext::GetSingleton();
+	if(pContext) McpHeapWatchStart(pContext->GetHeap());
 	return false;
 }
 
@@ -274,10 +277,18 @@ static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam:
 	return original(self, eTeam);
 }
 
-// What a switched-on city-state's units see stays uncovered on its ally's map.
+// What a switched-on city-state's units see stays uncovered on its ally's map; a unit sharing live sight takes it along.
 static void AfterUnitSetXY(CvUnit* self, int, int, bool, bool, bool, bool, bool)
 {
-	if(McpCsAnySwitchedOn() && McpCsIsSwitchedOn(self->getOwner())) McpCsRevealAround(self);
+	if(!McpCsAnySwitchedOn() || !McpCsIsSwitchedOn(self->getOwner())) return;
+	McpCsRevealAround(self);
+	McpCsSightAfterMove(self);
+}
+
+static bool BeforeUnitKill(CvUnit* self, bool, PlayerTypes)
+{
+	McpCsSightBeforeKill(self);
+	return false;
 }
 
 static void AfterRegisterGame(lua_State* L)
@@ -356,6 +367,7 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
 	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
 	Check(CivRegisterAfter<CivHooks::CvUnit_setXY>(host, &AfterUnitSetXY), "after CvUnit::setXY");
+	Check(CivRegisterBefore<CivHooks::CvUnit_kill>(host, &BeforeUnitKill), "before CvUnit::kill");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)static_cast<CivPlayerQueryFn>(&IsPluginControlledPlayer)), "IsPluginControlledPlayer");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)static_cast<CivPlayerQueryFn>(&KeepDeadSlotOpen)), "KeepDeadSlotOpen");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)static_cast<CivPopupRaisedFn>(&PopupRaised)), "PopupRaised");

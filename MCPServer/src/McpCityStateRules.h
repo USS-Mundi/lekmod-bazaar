@@ -3,6 +3,7 @@
 // What a switched-on city-state allows its ally, by the ally's influence: game-free, so it is tested natively
 // (tests/run_city_state_rules_test.sh). The values come from the mod's SQL; these defaults equal the rows it ships.
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,37 @@ const McpCsDisposition* McpCsDispositionFor(const std::vector<McpCsDisposition>&
 // How many of its military units it sends out at this step: never its last one, never below 0.
 int McpCsSendCap(const McpCsTier* tier, int militaryUnits);
 
+// The influence at which each thing its ally does not have yet opens, -1 when nothing higher opens it.
+struct McpCsNextSteps
+{
+	int moreUnitsOut;
+	int sight;
+	int enterAllyLand;
+};
+McpCsNextSteps McpCsNextStepsFor(const std::vector<McpCsTier>& tiers, int influence, int militaryUnits);
+
+// The ally's message to its city-state is the one word that switches it off: "dismiss" (or "/dismiss"), any case.
+bool McpCsIsDismissal(const std::string& text);
+
+// Live sight a city-state shares with its ally: the plots each sharing unit has lit for the ally's team. It lives in
+// the city-state player's script data, which a save writes together with the visibility counts, so a load can take
+// exactly those plots off again.
+struct McpCsSightLedger
+{
+	int team;                                    // -1 while nothing is lit
+	std::map<int, std::vector<int> > unitPlots;  // unit id -> plot indices lit for its sight
+	McpCsSightLedger() : team(-1) {}
+};
+// "" when nothing is lit, so the script data is left empty.
+std::string McpCsSightLedgerWrite(const McpCsSightLedger& ledger);
+// false when the text is not a ledger this plugin wrote; "" reads as an empty ledger.
+bool McpCsSightLedgerRead(const std::string& text, McpCsSightLedger& ledger);
+
 const char* McpCsModifierText(McpCsModifier modifier);
 // allyHistory: the ally's influence once a turn, oldest first.
 std::vector<std::string> McpCsModifiers(const McpCsSettings& settings, int allyInfluence, int runnerUpInfluence, const std::vector<int>& allyHistory);
+
+// Why a city-state's seat may not make this call, or "" when it may: what the game's rules for city-states decide, and
+// what would strip the city the game takes back (disbanding units, turning the city to a process, the treasury's
+// figures). action and item are the call's own arguments, "" when it has none.
+std::string McpCsToolRefusal(const std::string& tool, const std::string& action, const std::string& item);

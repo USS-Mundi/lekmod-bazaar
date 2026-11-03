@@ -94,6 +94,7 @@ MCP_TOOL(ToolStealTech);
 MCP_TOOL(ToolCityState);
 MCP_TOOL(ToolCityStateAction);
 MCP_TOOL(ToolTellCityState);
+MCP_TOOL(ToolShareSight);
 
 // McpCulture.cpp
 MCP_TOOL(ToolChooseIdeology);

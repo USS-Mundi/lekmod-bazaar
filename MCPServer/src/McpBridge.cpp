@@ -10,6 +10,7 @@
 #include "McpPopups.h"
 #include "McpSeat.h"
 #include "McpCityStates.h"
+#include "McpCityStateRules.h"
 #include "McpPlanJournal.h"
 #include "McpTurnPlan.h"
 #include "CvMinorCivAI.h"
@@ -810,12 +811,19 @@ void McpBridge::Impl::DrainChat()
 	}
 }
 
-// The human writes to a city-state from the log window: only its ally may, and the first message switches it on.
+// The human writes to a city-state from the log window: only its ally may, the first message switches it on, and
+// "dismiss" switches it off.
 void McpBridge::Impl::DrainCityStateChat(PlayerTypes eMinor, const std::string& text)
 {
 	PlayerTypes eHuman = GC.getGame().getActivePlayer();
 	CvPlayer& minor = GET_PLAYER(eMinor);
 	std::string err;
+	if(McpCsIsDismissal(text))
+	{
+		if(eHuman != NO_PLAYER && McpCsPatron(eMinor) == eHuman) McpCsSwitchOff(eMinor, "its ally dismissed it");
+		else Append((int)eHuman, "", MCP_LOG_CHAT, McpTool::CivName(eMinor) + " is not switched on.");
+		return;
+	}
 	if(eHuman == NO_PLAYER || !minor.isAlive() || !minor.isMinorCiv() || minor.GetMinorCivAI()->GetAlly() != eHuman || !McpCsSwitchOn(eMinor, eHuman, err))
 	{
 		Append((int)eHuman, "", MCP_LOG_CHAT, "Not sent, you are not their ally now: " + text);
@@ -937,7 +945,7 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	PlayerTypes ePlayerBefore = McpPlayerOf(before);
 	if(ePlayerBefore >= MAX_MAJOR_CIVS)
 	{
-		std::string why = McpCsToolRefusal(pJob->tool);
+		std::string why = McpCsToolRefusal(pJob->tool, McpTool::ArgStr(pJob->args, "action"), McpTool::ArgStr(pJob->args, "item"));
 		if(!why.empty()) { pJob->error = why; return false; }
 	}
 	if(bLogged && bFirstTry && ePlayerBefore != NO_PLAYER) Append((int)ePlayerBefore, McpIdentityLabel(before.identity), szCategory, McpDescribeCall(*pTool, pJob->args));

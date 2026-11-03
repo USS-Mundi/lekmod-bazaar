@@ -90,6 +90,69 @@ namespace
 		CHECK(!Contains(steady, McpCsModifierText(MCP_CS_RISING)));
 		CHECK(!Contains(steady, McpCsModifierText(MCP_CS_FALLING)));
 	}
+
+	void TestRefusals()
+	{
+		CHECK(McpCsToolRefusal("declare_war", "", "").find("a city-state does not do that") == 0);
+		CHECK(McpCsToolRefusal("move_unit", "", "").empty());
+		CHECK(McpCsToolRefusal("unit_action", "fortify", "").empty());
+		CHECK(!McpCsToolRefusal("unit_action", "disband", "").empty());
+		CHECK(McpCsToolRefusal("set_production", "", "UNIT_COMPOSITE_BOWMAN").empty());
+		CHECK(!McpCsToolRefusal("set_production", "", "PROCESS_WEALTH").empty());
+		CHECK(!McpCsToolRefusal("set_production", "", "PROCESS_RESEARCH").empty());
+		CHECK(!McpCsToolRefusal("economic_overview", "", "").empty());
+	}
+	void TestNextSteps()
+	{
+		std::vector<McpCsTier> tiers = McpCsDefaultTiers();
+		McpCsNextSteps low = McpCsNextStepsFor(tiers, 65, 8);
+		CHECK(low.moreUnitsOut == 70 && low.sight == 80 && low.enterAllyLand == 100);
+		McpCsNextSteps mid = McpCsNextStepsFor(tiers, 104, 8);
+		CHECK(mid.moreUnitsOut == 110 && mid.sight == -1 && mid.enterAllyLand == -1);
+		McpCsNextSteps few = McpCsNextStepsFor(tiers, 104, 2);
+		CHECK(few.moreUnitsOut == -1);
+		McpCsNextSteps top = McpCsNextStepsFor(tiers, 150, 8);
+		CHECK(top.moreUnitsOut == -1 && top.sight == -1 && top.enterAllyLand == -1);
+		McpCsNextSteps none = McpCsNextStepsFor(tiers, 40, 8);
+		CHECK(none.moreUnitsOut == 70 && none.sight == 80 && none.enterAllyLand == 100);
+	}
+
+	void TestDismissal()
+	{
+		CHECK(McpCsIsDismissal("dismiss"));
+		CHECK(McpCsIsDismissal("  Dismiss \n"));
+		CHECK(McpCsIsDismissal("/dismiss"));
+		CHECK(!McpCsIsDismissal("please dismiss your guard"));
+		CHECK(!McpCsIsDismissal("dismissed"));
+		CHECK(!McpCsIsDismissal(""));
+	}
+	void TestSightLedger()
+	{
+		McpCsSightLedger empty;
+		CHECK(McpCsSightLedgerWrite(empty).empty());
+		McpCsSightLedger read;
+		CHECK(McpCsSightLedgerRead("", read) && read.team == -1 && read.unitPlots.empty());
+
+		McpCsSightLedger lit;
+		lit.team = 3;
+		lit.unitPlots[8192].push_back(101);
+		lit.unitPlots[8192].push_back(102);
+		lit.unitPlots[16385].push_back(7);
+		McpCsSightLedger back;
+		CHECK(McpCsSightLedgerRead(McpCsSightLedgerWrite(lit), back));
+		CHECK(back.team == 3 && back.unitPlots.size() == 2);
+		CHECK(back.unitPlots[8192].size() == 2 && back.unitPlots[8192][1] == 102);
+		CHECK(back.unitPlots[16385].size() == 1 && back.unitPlots[16385][0] == 7);
+
+		McpCsSightLedger none;
+		none.team = 3;
+		CHECK(McpCsSightLedgerWrite(none).empty());
+
+		McpCsSightLedger foreign;
+		CHECK(!McpCsSightLedgerRead("someone else's data", foreign));
+		CHECK(!McpCsSightLedgerRead("mcp-sight 1|x|5:1", foreign));
+		CHECK(!McpCsSightLedgerRead("mcp-sight 1|3|5:1,b", foreign));
+	}
 }
 
 int main()
@@ -99,6 +162,10 @@ int main()
 	TestUnlocks();
 	TestDisposition();
 	TestModifiers();
+	TestRefusals();
+	TestNextSteps();
+	TestDismissal();
+	TestSightLedger();
 	if(s_failures) { std::printf("%d check(s) failed\n", s_failures); return 1; }
 	std::printf("all city-state rule checks pass\n");
 	return 0;

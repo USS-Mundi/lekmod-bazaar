@@ -290,6 +290,21 @@ MCP_TOOL(ToolTellCityState)
 	return JVal(o);
 }
 
+MCP_TOOL(ToolShareSight)
+{
+	CvPlayer* me = MeActing(err);
+	if(!me) return JVal();
+	CvUnit* u = RequireUnit(me, args, err);
+	if(!u) return JVal();
+	if(!McpCsShareSight(u, ArgBool(args, "on", true), err)) return JVal();
+	JObj o;
+	JArr sharing;
+	std::vector<int> units = McpCsSharingUnits(me->GetID());
+	for(size_t i = 0; i < units.size(); ++i) sharing.push_back(J(units[i]));
+	o["units_sharing_live_sight"] = JVal(sharing);
+	return JVal(o);
+}
+
 MCP_TOOL(ToolCityStateAction)
 {
 	CvPlayer* me = MeActing(err);
