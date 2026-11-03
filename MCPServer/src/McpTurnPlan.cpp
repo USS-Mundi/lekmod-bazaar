@@ -8,6 +8,7 @@
 #include "McpBridge.h"
 #include "McpSeat.h"
 #include "McpCityStateFiles.h"
+#include "McpMapImage.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -40,6 +41,8 @@ namespace
 
 	std::map<int, SeatPlan> s_plans;
 	volatile LONG s_owesPlan[MAX_PLAYERS] = { 0 };
+	std::map<int, int> s_lastEnded; // the game turn each seat last ended since the game loaded
+	std::map<int, int> s_landShown; // the game turn each seat was last shown its land
 
 	// Waiting, planning and the seat's own housekeeping are not orders.
 	bool Plannable(const std::string& tool)
@@ -169,6 +172,12 @@ namespace
 			}
 		}
 		return v;
+	}
+
+	int LastEnded(int seat)
+	{
+		std::map<int, int>::const_iterator it = s_lastEnded.find(seat);
+		return it == s_lastEnded.end() ? -1 : it->second;
 	}
 
 	bool Due(const SeatPlan& p)
@@ -394,7 +403,7 @@ MCP_TOOL(ToolPlanTurn)
 		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least arc (how you mean to win from here) and thrust (what you are doing about it now)");
 	std::vector<std::string> checks = CheckOrders(me, plan.orders);
 	warnings.insert(warnings.end(), checks.begin(), checks.end());
-	plan.plannedTurn = iTurn;
+	plan.plannedTurn = McpPlanMadeOnTurn(iTurn, McpIsPlayerTurn(*me), LastEnded(me->GetID()));
 	plan.note = ArgStr(args, "note");
 	plan.view = Capture(me);
 	bool bReplaced = s_plans.count((int)me->GetID()) > 0;
@@ -443,6 +452,13 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	if(err.empty()) o["briefing"] = briefing;
 	McpGamePlan& game = GamePlan(me);
 	if(game.turn >= 0) o["your_game_plan"] = J(McpGamePlanText(game, false));
+	int iTurn = GC.getGame().getGameTurn();
+	std::map<int, int>::iterator shown = s_landShown.find((int)me->GetID());
+	if((shown == s_landShown.end() || shown->second != iTurn) && !McpLogsFlag("MCPServer-turn-picture.off"))
+	{
+		s_landShown[(int)me->GetID()] = iTurn;
+		McpAddLandToTurnStart(me->GetID(), o);
+	}
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second)) return;
 	SeatPlan& p = it->second;
@@ -518,6 +534,7 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err)
 void McpNoteTurnEnded(CvPlayer* me)
 {
 	McpOwePlan(me->GetID());
+	s_lastEnded[(int)me->GetID()] = GC.getGame().getGameTurn();
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second)) return;
 	if(McpPlanJournalOn())
@@ -542,6 +559,8 @@ void McpTurnPlanReset()
 	s_plans.clear();
 	s_gamePlans.clear();
 	for(int i = 0; i < MAX_PLAYERS; ++i) InterlockedExchange(&s_owesPlan[i], 0);
+	s_lastEnded.clear();
+	s_landShown.clear();
 }
 
 void McpOwePlan(int seat)

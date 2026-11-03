@@ -32,8 +32,9 @@ struct McpMapHex
 	std::string cityLabel;
 	std::vector<McpMapUnit> units;   // up to three; two are drawn, the rest counted in the +N
 	int extraUnits;
+	bool worked;                        // a citizen of the viewer's city works it: a white dot under the ground label
 
-	McpMapHex() : x(0), y(0), fill(0), fogged(false), unexplored(false), riverE(false), riverSE(false), riverSW(false), hasRoad(false), owned(false), borderColor(0), city(false), cityColor(0), extraUnits(0)
+	McpMapHex() : x(0), y(0), fill(0), fogged(false), unexplored(false), riverE(false), riverSE(false), riverSW(false), hasRoad(false), owned(false), borderColor(0), city(false), cityColor(0), extraUnits(0), worked(false)
 	{
 		for(int i = 0; i < 6; ++i) road[i] = border[i] = false;
 	}

@@ -2,6 +2,7 @@
 #include "McpMapImage.h"
 #include "McpMapDraw.h"
 #include "McpToolSupport.h"
+#include "McpTurnCycle.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -142,6 +143,7 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 	std::vector<McpMapHex> hexes;
 	std::set<PlayerTypes> owners;
 	int iUnexplored = 0, iFogged = 0;
+	bool bAnyWorked = false;
 	for(int y = cy - radius; y <= cy + radius; ++y)
 		for(int x = x0; x <= cx + radius + 1; ++x)
 		{
@@ -170,6 +172,9 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 			h.hasRoad = eRoute != NO_ROUTE;
 			PlayerTypes eOwner = p->getRevealedOwner(eTeam);
 			if(eOwner != NO_PLAYER) { h.owned = true; h.borderColor = OwnerColor(eOwner); owners.insert(eOwner); }
+			CvCity* pWorker = p->isBeingWorked() ? p->getWorkingCity() : NULL;
+			h.worked = pWorker && pWorker->getOwner() == eMe && !p->isCity();
+			if(h.worked) bAnyWorked = true;
 			for(int d = 0; d < NUM_DIRECTION_TYPES; ++d)
 			{
 				CvPlot* n = plotDirection(p->getX(), p->getY(), (DirectionTypes)d);
@@ -264,6 +269,7 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 		legend.push_back(e);
 	}
 	std::string footer = McpFormat("center %d,%d  radius %d  hatched = out of sight now  ? = unexplored", cx, cy, radius);
+	if(bAnyWorked) footer += "  white dot = worked by your city";
 
 	std::string err;
 	std::string png = McpDrawHexMapPng(hexes, legend, footer, x0, y1, 2 * radius + 3, 2 * radius + 1, map.isWrapX() ? map.getGridWidth() : 0, err);
@@ -271,4 +277,89 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 	McpSaveMapCopy(png);
 	summary = McpFormat("%d tiles drawn around (%d,%d); %d of them out of sight now; %d unexplored, marked ?", (int)hexes.size() - iUnexplored, cx, cy, iFogged, iUnexplored);
 	return png;
+}
+
+void McpAddLandToTurnStart(PlayerTypes eMe, picojson::object& o)
+{
+	const int REACH = 4, MAX_PICTURES = 3;
+	CvPlayer& me = GET_PLAYER(eMe);
+	TeamTypes eTeam = me.getTeam();
+	std::vector<CvCity*> cities;
+	int iLoop = 0;
+	for(CvCity* c = me.firstCity(&iLoop); c; c = me.nextCity(&iLoop)) cities.push_back(c);
+	if(cities.empty()) return;
+
+	// Any tile near a city can be a picture's center.
+	std::vector<CvPlot*> centers;
+	std::set<int> seen;
+	for(size_t k = 0; k < cities.size(); ++k)
+		for(int dy = -REACH; dy <= REACH; ++dy)
+			for(int dx = -REACH; dx <= REACH; ++dx)
+			{
+				CvPlot* p = plotXYWithRangeCheck(cities[k]->getX(), cities[k]->getY(), dx, dy, REACH);
+				if(p && seen.insert(p->GetPlotIndex()).second) centers.push_back(p);
+			}
+	std::vector<std::vector<int> > dist(centers.size());
+	for(size_t c = 0; c < centers.size(); ++c)
+		for(size_t k = 0; k < cities.size(); ++k)
+			dist[c].push_back(plotDistance(centers[c]->getX(), centers[c]->getY(), cities[k]->getX(), cities[k]->getY()));
+	std::vector<McpPicture> pictures = McpPlanPictures(dist, REACH, MAX_PICTURES);
+
+	JArr images, lines;
+	std::vector<bool> pictured(cities.size(), false);
+	for(size_t i = 0; i < pictures.size(); ++i)
+	{
+		CvPlot* center = centers[pictures[i].center];
+		int radius = std::min(8, std::max(5, pictures[i].farthest + 4));
+		std::string summary;
+		JArr inCities, inUnits;
+		std::string png = McpRenderMapPng(eMe, center->getX(), center->getY(), radius, summary, inCities, inUnits);
+		if(png.empty()) { lines.push_back(J("a picture could not be drawn: " + summary)); continue; }
+		images.push_back(J(McpBase64(png)));
+		std::string names;
+		for(size_t k = 0; k < pictures[i].cities.size(); ++k)
+		{
+			pictured[pictures[i].cities[k]] = true;
+			names += (k ? ", " : "") + std::string(cities[pictures[i].cities[k]]->getName().c_str());
+		}
+		lines.push_back(J(McpFormat("picture %d: around (%d,%d), radius %d: %s", (int)images.size(), center->getX(), center->getY(), radius, names.c_str())));
+	}
+	std::string missing;
+	for(size_t k = 0; k < cities.size(); ++k)
+		if(!pictured[k]) missing += (missing.empty() ? "" : ", ") + std::string(cities[k]->getName().c_str());
+	if(!missing.empty()) lines.push_back(J("not pictured: " + missing + " (map_image shows them)"));
+
+#ifdef MCP_LEKMOD
+	int iBuyRange = GC.getMAXIMUM_BUY_PLOT_DISTANCE();
+#endif
+	for(size_t k = 0; k < cities.size(); ++k)
+	{
+		CvCity* c = cities[k];
+#ifndef MCP_LEKMOD
+		int iBuyRange = c->getBuyPlotDistance();
+#endif
+		std::string withResource;
+		int iCheapest = -1;
+		for(int dy = -iBuyRange; dy <= iBuyRange; ++dy)
+			for(int dx = -iBuyRange; dx <= iBuyRange; ++dx)
+			{
+				CvPlot* p = plotXYWithRangeCheck(c->getX(), c->getY(), dx, dy, iBuyRange);
+				if(!p || !c->CanBuyPlot(p->getX(), p->getY(), true)) continue;
+				int iCost = c->GetBuyPlotCost(p->getX(), p->getY());
+				ResourceTypes eRes = p->getResourceType(eTeam);
+				if(eRes != NO_RESOURCE)
+					withResource += McpFormat("%s(%d,%d) %s %dg", withResource.empty() ? "" : ", ", p->getX(), p->getY(), ResourceName(eRes), iCost);
+				else if(iCheapest < 0 || iCost < iCheapest) iCheapest = iCost;
+			}
+		std::string line = McpFormat("%s (%d,%d) pop %d: ", c->getName().c_str(), c->getX(), c->getY(), c->getPopulation());
+		if(withResource.empty() && iCheapest < 0) line += "nothing to buy";
+		else
+		{
+			if(!withResource.empty()) line += "buy " + withResource;
+			if(iCheapest >= 0) line += McpFormat("%sother tiles from %dg", withResource.empty() ? "buy " : "; ", iCheapest);
+		}
+		lines.push_back(J(line));
+	}
+	o["your_land"] = JVal(lines);
+	if(!images.empty()) o["image_png_base64"] = JVal(images);
 }

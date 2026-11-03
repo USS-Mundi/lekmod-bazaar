@@ -87,3 +87,20 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 std::string McpGamePlanText(const McpGamePlan& plan, bool bFull);
 // Turns until gold reaches cost at rate a turn: 0 if it already has, -1 if it never will.
 int McpTurnsToAfford(int cost, int gold, int rate);
+// The turn a plan is made on, which it runs after: the game turn during the seat's own turn, else the turn the seat
+// last ended (-1 if none since the game loaded), since the game may already be on the turn the seat is waiting for.
+int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn);
+
+// One picture of a seat's land: the candidate center it is drawn around, the cities within reach of it, and the
+// distance to the farthest of them.
+struct McpPicture
+{
+	int center;
+	std::vector<int> cities;
+	int farthest;
+	McpPicture() : center(-1), farthest(0) {}
+};
+// Pictures that together show every city, at most maxPictures. dist[c][k] is the distance from candidate center c to
+// city k; a city is in a picture when it is within reach of the center. Each picture takes the center that shows the
+// most cities not yet shown, then the one whose farthest city is nearest, then the first.
+std::vector<McpPicture> McpPlanPictures(const std::vector<std::vector<int> >& dist, int reach, int maxPictures);

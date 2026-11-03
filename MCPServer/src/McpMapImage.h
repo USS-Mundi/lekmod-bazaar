@@ -10,3 +10,8 @@
 std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::string& summary, picojson::array& cities, picojson::array& units);
 
 std::string McpBase64(const std::string& bytes);
+
+// Game thread. A seat's land for the start of its turn: up to three pictures that together show every city and the
+// ground around it, under image_png_base64 (a list), and under your_land a line per picture and per city with the
+// tiles it can buy and their prices.
+void McpAddLandToTurnStart(PlayerTypes eMe, picojson::object& o);

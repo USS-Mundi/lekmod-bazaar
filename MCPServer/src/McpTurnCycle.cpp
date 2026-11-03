@@ -253,3 +253,41 @@ int McpTurnsToAfford(int cost, int gold, int rate)
 	if(rate <= 0) return -1;
 	return (cost - gold + rate - 1) / rate;
 }
+
+int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn)
+{
+	if(bMyTurn || lastEndedTurn < 0 || lastEndedTurn > gameTurn) return gameTurn;
+	return lastEndedTurn;
+}
+
+std::vector<McpPicture> McpPlanPictures(const std::vector<std::vector<int> >& dist, int reach, int maxPictures)
+{
+	std::vector<McpPicture> pictures;
+	size_t nCities = dist.empty() ? 0 : dist[0].size();
+	std::vector<bool> shown(nCities, false);
+	size_t left = nCities;
+	while(left > 0 && (int)pictures.size() < maxPictures)
+	{
+		McpPicture best;
+		int bestNew = 0;
+		for(size_t c = 0; c < dist.size(); ++c)
+		{
+			McpPicture p;
+			p.center = (int)c;
+			int fresh = 0;
+			for(size_t k = 0; k < nCities && k < dist[c].size(); ++k)
+			{
+				if(dist[c][k] > reach) continue;
+				p.cities.push_back((int)k);
+				if(dist[c][k] > p.farthest) p.farthest = dist[c][k];
+				if(!shown[k]) ++fresh;
+			}
+			if(fresh > bestNew || (fresh == bestNew && fresh > 0 && p.farthest < best.farthest)) { best = p; bestNew = fresh; }
+		}
+		if(bestNew == 0) break;
+		for(size_t k = 0; k < best.cities.size(); ++k)
+			if(!shown[best.cities[k]]) { shown[best.cities[k]] = true; --left; }
+		pictures.push_back(best);
+	}
+	return pictures;
+}

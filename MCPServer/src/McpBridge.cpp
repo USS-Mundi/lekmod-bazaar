@@ -1268,16 +1268,23 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		bool bIsError = false;
 		picojson::value value = CallTool(token, itName->second.get<std::string>(), args, bIsError);
 
-		// A tool that hands back a picture puts it under image_png_base64; it travels as MCP
-		// image content next to the rest of the result.
-		picojson::array content;
-		picojson::object image;
+		// A tool that hands back pictures puts them under image_png_base64, one or a list; they
+		// travel as MCP image content after the rest of the result.
+		picojson::array content, images;
 		if(value.is<picojson::object>() && value.get<picojson::object>().count("image_png_base64"))
 		{
 			picojson::object o = value.get<picojson::object>();
-			image["type"] = picojson::value("image");
-			image["data"] = o["image_png_base64"];
-			image["mimeType"] = picojson::value("image/png");
+			picojson::array data;
+			if(o["image_png_base64"].is<picojson::array>()) data = o["image_png_base64"].get<picojson::array>();
+			else data.push_back(o["image_png_base64"]);
+			for(size_t i = 0; i < data.size(); ++i)
+			{
+				picojson::object image;
+				image["type"] = picojson::value("image");
+				image["data"] = data[i];
+				image["mimeType"] = picojson::value("image/png");
+				images.push_back(picojson::value(image));
+			}
 			o.erase("image_png_base64");
 			value = picojson::value(o);
 		}
@@ -1285,7 +1292,7 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		text["type"] = picojson::value("text");
 		text["text"] = picojson::value(value.is<std::string>() ? value.get<std::string>() : value.serialize());
 		content.push_back(picojson::value(text));
-		if(!image.empty()) content.push_back(picojson::value(image));
+		content.insert(content.end(), images.begin(), images.end());
 		picojson::object result;
 		result["content"] = picojson::value(content);
 		result["isError"] = picojson::value(bIsError);

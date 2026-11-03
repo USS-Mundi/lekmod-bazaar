@@ -7,4 +7,6 @@
 #include <string>
 
 bool McpPlanJournalOn();
+// Whether Logs\\<name> exists under the game's My Games folder: the turn cycle's switches.
+bool McpLogsFlag(const char* name);
 void McpPlanJournalAppend(const std::string& jsonLine);

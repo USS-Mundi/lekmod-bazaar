@@ -23,10 +23,15 @@ namespace
 	Lock s_lock;
 }
 
+bool McpLogsFlag(const char* name)
+{
+	std::string flag = LogsFile(name);
+	return !flag.empty() && GetFileAttributesA(flag.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 bool McpPlanJournalOn()
 {
-	std::string flag = LogsFile("MCPServer-plan-journal.on");
-	return !flag.empty() && GetFileAttributesA(flag.c_str()) != INVALID_FILE_ATTRIBUTES;
+	return McpLogsFlag("MCPServer-plan-journal.on");
 }
 
 void McpPlanJournalAppend(const std::string& jsonLine)

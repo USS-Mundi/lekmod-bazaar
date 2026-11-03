@@ -281,6 +281,60 @@ namespace
 		CHECK(McpTurnsToAfford(390, 302, 0) == -1);
 		CHECK(McpTurnsToAfford(390, 302, -5) == -1);
 	}
+
+	void TestPlanCountsFromTheTurnTheSeatEnded()
+	{
+		// Planning during its own turn 12: the plan is for turn 13.
+		CHECK(McpPlanMadeOnTurn(12, true, 11) == 12);
+		// Ended turn 12 and planning while the others still play turn 12.
+		CHECK(McpPlanMadeOnTurn(12, false, 12) == 12);
+		// Last in the turn order: the game moved on to turn 13 the moment it ended turn 12, before it planned.
+		CHECK(McpPlanMadeOnTurn(13, false, 12) == 12);
+		// No turn ended since the game loaded: the game turn is all there is.
+		CHECK(McpPlanMadeOnTurn(13, false, -1) == 13);
+	}
+
+	void TestOnePictureWhenTheCitiesFit()
+	{
+		// Two candidate centers, three cities: the second center has every city within reach 4.
+		std::vector<std::vector<int> > dist(2);
+		int a[] = { 0, 5, 7 }, b[] = { 3, 2, 4 };
+		dist[0].assign(a, a + 3);
+		dist[1].assign(b, b + 3);
+		std::vector<McpPicture> pics = McpPlanPictures(dist, 4, 3);
+		CHECK(pics.size() == 1);
+		CHECK(pics[0].center == 1 && pics[0].cities.size() == 3 && pics[0].farthest == 4);
+	}
+
+	void TestSpreadCitiesTakeMorePicturesUpToTheLimit()
+	{
+		// Each center reaches only its own city: three cities need three pictures, a limit of two leaves one out.
+		std::vector<std::vector<int> > dist(3);
+		int a[] = { 0, 9, 9 }, b[] = { 9, 1, 9 }, c[] = { 9, 9, 2 };
+		dist[0].assign(a, a + 3);
+		dist[1].assign(b, b + 3);
+		dist[2].assign(c, c + 3);
+		CHECK(McpPlanPictures(dist, 4, 3).size() == 3);
+		std::vector<McpPicture> two = McpPlanPictures(dist, 4, 2);
+		CHECK(two.size() == 2 && two[0].center == 0 && two[1].center == 1);
+	}
+
+	void TestTiesGoToTheTighterPicture()
+	{
+		// Both centers reach both cities; the one whose farthest city is nearer wins.
+		std::vector<std::vector<int> > dist(2);
+		int a[] = { 4, 4 }, b[] = { 2, 1 };
+		dist[0].assign(a, a + 2);
+		dist[1].assign(b, b + 2);
+		std::vector<McpPicture> pics = McpPlanPictures(dist, 4, 3);
+		CHECK(pics.size() == 1 && pics[0].center == 1 && pics[0].farthest == 2);
+	}
+
+	void TestNoCitiesNoPictures()
+	{
+		std::vector<std::vector<int> > dist(1);
+		CHECK(McpPlanPictures(dist, 4, 3).empty());
+	}
 }
 
 int main()
@@ -304,6 +358,11 @@ int main()
 	TestUnknownHeadingAndLongPlan();
 	TestPlanText();
 	TestTurnsToAfford();
+	TestPlanCountsFromTheTurnTheSeatEnded();
+	TestOnePictureWhenTheCitiesFit();
+	TestSpreadCitiesTakeMorePicturesUpToTheLimit();
+	TestTiesGoToTheTighterPicture();
+	TestNoCitiesNoPictures();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
 	return 0;

@@ -299,6 +299,13 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		if(!h.topRight.empty()) ground += (ground.empty() ? "" : " ") + h.topRight;
 		if(!h.bottomLeft.empty() && ground.size() + h.bottomLeft.size() <= 11) ground += (ground.empty() ? "" : " ") + h.bottomLeft;
 		if(!ground.empty()) DrawCentered(g, ground, labelFont, ink, px, py + 14 * s);
+		if(h.worked)
+		{
+			SolidBrush dot(Color(255, 255, 255, 255));
+			Pen dotEdge(Color(255, 0, 0, 0), 1 * s);
+			g.FillEllipse(&dot, px - 4 * s, py + 21 * s, 8 * s, 8 * s);
+			g.DrawEllipse(&dotEdge, px - 4 * s, py + 21 * s, 8 * s, 8 * s);
+		}
 		if(h.city)
 		{
 			PointF c[6];
