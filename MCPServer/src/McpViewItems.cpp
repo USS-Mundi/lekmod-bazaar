@@ -1,0 +1,206 @@
+#include "McpViewItems.h"
+#include <cmath>
+#include <cstdio>
+#include <map>
+
+// Visual C++ 2008, the game's compiler, has sprintf_s but no snprintf; both take the buffer's size.
+#if defined(_MSC_VER)
+#define MCP_SNPRINTF sprintf_s
+#else
+#define MCP_SNPRINTF snprintf
+#endif
+
+namespace
+{
+	typedef picojson::object JObj;
+	typedef picojson::array JArr;
+	typedef picojson::value JVal;
+	typedef std::vector<std::pair<std::string, std::string> > Fields;
+
+	const char* const FIRST[] = { "name", "civ", "civilization", "leader", "owner" };
+	const char* const DROPPED[] = { "help", "how", "is_combat", "is_worker" };
+	const char* const TICKING_EXACT[] = { "gold", "culture", "faith", "turn", "year", "end turn blocking", "golden age turns left" };
+	const char* const TICKING_LAST[] = { "progress", "turns left", "turns to grow", "food stored", "score", "influence", "moves left",
+		"activity", "needs orders" };
+
+	template <size_t N> bool In(const char* const (&list)[N], const std::string& s)
+	{
+		for(size_t i = 0; i < N; ++i) if(s == list[i]) return true;
+		return false;
+	}
+
+	std::string Spaced(const std::string& key)
+	{
+		std::string s = key;
+		for(size_t i = 0; i < s.size(); ++i) if(s[i] == '_') s[i] = ' ';
+		return s;
+	}
+
+	std::string Number(double d)
+	{
+		char buf[64];
+		if(d == std::floor(d) && d > -2e9 && d < 2e9) MCP_SNPRINTF(buf, sizeof(buf), "%d", (int)d);
+		else MCP_SNPRINTF(buf, sizeof(buf), "%.1f", d);
+		return buf;
+	}
+
+	std::string Scalar(const JVal& v)
+	{
+		if(v.is<std::string>()) return v.get<std::string>();
+		if(v.is<bool>()) return v.get<bool>() ? "yes" : "no";
+		if(v.is<double>()) return Number(v.get<double>());
+		if(v.is<picojson::null>()) return "none";
+		return v.serialize();
+	}
+
+	bool IsList(const JVal& v)
+	{
+		if(!v.is<JArr>()) return false;
+		const JArr& a = v.get<JArr>();
+		for(size_t i = 0; i < a.size(); ++i) if(a[i].is<JObj>()) return true;
+		return false;
+	}
+
+	bool IsEmptyArray(const JVal& v) { return v.is<JArr>() && v.get<JArr>().empty(); }
+
+	std::string Inline(const JVal& v)
+	{
+		if(v.is<JObj>())
+		{
+			const JObj& o = v.get<JObj>();
+			std::string out;
+			for(JObj::const_iterator it = o.begin(); it != o.end(); ++it)
+			{
+				if(In(DROPPED, it->first)) continue;
+				if(!out.empty()) out += ", ";
+				out += Spaced(it->first) + " " + Inline(it->second);
+			}
+			return "{" + out + "}";
+		}
+		if(v.is<JArr>())
+		{
+			const JArr& a = v.get<JArr>();
+			bool bObjects = false;
+			for(size_t i = 0; i < a.size(); ++i) if(a[i].is<JObj>() || a[i].is<JArr>()) bObjects = true;
+			std::string out;
+			for(size_t i = 0; i < a.size(); ++i) out += (i ? (bObjects ? "; " : ", ") : "") + Inline(a[i]);
+			return "[" + out + "]";
+		}
+		return Scalar(v);
+	}
+
+	void AddFields(const std::string& prefix, const JObj& o, Fields& out)
+	{
+		std::string pre = prefix.empty() ? std::string() : prefix + ".";
+		for(size_t i = 0; i < sizeof(FIRST) / sizeof(FIRST[0]); ++i)
+		{
+			JObj::const_iterator it = o.find(FIRST[i]);
+			if(it != o.end() && !it->second.is<JObj>() && !it->second.is<JArr>()) out.push_back(std::make_pair(pre + FIRST[i], Scalar(it->second)));
+		}
+		JObj::const_iterator x = o.find("x"), y = o.find("y");
+		bool bAt = x != o.end() && y != o.end() && x->second.is<double>() && y->second.is<double>();
+		if(bAt) out.push_back(std::make_pair(pre + "at", "(" + Number(x->second.get<double>()) + "," + Number(y->second.get<double>()) + ")"));
+		bool bNamed = o.find("name") != o.end();
+		for(JObj::const_iterator it = o.begin(); it != o.end(); ++it)
+		{
+			const std::string& k = it->first;
+			bool bNested = it->second.is<JObj>() || it->second.is<JArr>();
+			if(In(FIRST, k) && !bNested) continue;
+			if(In(DROPPED, k) || IsEmptyArray(it->second)) continue;
+			if(bAt && (k == "x" || k == "y")) continue;
+			if(bNamed && k == "type") continue;
+			std::string name = pre + Spaced(k);
+			if(it->second.is<JObj>()) AddFields(name, it->second.get<JObj>(), out);
+			else out.push_back(std::make_pair(name, Inline(it->second)));
+		}
+	}
+
+	McpViewItem Item(const std::string& section, const std::string& key, const Fields& fields)
+	{
+		McpViewItem it;
+		it.section = section;
+		it.key = key;
+		it.fields = fields;
+		return it;
+	}
+}
+
+void McpObjectFields(const picojson::object& o, std::vector<std::pair<std::string, std::string> >& out)
+{
+	AddFields("", o, out);
+}
+
+std::string McpObjectKey(const std::string& section, const picojson::object& o, size_t index)
+{
+	const char* const ids[] = { "id", "city_id", "unit_id", "player_id" };
+	JObj::const_iterator owner = o.find("owner");
+	std::string whose = owner != o.end() && owner->second.is<std::string>() ? ":" + owner->second.get<std::string>() : std::string();
+	for(size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); ++i)
+	{
+		JObj::const_iterator it = o.find(ids[i]);
+		if(it != o.end() && !it->second.is<JObj>() && !it->second.is<JArr>()) return section + ":" + ids[i] + ":" + Scalar(it->second) + whose;
+	}
+	JObj::const_iterator x = o.find("x"), y = o.find("y");
+	if(x != o.end() && y != o.end()) return section + ":" + Scalar(x->second) + "," + Scalar(y->second);
+	const char* const names[] = { "name", "civ", "civilization", "type", "tech", "policy", "branch", "resource" };
+	for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+	{
+		JObj::const_iterator it = o.find(names[i]);
+		if(it != o.end() && it->second.is<std::string>()) return section + ":" + it->second.get<std::string>();
+	}
+	return section + ":#" + Number((double)index);
+}
+
+void McpScreenItems(const std::string& section, const picojson::value& result, std::vector<McpViewItem>& items)
+{
+	if(!result.is<JObj>()) return;
+	const JObj& o = result.get<JObj>();
+	JObj plain;
+	std::vector<std::string> lists;
+	for(JObj::const_iterator it = o.begin(); it != o.end(); ++it)
+	{
+		if(IsList(it->second)) lists.push_back(it->first);
+		else if(!IsEmptyArray(it->second)) plain[it->first] = it->second;
+	}
+	Fields f;
+	AddFields("", plain, f);
+	if(!f.empty()) items.push_back(Item(section, section + ":summary", f));
+	for(size_t i = 0; i < lists.size(); ++i)
+	{
+		std::string name = section + ": " + Spaced(lists[i]);
+		const JArr& a = o.find(lists[i])->second.get<JArr>();
+		for(size_t k = 0; k < a.size(); ++k)
+		{
+			if(!a[k].is<JObj>()) continue;
+			Fields lf;
+			AddFields("", a[k].get<JObj>(), lf);
+			items.push_back(Item(name, McpObjectKey(name, a[k].get<JObj>(), k), lf));
+		}
+	}
+}
+
+void McpUniqueKeys(std::vector<McpViewItem>& items)
+{
+	std::map<std::string, int> seen;
+	for(size_t i = 0; i < items.size(); ++i)
+	{
+		int n = ++seen[items[i].key];
+		if(n > 1) items[i].key += "#" + Number((double)n);
+	}
+}
+
+bool McpTickingField(const std::string& name)
+{
+	if(In(TICKING_EXACT, name)) return true;
+	size_t dot = name.rfind('.');
+	return In(TICKING_LAST, dot == std::string::npos ? name : name.substr(dot + 1));
+}
+
+std::set<std::string> McpTickingFields(const std::vector<McpViewItem>& items)
+{
+	std::set<std::string> out;
+	for(size_t i = 0; i < items.size(); ++i)
+		for(size_t k = 0; k < items[i].fields.size(); ++k)
+			if(McpTickingField(items[i].fields[k].first)) out.insert(items[i].fields[k].first);
+	return out;
+}

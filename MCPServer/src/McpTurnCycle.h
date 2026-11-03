@@ -90,6 +90,10 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 std::string McpGamePlanText(const McpGamePlan& plan);
 // One heading as it is shown beside its state: "plan (T<turn>): <text>", or "plan: none written".
 std::string McpGamePlanLine(const McpGamePlan& plan, const std::string& heading);
+// A plan saved under the earlier headings (read, arc, thrust, rivals, tripwires) moved onto the current ones: read,
+// arc, thrust and tripwires into direction, rivals into relations (only where those are empty), written on the plan's
+// last turn. The earlier headings are removed. A plan without them is left as it is.
+void McpMigratePlan(McpGamePlan& plan);
 // What has no plan: each heading with no text, and "<city> in the cities plan" for each city the cities plan does not
 // name.
 std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vector<std::string>& cities);
@@ -110,7 +114,8 @@ struct McpViewSection
 };
 
 // The turn view with what is new marked where it sits: "+ " a thing not there last time, "~ " one whose fields
-// changed (the old values follow in "(was: ...)"), "- " one gone (its last line), "  " the same. Fields in ticking
+// changed (the old values follow in "(was: ...)"; for a list, "<field>: removed ...; added ..." with only the
+// elements that changed), "- " one gone (its last line), "  " the same. Fields in ticking
 // (counters that move every turn) are shown but do not count as a change. Sections come in the order now has them,
 // then any only before had. Without bHasBefore (the first view since the game loaded) nothing is marked. A field
 // named name or type is shown by its value alone; the others as "<field> <value>", joined by " · ".

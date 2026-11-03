@@ -368,6 +368,35 @@ namespace
 		CHECK(Has(Section(view, "seen"), "- Brute · at (3,3)"));
 	}
 
+	void TestChangedListsShowOnlyWhatChanged()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(Item("cities", "city:1", "name", "Caen", "worked", "[(12,33) wheat 2f 1p; (14,33) deer 1f 2p]"));
+		now.push_back(Item("cities", "city:1", "name", "Caen", "worked", "[(12,33) wheat 2f 1p; (13,34) forest 1f 1p]"));
+		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
+		CHECK(Has(Section(view, "cities"), "~ Caen · worked [(12,33) wheat 2f 1p; (13,34) forest 1f 1p]  (was: worked: removed (14,33) deer 1f 2p; added (13,34) forest 1f 1p)"));
+	}
+
+	void TestOldPlanHeadingsMoveToTheNewOnes()
+	{
+		McpGamePlan plan;
+		plan.turn = 12;
+		plan.sections["read"] = "2 cities";
+		plan.sections["arc"] = "science";
+		plan.sections["thrust"] = "libraries";
+		plan.sections["rivals"] = "Maurya: ahead";
+		plan.sections["tripwires"] = "war";
+		McpMigratePlan(plan);
+		CHECK(plan.sections.count("arc") == 0 && plan.sections.count("rivals") == 0 && plan.sections.count("read") == 0);
+		CHECK(plan.sections["direction"] == "Read: 2 cities. Arc: science. Thrust: libraries. Tripwires: war.");
+		CHECK(plan.sections["relations"] == "Maurya: ahead");
+		CHECK(plan.written["direction"] == 12 && plan.written["relations"] == 12);
+		McpGamePlan fresh;
+		fresh.sections["direction"] = "wide";
+		McpMigratePlan(fresh);
+		CHECK(fresh.sections.size() == 1 && fresh.sections["direction"] == "wide");
+	}
+
 	void TestTurnsToAfford()
 	{
 		CHECK(McpTurnsToAfford(300, 320, 10) == 0);
@@ -458,6 +487,8 @@ int main()
 	TestNewChangedSameAndGone();
 	TestTickingFieldsShowButDoNotMark();
 	TestSectionsKeepTheirOrderAndGoneSectionsStay();
+	TestChangedListsShowOnlyWhatChanged();
+	TestOldPlanHeadingsMoveToTheNewOnes();
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
 	TestOnePictureWhenTheCitiesFit();

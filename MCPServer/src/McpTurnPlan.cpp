@@ -46,6 +46,7 @@ namespace
 	std::map<int, int> s_landShown; // the game turn each seat was last shown its land
 	std::map<int, int> s_viewShown; // the game turn each seat was last shown its turn view
 	std::map<int, std::vector<McpViewItem> > s_viewAtEnd; // what each seat could see when it last ended a turn
+	std::map<int, std::string> s_viewText;  // the turn view each seat was last shown, sent again on a later wait that turn
 
 	// Waiting, planning and the seat's own housekeeping are not orders.
 	bool Plannable(const std::string& tool)
@@ -231,6 +232,7 @@ namespace
 			std::string entry = ArgStr(o, "log");
 			if(!entry.empty()) plan.log.push_back(entry);
 		}
+		McpMigratePlan(plan);
 		return plan;
 	}
 
@@ -440,7 +442,7 @@ MCP_TOOL(ToolPlanTurn)
 	o["ok"] = J(true);
 	o["orders"] = J((int)plan.orders.size());
 	if(bReplaced) o["replaced"] = J("your earlier plan");
-	if(bPlanChanged) o["game_plan"] = J("saved: it heads every turn from now on");
+	if(bPlanChanged) o["game_plan"] = J("saved: each turn view shows each part beside the state it is about");
 	if(!warnings.empty()) o["warnings"] = JVal(Lines(warnings));
 	o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn comes it shows everything you can see, what changed marked in place, your plans beside it, and these orders"
 		: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
@@ -484,6 +486,20 @@ namespace
 		return NULL;
 	}
 
+	// The units and cities a plan's orders name.
+	void PlannedIds(const std::vector<McpPlannedOrder>& orders, std::set<int>& units, std::set<int>& cities)
+	{
+		for(size_t i = 0; i < orders.size(); ++i)
+		{
+			JVal v;
+			picojson::parse(v, orders[i].args);
+			if(!v.is<JObj>()) continue;
+			int unit = ArgInt(v.get<JObj>(), "unit_id", -1), city = ArgInt(v.get<JObj>(), "city_id", -1);
+			if(unit >= 0) units.insert(unit);
+			if(city >= 0) cities.insert(city);
+		}
+	}
+
 	std::string JoinLines(const std::vector<std::string>& lines, const char* none)
 	{
 		if(lines.empty()) return std::string("  ") + none + "\n";
@@ -495,7 +511,7 @@ namespace
 	// The whole turn view as text: every section with what changed marked, each part of the game plan after the
 	// state it is about, then what happened, what the game waits on, and what has no plan or no order.
 	std::string TurnViewText(CvPlayer* me, const McpTurnViewData& d, const McpGamePlan& plan, const std::vector<McpViewItem>* before,
-		int& added, int& changed, int& gone)
+		const std::set<int>& plannedUnits, const std::set<int>& plannedCities, int& added, int& changed, int& gone)
 	{
 		std::vector<McpViewItem> none;
 		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, d.items, d.ticking, before != NULL);
@@ -533,7 +549,13 @@ namespace
 		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(d.news, "nothing reported");
 		out += "\nTHE GAME IS WAITING ON\n" + JoinLines(d.decisions, "nothing");
 		out += "\nWITHOUT A PLAN\n" + JoinLines(McpWithoutAPlan(plan, d.cities), "nothing");
-		out += "\nWITHOUT AN ORDER\n" + JoinLines(d.withoutOrder, "nothing");
+		std::vector<std::string> waiting;
+		for(size_t i = 0; i < d.withoutOrder.size(); ++i)
+		{
+			const McpWithoutOrder& w = d.withoutOrder[i];
+			if(!(w.city ? plannedCities : plannedUnits).count(w.id)) waiting.push_back(w.label);
+		}
+		out += "\nWITHOUT AN ORDER (your planned orders counted)\n" + JoinLines(waiting, "nothing");
 		return out;
 	}
 }
@@ -543,15 +565,21 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	McpGamePlan& game = GamePlan(me);
 	int iTurn = GC.getGame().getGameTurn();
 	int seat = (int)me->GetID();
+	std::map<int, SeatPlan>::iterator due = s_plans.find(seat);
+	if(due != s_plans.end() && !Due(due->second)) due = s_plans.end();
 	std::map<int, int>::iterator viewed = s_viewShown.find(seat);
-	if(viewed == s_viewShown.end() || viewed->second != iTurn)
+	if(viewed != s_viewShown.end() && viewed->second == iTurn) o["turn_view"] = J(s_viewText[seat]);
+	else
 	{
 		s_viewShown[seat] = iTurn;
 		McpTurnViewData d = McpGatherTurnView(me);
 		McpGatherTurnNews(d);
+		std::set<int> plannedUnits, plannedCities;
+		if(due != s_plans.end()) PlannedIds(due->second.orders, plannedUnits, plannedCities);
 		std::map<int, std::vector<McpViewItem> >::const_iterator before = s_viewAtEnd.find(seat);
 		int added = 0, changed = 0, gone = 0;
-		std::string text = TurnViewText(me, d, game, before == s_viewAtEnd.end() ? NULL : &before->second, added, changed, gone);
+		std::string text = TurnViewText(me, d, game, before == s_viewAtEnd.end() ? NULL : &before->second, plannedUnits, plannedCities, added, changed, gone);
+		s_viewText[seat] = text;
 		o["turn_view"] = J(text);
 		if(McpPlanJournalOn())
 		{
@@ -574,9 +602,8 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		s_landShown[seat] = iTurn;
 		McpAddLandToTurnStart(me->GetID(), o);
 	}
-	std::map<int, SeatPlan>::iterator it = s_plans.find(seat);
-	if(it == s_plans.end() || !Due(it->second)) return;
-	SeatPlan& p = it->second;
+	if(due == s_plans.end()) return;
+	SeatPlan& p = due->second;
 	ShowChanges(me, p);
 	o["your_aim"] = J(p.aim);
 	o["your_plan"] = JVal(OrdersJson(p.orders));
@@ -678,6 +705,7 @@ void McpTurnPlanReset()
 	s_landShown.clear();
 	s_viewShown.clear();
 	s_viewAtEnd.clear();
+	s_viewText.clear();
 }
 
 void McpOwePlan(int seat)

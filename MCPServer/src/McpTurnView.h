@@ -12,13 +12,23 @@
 
 class CvPlayer;
 
+// A unit waiting for orders, or a city with nothing to build: its id, so planned orders that name it can take it off
+// the list, and how it is shown.
+struct McpWithoutOrder
+{
+	bool city;
+	int id;
+	std::string label;
+	McpWithoutOrder() : city(false), id(-1) {}
+};
+
 struct McpTurnViewData
 {
 	std::vector<McpViewItem> items;
 	std::set<std::string> ticking;       // fields that move every turn: shown, never counted as a change
 	std::vector<std::string> news;       // what happened since the last turn: the game's events and messages
 	std::vector<std::string> decisions;  // what the game is waiting on: pending choices, requests, what blocks the turn
-	std::vector<std::string> withoutOrder; // units waiting for orders and cities with nothing to build
+	std::vector<McpWithoutOrder> withoutOrder; // units waiting for orders and cities with nothing to build
 	std::vector<std::string> cities;     // the seat's city names
 };
 

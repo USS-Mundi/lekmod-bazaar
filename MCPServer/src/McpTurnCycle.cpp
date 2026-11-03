@@ -267,6 +267,37 @@ std::string McpGamePlanLine(const McpGamePlan& plan, const std::string& heading)
 	return text.empty() ? std::string("plan: none written") : "plan" + Written(plan, heading) + ": " + text;
 }
 
+void McpMigratePlan(McpGamePlan& plan)
+{
+	const char* const earlier[] = { "read", "arc", "thrust", "tripwires" };
+	std::string direction;
+	bool bAny = false;
+	for(size_t i = 0; i < sizeof(earlier) / sizeof(earlier[0]); ++i)
+	{
+		std::map<std::string, std::string>::iterator it = plan.sections.find(earlier[i]);
+		if(it == plan.sections.end()) continue;
+		bAny = true;
+		std::string text = it->second;
+		if(!text.empty())
+		{
+			if(text[text.size() - 1] != '.') text += ".";
+			direction += (direction.empty() ? "" : " ") + Title(earlier[i]) + ": " + text;
+		}
+		plan.sections.erase(it);
+	}
+	std::map<std::string, std::string>::iterator rivals = plan.sections.find("rivals");
+	std::string relations;
+	if(rivals != plan.sections.end())
+	{
+		bAny = true;
+		relations = rivals->second;
+		plan.sections.erase(rivals);
+	}
+	if(!bAny) return;
+	if(!direction.empty() && Section(plan, "direction").empty()) { plan.sections["direction"] = direction; plan.written["direction"] = plan.turn; }
+	if(!relations.empty() && Section(plan, "relations").empty()) { plan.sections["relations"] = relations; plan.written["relations"] = plan.turn; }
+}
+
 std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vector<std::string>& cities)
 {
 	std::vector<std::string> out;
@@ -294,6 +325,54 @@ namespace
 		return out;
 	}
 
+	bool IsListText(const std::string& v)
+	{
+		return v.size() >= 2 && v[0] == '[' && v[v.size() - 1] == ']';
+	}
+
+	// The elements of a "[...]" list: split at the top level on "; " when it has one, else on ", ".
+	std::vector<std::string> ListElements(const std::string& v)
+	{
+		std::string inner = v.substr(1, v.size() - 2);
+		bool bSemi = false;
+		int depth = 0;
+		for(size_t i = 0; i + 1 < inner.size(); ++i)
+		{
+			char c = inner[i];
+			if(c == '[' || c == '{' || c == '(') ++depth;
+			else if(c == ']' || c == '}' || c == ')') --depth;
+			else if(depth == 0 && c == ';' && inner[i + 1] == ' ') bSemi = true;
+		}
+		char sep = bSemi ? ';' : ',';
+		std::vector<std::string> out;
+		std::string cur;
+		depth = 0;
+		for(size_t i = 0; i < inner.size(); ++i)
+		{
+			char c = inner[i];
+			if(c == '[' || c == '{' || c == '(') ++depth;
+			else if(c == ']' || c == '}' || c == ')') --depth;
+			if(depth == 0 && c == sep && i + 1 < inner.size() && inner[i + 1] == ' ') { out.push_back(cur); cur.clear(); ++i; continue; }
+			cur += c;
+		}
+		if(!cur.empty()) out.push_back(cur);
+		return out;
+	}
+
+	std::string ListChange(const std::string& before, const std::string& now)
+	{
+		std::vector<std::string> a = ListElements(before), b = ListElements(now);
+		std::string removed, added;
+		for(size_t i = 0; i < a.size(); ++i)
+			if(std::find(b.begin(), b.end(), a[i]) == b.end()) removed += (removed.empty() ? "" : "; ") + a[i];
+		for(size_t i = 0; i < b.size(); ++i)
+			if(std::find(a.begin(), a.end(), b[i]) == a.end()) added += (added.empty() ? "" : "; ") + b[i];
+		std::string out;
+		if(!removed.empty()) out += "removed " + removed;
+		if(!added.empty()) out += (out.empty() ? "" : "; ") + std::string("added ") + added;
+		return out.empty() ? std::string("reordered") : out;
+	}
+
 	// The fields that changed, outside the ticking ones, as "<field> <old value>"; empty when nothing did.
 	std::string Was(const McpViewItem& before, const McpViewItem& now, const std::set<std::string>& ticking)
 	{
@@ -313,7 +392,9 @@ namespace
 			std::string was = o == oldValues.end() ? std::string("none") : o->second;
 			if(n != newValues.end() && o != oldValues.end() && n->second == o->second) continue;
 			if(!out.empty()) out += "; ";
-			out += f + " " + was;
+			if(o != oldValues.end() && n != newValues.end() && IsListText(o->second) && IsListText(n->second))
+				out += f + ": " + ListChange(o->second, n->second);
+			else out += f + " " + was;
 		}
 		return out;
 	}
