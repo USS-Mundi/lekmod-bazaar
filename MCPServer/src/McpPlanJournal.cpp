@@ -29,6 +29,12 @@ bool McpPlanJournalOn()
 	return !flag.empty() && GetFileAttributesA(flag.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
+bool McpAgentsTogetherOn()
+{
+	std::string flag = LogsFile("MCPServer-agents-together.on");
+	return !flag.empty() && GetFileAttributesA(flag.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 void McpPlanJournalAppend(const std::string& jsonLine)
 {
 	std::string path = LogsFile("MCPServer-plan-journal.jsonl");

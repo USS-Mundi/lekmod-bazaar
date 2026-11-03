@@ -8,3 +8,7 @@
 
 bool McpPlanJournalOn();
 void McpPlanJournalAppend(const std::string& jsonLine);
+
+// Logs\MCPServer-agents-together.on in the same folder: a single-player game with model seats plays simultaneous
+// turns, the seats taking theirs at the same time as the human (McpApplyTurnMode). Read when a game starts or loads.
+bool McpAgentsTogetherOn();
