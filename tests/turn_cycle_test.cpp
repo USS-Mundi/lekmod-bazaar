@@ -2,6 +2,7 @@
 #include "McpTurnCycle.h"
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -220,15 +221,16 @@ namespace
 		return m;
 	}
 
-	void TestFirstPlanNeedsArcAndThrust()
+	void TestFirstPlanNeedsDirection()
 	{
 		McpGamePlan plan;
 		std::string err;
 		std::vector<std::string> warn;
-		CHECK(!McpGamePlanApply(plan, Fields("arc", "land first"), "", 5, err, warn) && err.find("thrust") != std::string::npos);
+		CHECK(!McpGamePlanApply(plan, Fields("cities", "Roma: settler"), "", 5, err, warn) && err.find("direction") != std::string::npos);
 		err.clear();
-		CHECK(McpGamePlanApply(plan, Fields("arc", "land first", "thrust", "settler by T14"), "", 5, err, warn));
-		CHECK(plan.turn == 5 && plan.sections["arc"] == "land first" && plan.log.size() == 1 && plan.log[0] == "T5: first plan");
+		CHECK(McpGamePlanApply(plan, Fields("direction", "land first", "cities", "Roma: settler"), "", 5, err, warn));
+		CHECK(plan.turn == 5 && plan.sections["direction"] == "land first" && plan.log.size() == 1 && plan.log[0] == "T5: first plan");
+		CHECK(plan.written["direction"] == 5 && plan.written["cities"] == 5);
 	}
 
 	void TestChangesNeedWhyAndKeepTheRest()
@@ -236,13 +238,15 @@ namespace
 		McpGamePlan plan;
 		std::string err;
 		std::vector<std::string> warn;
-		McpGamePlanApply(plan, Fields("arc", "land first", "thrust", "settler by T14"), "", 5, err, warn);
-		CHECK(!McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "", 9, err, warn) && err.find("why") != std::string::npos);
+		McpGamePlanApply(plan, Fields("direction", "land first", "research", "Pottery"), "", 5, err, warn);
+		CHECK(!McpGamePlanApply(plan, Fields("research", "Bronze Working"), "", 9, err, warn) && err.find("why") != std::string::npos);
 		err.clear();
-		CHECK(McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "Turkish army at the border", 9, err, warn));
-		CHECK(plan.sections["arc"] == "land first" && plan.sections["thrust"] == "walls in Antium");
-		CHECK(plan.turn == 9 && plan.log.size() == 2 && plan.log[1] == "T9: Turkish army at the border");
-		CHECK(McpGamePlanApply(plan, Fields("thrust", "walls in Antium"), "", 10, err, warn) && plan.log.size() == 2 && plan.turn == 9);
+		CHECK(McpGamePlanApply(plan, Fields("research", "Bronze Working"), "barbarians next door", 9, err, warn));
+		CHECK(plan.sections["direction"] == "land first" && plan.sections["research"] == "Bronze Working");
+		CHECK(plan.turn == 9 && plan.log.size() == 2 && plan.log[1] == "T9: barbarians next door");
+		// Each heading keeps the turn it was last written; the one left alone keeps its own.
+		CHECK(plan.written["research"] == 9 && plan.written["direction"] == 5);
+		CHECK(McpGamePlanApply(plan, Fields("research", "Bronze Working"), "", 10, err, warn) && plan.log.size() == 2 && plan.turn == 9);
 	}
 
 	void TestUnknownHeadingAndLongPlan()
@@ -250,27 +254,118 @@ namespace
 		McpGamePlan plan;
 		std::string err;
 		std::vector<std::string> warn;
-		CHECK(!McpGamePlanApply(plan, Fields("arc", "x", "dreams", "y"), "", 1, err, warn) && err.find("dreams") != std::string::npos);
+		CHECK(!McpGamePlanApply(plan, Fields("direction", "x", "arc", "y"), "", 1, err, warn) && err.find("arc") != std::string::npos);
+		CHECK(err.find("relations") != std::string::npos);
 		std::string longText;
-		for(int i = 0; i < 460; ++i) longText += "word ";
+		for(int i = 0; i < 710; ++i) longText += "word ";
 		err.clear();
-		CHECK(McpGamePlanApply(plan, Fields("arc", longText.c_str(), "thrust", "t"), "", 1, err, warn));
+		CHECK(McpGamePlanApply(plan, Fields("direction", longText.c_str(), "policy", "t"), "", 1, err, warn));
 		CHECK(warn.size() == 1 && warn[0].find("words") != std::string::npos);
 	}
 
-	void TestPlanText()
+	void TestSevenHeadingsInOrder()
+	{
+		const std::vector<std::string>& h = McpGamePlanHeadings();
+		const char* const want[] = { "direction", "cities", "military", "civilians", "research", "policy", "relations" };
+		CHECK(h.size() == 7);
+		for(size_t i = 0; i < h.size() && i < 7; ++i) CHECK(h[i] == want[i]);
+	}
+
+	void TestPlanTextShowsEveryHeadingWithItsTurn()
 	{
 		McpGamePlan plan;
 		std::string err;
 		std::vector<std::string> warn;
-		std::map<std::string, std::string> f;
-		f["read"] = "3rd in score"; f["arc"] = "science"; f["thrust"] = "universities"; f["rivals"] = "Canada: culture"; f["tripwires"] = "Sistine built";
-		McpGamePlanApply(plan, f, "", 40, err, warn);
-		std::string full = McpGamePlanText(plan, true), head = McpGamePlanText(plan, false);
-		CHECK(full.find("Read: 3rd in score") != std::string::npos && full.find("Rivals: Canada: culture") != std::string::npos);
-		CHECK(full.find("T40: first plan") != std::string::npos);
-		CHECK(head.find("Arc: science") != std::string::npos && head.find("Thrust: universities") != std::string::npos);
-		CHECK(head.find("Tripwires: Sistine built") != std::string::npos && head.find("Read:") == std::string::npos);
+		McpGamePlanApply(plan, Fields("direction", "science", "cities", "Roma: library"), "", 40, err, warn);
+		McpGamePlanApply(plan, Fields("research", "Philosophy"), "Writing landed", 44, err, warn);
+		std::string text = McpGamePlanText(plan);
+		CHECK(text.find("Direction (T40): science") != std::string::npos);
+		CHECK(text.find("Research (T44): Philosophy") != std::string::npos);
+		CHECK(text.find("Military: none written") != std::string::npos);
+		CHECK(text.find("T44: Writing landed") != std::string::npos);
+		CHECK(McpGamePlanLine(plan, "cities") == "plan (T40): Roma: library");
+		CHECK(McpGamePlanLine(plan, "policy") == "plan: none written");
+	}
+
+	void TestWithoutAPlan()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		McpGamePlanApply(plan, Fields("direction", "wide", "cities", "Roma: settler. Milano: monument"), "", 3, err, warn);
+		std::vector<std::string> cities;
+		cities.push_back("Roma"); cities.push_back("Milano"); cities.push_back("Napoli");
+		std::vector<std::string> gaps = McpWithoutAPlan(plan, cities);
+		CHECK(Has(gaps, "Napoli in the cities plan"));
+		CHECK(!Has(gaps, "Roma in the cities plan") && !Has(gaps, "Milano in the cities plan"));
+		CHECK(Has(gaps, "military") && Has(gaps, "civilians") && Has(gaps, "research") && Has(gaps, "policy") && Has(gaps, "relations"));
+		CHECK(!Has(gaps, "direction") && !Has(gaps, "cities"));
+	}
+
+	McpViewItem Item(const char* section, const char* key, const char* f1, const char* v1, const char* f2 = NULL, const char* v2 = NULL)
+	{
+		McpViewItem it;
+		it.section = section;
+		it.key = key;
+		it.fields.push_back(std::make_pair(std::string(f1), std::string(v1)));
+		if(f2) it.fields.push_back(std::make_pair(std::string(f2), std::string(v2)));
+		return it;
+	}
+
+	const std::vector<std::string>& Section(const std::vector<McpViewSection>& view, const char* name)
+	{
+		static std::vector<std::string> none;
+		for(size_t i = 0; i < view.size(); ++i) if(view[i].name == name) return view[i].lines;
+		return none;
+	}
+
+	void TestFirstViewHasNoMarks()
+	{
+		std::vector<McpViewItem> before, now;
+		now.push_back(Item("cities", "city:1", "name", "Roma", "population", "3"));
+		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), false);
+		CHECK(view.size() == 1 && view[0].name == "cities");
+		CHECK(Section(view, "cities").size() == 1 && Section(view, "cities")[0] == "  Roma · population 3");
+	}
+
+	void TestNewChangedSameAndGone()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(Item("cities", "city:1", "name", "Roma", "population", "3"));
+		before.push_back(Item("units", "unit:7", "type", "Warrior", "at", "(5,5)"));
+		before.push_back(Item("units", "unit:8", "type", "Scout", "at", "(9,9)"));
+		now.push_back(Item("cities", "city:1", "name", "Roma", "population", "4"));
+		now.push_back(Item("cities", "city:2", "name", "Milano", "population", "1"));
+		now.push_back(Item("units", "unit:7", "type", "Warrior", "at", "(5,5)"));
+		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
+		const std::vector<std::string>& cities = Section(view, "cities");
+		CHECK(Has(cities, "~ Roma · population 4  (was: population 3)"));
+		CHECK(Has(cities, "+ Milano · population 1"));
+		const std::vector<std::string>& units = Section(view, "units");
+		CHECK(Has(units, "  Warrior · at (5,5)"));
+		CHECK(Has(units, "- Scout · at (9,9)"));
+	}
+
+	void TestTickingFieldsShowButDoNotMark()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(Item("cities", "city:1", "name", "Roma", "food stored", "12/30"));
+		now.push_back(Item("cities", "city:1", "name", "Roma", "food stored", "15/30"));
+		std::set<std::string> ticking;
+		ticking.insert("food stored");
+		std::vector<McpViewSection> view = McpMarkView(before, now, ticking, true);
+		CHECK(Has(Section(view, "cities"), "  Roma · food stored 15/30"));
+	}
+
+	void TestSectionsKeepTheirOrderAndGoneSectionsStay()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(Item("seen", "seen:1", "type", "Brute", "at", "(3,3)"));
+		now.push_back(Item("empire", "empire", "gold", "18"));
+		now.push_back(Item("cities", "city:1", "name", "Roma"));
+		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
+		CHECK(view.size() == 3 && view[0].name == "empire" && view[1].name == "cities" && view[2].name == "seen");
+		CHECK(Has(Section(view, "seen"), "- Brute · at (3,3)"));
 	}
 
 	void TestTurnsToAfford()
@@ -353,10 +448,16 @@ int main()
 	TestMostUrgentFirstAndCapped();
 	TestOrdersToRun();
 	TestWhyKinds();
-	TestFirstPlanNeedsArcAndThrust();
+	TestFirstPlanNeedsDirection();
 	TestChangesNeedWhyAndKeepTheRest();
 	TestUnknownHeadingAndLongPlan();
-	TestPlanText();
+	TestSevenHeadingsInOrder();
+	TestPlanTextShowsEveryHeadingWithItsTurn();
+	TestWithoutAPlan();
+	TestFirstViewHasNoMarks();
+	TestNewChangedSameAndGone();
+	TestTickingFieldsShowButDoNotMark();
+	TestSectionsKeepTheirOrderAndGoneSectionsStay();
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
 	TestOnePictureWhenTheCitiesFit();

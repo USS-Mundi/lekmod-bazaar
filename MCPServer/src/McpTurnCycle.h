@@ -5,6 +5,7 @@
 // and run_plan carries out the orders it keeps. McpTurnPlan.cpp reads the game into these shapes.
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -66,25 +67,56 @@ std::vector<McpPlannedOrder> McpOrdersToRun(const std::vector<McpPlannedOrder>& 
 bool McpIsWhyKind(const std::string& kind);
 std::string McpWhyKinds();
 
-// The game plan a seat keeps across turns: fixed headings so the game can show and track it, the seat's own words
-// under each, and a log of why it changed.
+// The game plan a seat keeps across turns: one document of its intentions under fixed headings, so the game can
+// show each part beside the state it is about, the turn each heading was last written, and a log of why it changed.
 struct McpGamePlan
 {
 	std::map<std::string, std::string> sections; // heading -> text
+	std::map<std::string, int> written;          // heading -> the turn it was last written
 	std::vector<std::string> log;                // "T<turn>: <why>", oldest first
 	int turn;                                    // the turn it last changed, -1 before the first plan
 	McpGamePlan() : turn(-1) {}
 };
 
-// read, arc, thrust, rivals, tripwires: the order they are shown in.
+// direction, cities, military, civilians, research, policy, relations: the order they are shown in.
 const std::vector<std::string>& McpGamePlanHeadings();
-// Replaces the headings given; the others stay. A first plan needs arc and thrust; a later change needs why, which
-// goes into the log. Giving a heading its current text is no change. warnings: what does not stop the change (a plan
-// past 450 words). False, with err, when the change is refused.
+// Replaces the headings given; the others stay. A first plan needs direction; a later change needs why, which goes
+// into the log. Giving a heading its current text is no change. warnings: what does not stop the change (a plan past
+// 700 words). False, with err, when the change is refused.
 bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string>& changes, const std::string& why,
 	int turn, std::string& err, std::vector<std::string>& warnings);
-// The plan as text: every heading and the last 8 log lines, or only arc, thrust and tripwires.
-std::string McpGamePlanText(const McpGamePlan& plan, bool bFull);
+// The plan as text: every heading with the turn it was written ("none written" for an empty one), then the last 8
+// log lines.
+std::string McpGamePlanText(const McpGamePlan& plan);
+// One heading as it is shown beside its state: "plan (T<turn>): <text>", or "plan: none written".
+std::string McpGamePlanLine(const McpGamePlan& plan, const std::string& heading);
+// What has no plan: each heading with no text, and "<city> in the cities plan" for each city the cities plan does not
+// name.
+std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vector<std::string>& cities);
+
+// One line of the turn view: a thing the player can see (a city, a unit, a civilization...), under its section, with
+// a key that names the same thing turn after turn, and its fields in the order they are shown.
+struct McpViewItem
+{
+	std::string section;
+	std::string key;
+	std::vector<std::pair<std::string, std::string> > fields;
+};
+
+struct McpViewSection
+{
+	std::string name;
+	std::vector<std::string> lines;
+};
+
+// The turn view with what is new marked where it sits: "+ " a thing not there last time, "~ " one whose fields
+// changed (the old values follow in "(was: ...)"), "- " one gone (its last line), "  " the same. Fields in ticking
+// (counters that move every turn) are shown but do not count as a change. Sections come in the order now has them,
+// then any only before had. Without bHasBefore (the first view since the game loaded) nothing is marked. A field
+// named name or type is shown by its value alone; the others as "<field> <value>", joined by " · ".
+std::vector<McpViewSection> McpMarkView(const std::vector<McpViewItem>& before, const std::vector<McpViewItem>& now,
+	const std::set<std::string>& ticking, bool bHasBefore);
+
 // Turns until gold reaches cost at rate a turn: 0 if it already has, -1 if it never will.
 int McpTurnsToAfford(int cost, int gold, int rate);
 // The turn a plan is made on, which it runs after: the game turn during the seat's own turn, else the turn the seat

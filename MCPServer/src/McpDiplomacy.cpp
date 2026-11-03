@@ -962,7 +962,7 @@ MCP_TOOL(ToolDiplomacy)
 		if(!other.isAlive() || other.GetID() == me->GetID() || !GET_TEAM(me->getTeam()).isHasMet(other.getTeam())) continue;
 		JObj r;
 		r["civilization"] = J(CivName(other.GetID()));
-		r["human"] = J(other.isHuman());
+		r["played_by"] = J(McpPlayedByModel(other.GetID()) ? "an agent seat" : other.isHuman() ? "the human" : "the game's AI");
 		r["relations"] = RelationJson(me, other);
 		rel.push_back(JVal(r));
 	}

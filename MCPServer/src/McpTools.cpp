@@ -384,8 +384,6 @@ MCP_TOOL(ToolUnitOptions)
 		if(defs[i].needsMoves && !u->canMove()) waiting.push_back(J(defs[i].name));
 		else actions.push_back(J(defs[i].name));
 	}
-	if(u->CanAutomate(AUTOMATE_EXPLORE)) actions.push_back(J("explore"));
-	if(u->CanAutomate(AUTOMATE_BUILD)) actions.push_back(J("automate_work"));
 	if(u->IsAutomated()) actions.push_back(J("stop_automation"));
 	o["actions"] = JVal(actions);
 	if(!waiting.empty())
@@ -733,27 +731,10 @@ MCP_TOOL(ToolUnitAction)
 		return JVal(o);
 	}
 
-	if(action == "explore" && me->isMinorCiv())
-	{
-		err = "a city-state's units do not wander off on their own: move them with move_unit, within what your ally may have out of your land";
-		return JVal();
-	}
 	if(action == "explore" || action == "automate_work")
 	{
-		bool bExplore = action == "explore";
-		if(!u->CanAutomate(bExplore ? AUTOMATE_EXPLORE : AUTOMATE_BUILD))
-		{
-			err = bExplore ? "this unit cannot explore on its own (only land and sea combat units can, and only while unexplored land it can reach remains)"
-			               : "only a worker or work boat can be automated";
-			return JVal();
-		}
-		u->Automate(bExplore ? AUTOMATE_EXPLORE : AUTOMATE_BUILD);
-		o["ok"] = J(true);
-		o["warning"] = J(bExplore
-		    ? "The game's AI now steers this unit. It picks its own route toward unexplored land, avoids danger poorly and can walk into barbarians or hostile units and die, and it hands the unit back to you when nothing it can reach is left to explore. Any direct order or stop_automation takes it back sooner."
-		    : "The game's AI now decides what this worker builds. It knows nothing of your plans: it may chop forests or jungles you wanted kept, ignore a strategic resource you need next, build roads you do not need and improve tiles you would not have chosen. Any direct order or stop_automation takes it back.");
-		o["unit"] = UnitJson(u);
-		return JVal(o);
+		err = "explore and automate_work are not offered: every unit is moved by its player, with move_unit and unit_action";
+		return JVal();
 	}
 	if(action == "stop_automation")
 	{
@@ -837,7 +818,7 @@ MCP_TOOL(ToolUnitAction)
 		return JVal(o);
 	}
 
-	err = "unknown action '" + action + "'; use one of " + UnitActionNames() + ", build, explore, automate_work, stop_automation, rebase, air_sweep, paradrop, nuke or disband";
+	err = "unknown action '" + action + "'; use one of " + UnitActionNames() + ", build, stop_automation, rebase, air_sweep, paradrop, nuke or disband";
 	return JVal();
 }
 
@@ -1218,11 +1199,11 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When it is your turn, the result also carries the briefing; once a turn, your land: pictures that together show every city and the ground around it (a white dot marks a tile your city works), and what each city can buy and for how much; and, if you sent a plan with plan_turn, that plan and what changed in what you can see since you made it. A wait over about 55 seconds needs the MCP client's tool timeout raised, or the client gives up first.",
+		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. Once a turn, when it is your turn, the result carries turn_view: everything you can see, one thing per line (your empire, each city and its citizens' tiles, each of your units, every unit of others in sight, research, policies, religion, the players at the table, civilizations and city-states, diplomacy, known cities, rankings, economy, military, trade routes, victory), with what is new since your last turn marked + (new), ~ (changed, with the old value) or - (gone), each part of your game plan beside the state it is about, what happened since your last turn, what the game is waiting on, and what has no plan or no order. It also carries pictures of your land (a white dot marks a tile your city works) and what each city can buy and for how much, and, if you sent a plan with plan_turn, its orders. A wait over about 55 seconds needs the MCP client's tool timeout raised, or the client gives up first.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
 		{ MCP_TOOL_PLAN_TURN,
-		  "Send your next turn as a plan, any time after you end a turn, so the thinking happens while others play. orders: the orders you will give, in order, each {tool, args} exactly as you would call them; end with end_turn to finish the turn with them. aim: what in your game plan this turn moves, or the course you are holding, until when, and what would end it. plan (when your game plan changes): any of the headings read, arc, thrust, rivals, tripwires, each your own words; the rest stay as they were. why: what made you change it, which goes into the plan's log; needed for any change after the first. The game plan heads every turn. The result warns of orders that would not work when the turn opens (gold it will have, what the city can take, whether a unit can get there). When your turn comes, wait_for_my_turn shows the plan and what changed since you made it, and run_plan carries it out in one call. A new plan replaces the last. note: anything you want to remember about it.",
-		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"read\":{\"type\":\"string\"},\"arc\":{\"type\":\"string\"},\"thrust\":{\"type\":\"string\"},\"rivals\":{\"type\":\"string\"},\"tripwires\":{\"type\":\"string\"}}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
+		  "Send your next turn as a plan, any time after you end a turn, so the thinking happens while others play. orders: the orders you will give, in order, each {tool, args} exactly as you would call them; end with end_turn to finish the turn with them. aim: what in your game plan this turn moves, or the course you are holding, until when, and what would end it. plan (when your game plan changes): any of the headings direction (how you win from here, who is in the way, what would change it), cities (each city: what it builds next and the tiles that feed it), military (each unit or group and its job), civilians (settlers, workers, great people and their jobs), research (the next techs), policy (the next picks), relations (each player: what you intend toward them and what you want from them), each your own words; the rest stay as they were, and each keeps the turn it was written. A first plan needs direction. why: what made you change it, which goes into the plan's log; needed for any change after the first. Each turn's view shows each part beside the state it is about. The result warns of orders that would not work when the turn opens (gold it will have, what the city can take, whether a unit can get there). When your turn comes, wait_for_my_turn shows these orders with the whole turn view, and run_plan carries them out in one call. A new plan replaces the last. note: anything you want to remember about it.",
+		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"direction\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":\"string\"}}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
 		{ MCP_TOOL_RUN_PLAN,
 		  "Carry out your plan for this turn in one call: unread game messages are acknowledged first, then each order runs in turn as if you had called it, and end_turn runs only if nothing before it failed. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of wait_for_my_turn asks for it.",
 		  "{\"type\":\"object\",\"properties\":{\"drop\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}},\"add\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"set_aside\":{\"type\":\"boolean\"},\"why\":{\"type\":\"object\"}}}", NULL, LOG_NONE, false },
@@ -1272,7 +1253,7 @@ namespace
 		  "Order a unit to move to a tile. Multi-turn moves continue when you end each turn (the unit is still in place when your next turn opens); do not re-issue them. Fails with a reason if there is no path. preview_only=true shows the path and turns without moving. To attack, use attack.",
 		  SCHEMA_UNIT_XY_PREVIEW, ToolMoveUnit, LOG_MOVE, false },
 		{ "unit_action",
-		  "Give a unit an order on its current tile. action is one of the names unit_options lists under actions, build (with build=BUILD_... from builds_here), rebase (aircraft, with x and y of one of your cities or carriers), air_sweep (fighters, x and y of the tile to clear of interceptors), paradrop (paratroopers, x and y of the landing tile), nuke (atomic bombs and nuclear missiles, x and y of the target), or disband. Aircraft bomb with the attack tool. explore (land or sea combat units) and automate_work (workers and work boats) hand the unit to the game's own AI, which moves it every turn until you give it any order or call stop_automation; it knows nothing of your plans, so this trades control for speed.",
+		  "Give a unit an order on its current tile. action is one of the names unit_options lists under actions, build (with build=BUILD_... from builds_here), rebase (aircraft, with x and y of one of your cities or carriers), air_sweep (fighters, x and y of the tile to clear of interceptors), paradrop (paratroopers, x and y of the landing tile), nuke (atomic bombs and nuclear missiles, x and y of the target), or disband. Aircraft bomb with the attack tool. stop_automation takes back a unit the game's AI was moving.",
 		  "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"action\":{\"type\":\"string\"},\"build\":{\"type\":\"string\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"unit_id\",\"action\"]}", ToolUnitAction, LOG_UNIT, false },
 		{ "attack",
 		  "Attack the enemy unit or city on a tile with one of your units (melee needs to be adjacent; ranged units strike from range). Returns the game's own damage estimate; pass preview_only=true to see the estimate without attacking.",

@@ -152,7 +152,7 @@ const std::vector<std::string>& McpGamePlanHeadings()
 	static std::vector<std::string> headings;
 	if(headings.empty())
 	{
-		const char* const names[] = { "read", "arc", "thrust", "rivals", "tripwires" };
+		const char* const names[] = { "direction", "cities", "military", "civilians", "research", "policy", "relations" };
 		headings.assign(names, names + sizeof(names) / sizeof(names[0]));
 	}
 	return headings;
@@ -160,7 +160,7 @@ const std::vector<std::string>& McpGamePlanHeadings()
 
 namespace
 {
-	const int PLAN_WORDS_SHOWN = 450;
+	const int PLAN_WORDS_SHOWN = 700;
 	const size_t PLAN_LOG_SHOWN = 8;
 	const size_t PLAN_LOG_KEPT = 40;
 
@@ -192,7 +192,7 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 	for(std::map<std::string, std::string>::const_iterator it = changes.begin(); it != changes.end(); ++it)
 		if(std::find(headings.begin(), headings.end(), it->first) == headings.end())
 		{
-			err = "'" + it->first + "' is not a heading of the plan; use read, arc, thrust, rivals and tripwires";
+			err = "'" + it->first + "' is not a heading of the plan; use direction, cities, military, civilians, research, policy and relations";
 			return false;
 		}
 	McpGamePlan next = plan;
@@ -201,13 +201,14 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 	{
 		if(next.sections[it->first] == it->second) continue;
 		next.sections[it->first] = it->second;
+		next.written[it->first] = turn;
 		bChanged = true;
 	}
 	if(!bChanged) return true;
 	bool bFirst = plan.turn < 0;
-	if(bFirst && (next.sections["arc"].empty() || next.sections["thrust"].empty()))
+	if(bFirst && next.sections["direction"].empty())
 	{
-		err = "a first plan needs at least arc (how you mean to win from here) and thrust (what you are doing about it now)";
+		err = "a first plan needs at least direction: how you win from here, who is in the way, what would change it";
 		return false;
 	}
 	if(!bFirst && why.empty())
@@ -221,30 +222,136 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 	int words = 0;
 	for(size_t i = 0; i < headings.size(); ++i) words += Words(next.sections[headings[i]]);
 	if(words > PLAN_WORDS_SHOWN)
-		warnings.push_back("the plan is " + Num(words) + " words; past about " + Num(PLAN_WORDS_SHOWN) + " it stops being read every turn");
+		warnings.push_back("the plan is " + Num(words) + " words; past about " + Num(PLAN_WORDS_SHOWN) + " it is long to read every turn");
 	plan = next;
 	return true;
 }
 
-std::string McpGamePlanText(const McpGamePlan& plan, bool bFull)
+namespace
+{
+	std::string Section(const McpGamePlan& plan, const std::string& heading)
+	{
+		std::map<std::string, std::string>::const_iterator it = plan.sections.find(heading);
+		return it == plan.sections.end() ? std::string() : it->second;
+	}
+
+	std::string Written(const McpGamePlan& plan, const std::string& heading)
+	{
+		std::map<std::string, int>::const_iterator it = plan.written.find(heading);
+		return it == plan.written.end() ? std::string() : " (T" + Num(it->second) + ")";
+	}
+}
+
+std::string McpGamePlanText(const McpGamePlan& plan)
 {
 	std::string out;
 	const std::vector<std::string>& headings = McpGamePlanHeadings();
 	for(size_t i = 0; i < headings.size(); ++i)
 	{
 		const std::string& h = headings[i];
-		if(!bFull && h != "arc" && h != "thrust" && h != "tripwires") continue;
-		std::map<std::string, std::string>::const_iterator it = plan.sections.find(h);
-		if(it == plan.sections.end() || it->second.empty()) continue;
-		out += Title(h) + ": " + it->second + "\n";
+		std::string text = Section(plan, h);
+		out += text.empty() ? Title(h) + ": none written\n" : Title(h) + Written(plan, h) + ": " + text + "\n";
 	}
-	if(bFull && !plan.log.empty())
+	if(!plan.log.empty())
 	{
 		out += "Log:\n";
 		size_t from = plan.log.size() > PLAN_LOG_SHOWN ? plan.log.size() - PLAN_LOG_SHOWN : 0;
 		for(size_t i = from; i < plan.log.size(); ++i) out += "  " + plan.log[i] + "\n";
 	}
 	return out;
+}
+
+std::string McpGamePlanLine(const McpGamePlan& plan, const std::string& heading)
+{
+	std::string text = Section(plan, heading);
+	return text.empty() ? std::string("plan: none written") : "plan" + Written(plan, heading) + ": " + text;
+}
+
+std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vector<std::string>& cities)
+{
+	std::vector<std::string> out;
+	const std::vector<std::string>& headings = McpGamePlanHeadings();
+	for(size_t i = 0; i < headings.size(); ++i)
+		if(Section(plan, headings[i]).empty()) out.push_back(headings[i]);
+	std::string citiesPlan = Section(plan, "cities");
+	if(!citiesPlan.empty())
+		for(size_t i = 0; i < cities.size(); ++i)
+			if(citiesPlan.find(cities[i]) == std::string::npos) out.push_back(cities[i] + " in the cities plan");
+	return out;
+}
+
+namespace
+{
+	std::string Render(const McpViewItem& item)
+	{
+		std::string out;
+		for(size_t i = 0; i < item.fields.size(); ++i)
+		{
+			const std::string& f = item.fields[i].first;
+			if(i) out += " · ";
+			out += (f == "name" || f == "type") ? item.fields[i].second : f + " " + item.fields[i].second;
+		}
+		return out;
+	}
+
+	// The fields that changed, outside the ticking ones, as "<field> <old value>"; empty when nothing did.
+	std::string Was(const McpViewItem& before, const McpViewItem& now, const std::set<std::string>& ticking)
+	{
+		std::map<std::string, std::string> oldValues, newValues;
+		for(size_t i = 0; i < before.fields.size(); ++i) oldValues[before.fields[i].first] = before.fields[i].second;
+		for(size_t i = 0; i < now.fields.size(); ++i) newValues[now.fields[i].first] = now.fields[i].second;
+		std::vector<std::string> names;
+		for(size_t i = 0; i < before.fields.size(); ++i) names.push_back(before.fields[i].first);
+		for(size_t i = 0; i < now.fields.size(); ++i)
+			if(!oldValues.count(now.fields[i].first)) names.push_back(now.fields[i].first);
+		std::string out;
+		for(size_t i = 0; i < names.size(); ++i)
+		{
+			const std::string& f = names[i];
+			if(ticking.count(f)) continue;
+			std::map<std::string, std::string>::const_iterator o = oldValues.find(f), n = newValues.find(f);
+			std::string was = o == oldValues.end() ? std::string("none") : o->second;
+			if(n != newValues.end() && o != oldValues.end() && n->second == o->second) continue;
+			if(!out.empty()) out += "; ";
+			out += f + " " + was;
+		}
+		return out;
+	}
+
+	McpViewSection& SectionNamed(std::vector<McpViewSection>& view, const std::string& name)
+	{
+		for(size_t i = 0; i < view.size(); ++i) if(view[i].name == name) return view[i];
+		McpViewSection s;
+		s.name = name;
+		view.push_back(s);
+		return view.back();
+	}
+}
+
+std::vector<McpViewSection> McpMarkView(const std::vector<McpViewItem>& before, const std::vector<McpViewItem>& now,
+	const std::set<std::string>& ticking, bool bHasBefore)
+{
+	std::map<std::string, size_t> was, is;
+	for(size_t i = 0; i < before.size(); ++i) was[before[i].key] = i;
+	for(size_t i = 0; i < now.size(); ++i) is[now[i].key] = i;
+	std::vector<McpViewSection> view;
+	for(size_t i = 0; i < now.size(); ++i)
+	{
+		McpViewSection& s = SectionNamed(view, now[i].section);
+		std::string line = Render(now[i]);
+		std::map<std::string, size_t>::const_iterator old = was.find(now[i].key);
+		if(!bHasBefore) s.lines.push_back("  " + line);
+		else if(old == was.end()) s.lines.push_back("+ " + line);
+		else
+		{
+			std::string changed = Was(before[old->second], now[i], ticking);
+			s.lines.push_back(changed.empty() ? "  " + line : "~ " + line + "  (was: " + changed + ")");
+		}
+	}
+	if(bHasBefore)
+		for(size_t i = 0; i < before.size(); ++i)
+			if(!is.count(before[i].key)) SectionNamed(view, before[i].section).lines.push_back("- " + Render(before[i]));
+	return view;
 }
 
 int McpTurnsToAfford(int cost, int gold, int rate)

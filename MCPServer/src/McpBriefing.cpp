@@ -1,6 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include <map>
 #include "McpToolSupport.h"
+#include "McpSeat.h"
 #include "McpToolHandlers.h"
 #include "McpBridge.h"
 #include "CvGame.h"
@@ -83,7 +84,7 @@ namespace
 		o["leader"] = J(pLeader ? pLeader->GetDescription() : "");
 		o["at_war"] = J(GET_TEAM(me->getTeam()).isAtWar(other.getTeam()));
 		if(other.getTeam() == me->getTeam()) o["same_team"] = J(true);
-		if(other.isHuman()) o["human"] = J(true);
+		o["played_by"] = J(McpPlayedByModel(other.GetID()) ? "an agent seat" : other.isHuman() ? "the human" : "the game's AI");
 		CvDiplomacyAI* pDiplo = other.GetDiplomacyAI();
 		if(!other.isHuman())
 		{

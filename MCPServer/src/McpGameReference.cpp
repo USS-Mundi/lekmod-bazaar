@@ -1491,7 +1491,7 @@ namespace
 		if(copies > 0) parts.push_back(Count(copies, "extra copy", "extra copies") + " of each starting unit" + (extra.empty() ? "" : " plus " + JoinAnd(extra)));
 		else if(!extra.empty()) parts.push_back("extra starting units: " + JoinAnd(extra));
 		if(FieldOr(handicap, "AIFreeXP", 0) > 0) parts.push_back("new units +" + PyG(FieldOr(handicap, "AIFreeXP", 0)) + " experience");
-		if(!parts.empty()) m_out.push_back("Computer players at this difficulty: " + Join(parts, "; ") + ". Human seats, agents included, get none of this.");
+		if(!parts.empty()) m_out.push_back("Civilizations the game's AI plays get at this difficulty: " + Join(parts, "; ") + ". The players list in each turn view says who plays each civilization; when every seat is held by an agent or the human, no civilization gets this. Human seats, agents included, get none of it.");
 	}
 
 	// What each technology needs and what it unlocks, for the civilizations in the game.

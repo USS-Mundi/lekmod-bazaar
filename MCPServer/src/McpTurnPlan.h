@@ -13,7 +13,8 @@ class CvPlayer;
 #define MCP_TOOL_RUN_PLAN "run_plan"
 #define MCP_JOB_PLAN_TAKE "plan-take"
 
-// At the start of the seat's turn: the briefing, and when a plan is due, the plan and what changed since it was made.
+// At the start of the seat's turn, once a turn: the turn view (everything it can see, what changed since it last ended a
+// turn marked in place, its game plan beside each part) and its land pictures; when a plan is due, the plan's orders.
 void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o);
 // run_plan's first step, as a game-thread job: the orders to carry out (the plan is used up), whether unread game
 // messages must be acknowledged first, and the debug journal's entry so far. Fills err when there is nothing to run.
