@@ -11,6 +11,7 @@
 #include "McpMapImage.h"
 #include "McpTurnView.h"
 #include "McpClocksGame.h"
+#include "McpCrashLog.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -608,8 +609,10 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	else
 	{
 		s_viewShown[seat] = iTurn;
+		McpTrail("turn view: gather begins", seat, iTurn);
 		McpTurnViewData d = McpGatherTurnView(me);
 		McpGatherTurnNews(d);
+		McpTrail("turn view: gather done", seat, iTurn);
 		std::set<int> plannedUnits, plannedCities;
 		if(due != s_plans.end()) PlannedIds(due->second.orders, plannedUnits, plannedCities);
 		std::map<int, std::vector<McpViewItem> >::const_iterator before = s_viewAtEnd.find(seat);
@@ -712,7 +715,9 @@ void McpNoteTurnEnded(CvPlayer* me)
 {
 	McpOwePlan(me->GetID());
 	s_lastEnded[(int)me->GetID()] = GC.getGame().getGameTurn();
+	McpTrail("turn view: end-of-turn snapshot begins", me->GetID(), GC.getGame().getGameTurn());
 	s_viewAtEnd[(int)me->GetID()] = McpGatherTurnView(me).items;
+	McpTrail("turn view: end-of-turn snapshot done", me->GetID(), GC.getGame().getGameTurn());
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second)) return;
 	if(McpPlanJournalOn())

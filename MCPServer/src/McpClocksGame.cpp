@@ -2,6 +2,7 @@
 #include "McpClocksGame.h"
 #include "McpToolSupport.h"
 #include "McpToolHandlers.h"
+#include "McpCrashLog.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -235,6 +236,7 @@ MCP_TOOL(ToolClocks)
 {
 	CvPlayer* me = Me(err);
 	if(!me) return JVal();
+	McpTrail("clocks tool", me->GetID());
 	int turns = ArgInt(args, "turns", 0);
 	int byTurn = ArgInt(args, "by_turn", 0);
 	int now = GC.getGame().getGameTurn();
