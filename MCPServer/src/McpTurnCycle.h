@@ -4,6 +4,7 @@
 // the clock (plan_turn); when the turn comes it is shown what changed in what it can see since it planned, decides,
 // and run_plan carries out the orders it keeps. McpTurnPlan.cpp reads the game into these shapes.
 
+#include "picojson.h"
 #include <map>
 #include <set>
 #include <string>
@@ -69,11 +70,31 @@ std::string McpWhyKinds();
 
 // The game plan a seat keeps across turns: one document of its intentions under fixed headings, so the game can
 // show each part beside the state it is about, the turn each heading was last written, and a log of why it changed.
+// A clock the seat aims to complete by a turn: a technology (with whatever it needs first), a city's build, a city's
+// size, an amount of gold, or the next policy.
+struct McpTarget
+{
+	std::string kind;     // tech, build, size, gold, policy
+	std::string subject;  // the technology or the build
+	std::string city;     // the city's name, for build and size
+	int amount;           // the size, or the gold
+	int by;               // the turn it is meant to be done by
+	McpTarget() : amount(0), by(0) {}
+};
+
+// plan_turn's targets: a list of {"tech": name, "by": turn}, {"city": name, "build": name, "by": turn},
+// {"city": name, "size": n, "by": turn}, {"gold": n, "by": turn} or {"policy": "next", "by": turn}. The turn must come
+// after nowTurn. False, with err naming the target and what is wrong, when any one is refused; an empty list clears.
+bool McpParseTargets(const picojson::value& list, int nowTurn, std::vector<McpTarget>& out, std::string& err);
+// "Iron Working by T31", "Caen Library by T36", "Bayeux size 4 by T32", "150 gold by T35", "next policy by T25".
+std::string McpTargetLabel(const McpTarget& t);
+
 struct McpGamePlan
 {
 	std::map<std::string, std::string> sections; // heading -> text
 	std::map<std::string, int> written;          // heading -> the turn it was last written
 	std::vector<std::string> log;                // "T<turn>: <why>", oldest first
+	std::vector<McpTarget> targets;              // what it aims to complete by when
 	int turn;                                    // the turn it last changed, -1 before the first plan
 	McpGamePlan() : turn(-1) {}
 };

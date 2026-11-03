@@ -479,3 +479,57 @@ std::vector<McpPicture> McpPlanPictures(const std::vector<std::vector<int> >& di
 	}
 	return pictures;
 }
+
+namespace
+{
+	std::string TargetText(const picojson::object& o, const char* key)
+	{
+		picojson::object::const_iterator it = o.find(key);
+		return it != o.end() && it->second.is<std::string>() ? it->second.get<std::string>() : std::string();
+	}
+
+	bool TargetInt(const picojson::object& o, const char* key, int& out)
+	{
+		picojson::object::const_iterator it = o.find(key);
+		if(it == o.end() || !it->second.is<double>()) return false;
+		out = (int)it->second.get<double>();
+		return true;
+	}
+}
+
+bool McpParseTargets(const picojson::value& list, int nowTurn, std::vector<McpTarget>& out, std::string& err)
+{
+	if(!list.is<picojson::array>()) { err = "targets must be a list"; return false; }
+	const picojson::array& a = list.get<picojson::array>();
+	std::vector<McpTarget> parsed;
+	for(size_t i = 0; i < a.size(); ++i)
+	{
+		std::string head = "target " + Num((int)i + 1) + ": ";
+		if(!a[i].is<picojson::object>()) { err = head + "each target is an object"; return false; }
+		const picojson::object& o = a[i].get<picojson::object>();
+		McpTarget t;
+		if(!TargetInt(o, "by", t.by)) { err = head + "by (the turn it is meant to be done by) is required"; return false; }
+		if(t.by <= nowTurn) { err = head + "by must be a turn after this one (T" + Num(nowTurn) + ")"; return false; }
+		t.city = TargetText(o, "city");
+		if(!TargetText(o, "tech").empty()) { t.kind = "tech"; t.subject = TargetText(o, "tech"); }
+		else if(!TargetText(o, "build").empty()) { t.kind = "build"; t.subject = TargetText(o, "build"); }
+		else if(TargetInt(o, "size", t.amount)) t.kind = "size";
+		else if(TargetInt(o, "gold", t.amount)) t.kind = "gold";
+		else if(o.find("policy") != o.end()) t.kind = "policy";
+		else { err = head + "name what it is for: tech, build, size, gold or policy"; return false; }
+		if((t.kind == "build" || t.kind == "size") && t.city.empty()) { err = head + t.kind + " needs city: the city's name"; return false; }
+		parsed.push_back(t);
+	}
+	out = parsed;
+	return true;
+}
+
+std::string McpTargetLabel(const McpTarget& t)
+{
+	std::string by = " by T" + Num(t.by);
+	if(t.kind == "tech") return t.subject + by;
+	if(t.kind == "build") return t.city + " " + t.subject + by;
+	if(t.kind == "size") return t.city + " size " + Num(t.amount) + by;
+	if(t.kind == "gold") return Num(t.amount) + " gold" + by;
+	return "next policy" + by;
+}

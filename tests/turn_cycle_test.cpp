@@ -1,5 +1,6 @@
 // Native tests for the turn cycle's game-free parts (no game needed): tests/run_turn_cycle_test.sh
 #include "McpTurnCycle.h"
+#include "picojson.h"
 #include <cstdio>
 #include <map>
 #include <set>
@@ -397,6 +398,47 @@ namespace
 		CHECK(fresh.sections.size() == 1 && fresh.sections["direction"] == "wide");
 	}
 
+	void TestTargetsAreReadFromPlanTurn()
+	{
+		picojson::value v;
+		picojson::parse(v, "[{\"tech\":\"Iron Working\",\"by\":31},{\"city\":\"Bayeux\",\"size\":4,\"by\":32},"
+			"{\"city\":\"Caen\",\"build\":\"Library\",\"by\":36},{\"gold\":150,\"by\":35},{\"policy\":\"next\",\"by\":25}]");
+		std::vector<McpTarget> t;
+		std::string err;
+		CHECK(McpParseTargets(v, 23, t, err) && err.empty() && t.size() == 5);
+		CHECK(t[0].kind == "tech" && t[0].subject == "Iron Working" && t[0].by == 31);
+		CHECK(t[1].kind == "size" && t[1].city == "Bayeux" && t[1].amount == 4);
+		CHECK(t[2].kind == "build" && t[2].city == "Caen" && t[2].subject == "Library");
+		CHECK(t[3].kind == "gold" && t[3].amount == 150);
+		CHECK(t[4].kind == "policy" && t[4].by == 25);
+		CHECK(McpTargetLabel(t[0]) == "Iron Working by T31");
+		CHECK(McpTargetLabel(t[1]) == "Bayeux size 4 by T32");
+		CHECK(McpTargetLabel(t[2]) == "Caen Library by T36");
+		CHECK(McpTargetLabel(t[3]) == "150 gold by T35");
+		CHECK(McpTargetLabel(t[4]) == "next policy by T25");
+	}
+
+	void TestBadTargetsAreRefusedWithTheReason()
+	{
+		std::vector<McpTarget> t;
+		std::string err;
+		picojson::value v;
+		picojson::parse(v, "[{\"tech\":\"Iron Working\"}]");
+		CHECK(!McpParseTargets(v, 23, t, err) && err.find("by") != std::string::npos);
+		picojson::parse(v, "[{\"tech\":\"Iron Working\",\"by\":20}]");
+		err.clear();
+		CHECK(!McpParseTargets(v, 23, t, err) && err.find("after") != std::string::npos);
+		picojson::parse(v, "[{\"wonder\":\"Pyramids\",\"by\":40}]");
+		err.clear();
+		CHECK(!McpParseTargets(v, 23, t, err) && err.find("tech, build, size, gold or policy") != std::string::npos);
+		picojson::parse(v, "[{\"size\":4,\"by\":40}]");
+		err.clear();
+		CHECK(!McpParseTargets(v, 23, t, err) && err.find("city") != std::string::npos);
+		picojson::parse(v, "[]");
+		err.clear();
+		CHECK(McpParseTargets(v, 23, t, err) && t.empty());
+	}
+
 	void TestTurnsToAfford()
 	{
 		CHECK(McpTurnsToAfford(300, 320, 10) == 0);
@@ -489,6 +531,8 @@ int main()
 	TestSectionsKeepTheirOrderAndGoneSectionsStay();
 	TestChangedListsShowOnlyWhatChanged();
 	TestOldPlanHeadingsMoveToTheNewOnes();
+	TestTargetsAreReadFromPlanTurn();
+	TestBadTargetsAreRefusedWithTheReason();
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
 	TestOnePictureWhenTheCitiesFit();

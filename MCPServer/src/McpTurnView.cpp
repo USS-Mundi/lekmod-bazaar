@@ -15,6 +15,7 @@
 using namespace McpTool;
 
 #include "McpViewItems.h"
+#include "McpClocksGame.h"
 
 namespace
 {
@@ -172,15 +173,19 @@ namespace
 			if(c->getOrderQueueLength() == 0) withoutOrder.push_back(Waiting(true, c->GetID(), std::string(c->getName().c_str()) + "'s production"));
 			JObj args;
 			args["city_id"] = J(c->GetID());
+			McpCityClocks cc = McpGatherCityClocks(c);
+			Fields kf;
+			kf.push_back(std::make_pair(std::string("name"), std::string(c->getName().c_str()) + " clocks"));
+			for(size_t i = 0; i < cc.clocks.size(); ++i) kf.push_back(std::make_pair("clock " + cc.clocks[i].name, McpClockLine(cc.clocks[i])));
+			for(size_t i = 0; i < cc.notes.size(); ++i) kf.push_back(std::make_pair(std::string("clock note"), cc.notes[i]));
+			if(!cc.queue.empty()) kf.push_back(std::make_pair(std::string("clock queue"), McpQueueLine(cc.queue)));
+			items.push_back(Item("cities", key + ":clocks", kf));
 			JVal citizens = Call(ToolCityCitizens, args);
 			if(citizens.is<JObj>())
 			{
 				Fields cf;
 				cf.push_back(std::make_pair(std::string("name"), std::string(c->getName().c_str()) + " citizens"));
-				JObj rest = citizens.get<JObj>();
-				rest.erase("name");
-				rest.erase("city");
-				McpObjectFields(rest, cf);
+				McpCitizensFields(citizens.get<JObj>(), cf);
 				items.push_back(Item("cities", key + ":citizens", cf));
 			}
 		}
@@ -197,6 +202,18 @@ namespace
 		Fields f;
 		McpObjectFields(plain, f);
 		items.push_back(Item("empire", "empire", f));
+	}
+
+	void AddEmpireClocks(CvPlayer* me, std::vector<McpViewItem>& items)
+	{
+		McpEmpireClocks ec = McpGatherEmpireClocks(me);
+		Fields f;
+		f.push_back(std::make_pair(std::string("name"), std::string("clocks")));
+		for(size_t i = 0; i < ec.clocks.size(); ++i) f.push_back(std::make_pair("clock " + ec.clocks[i].name, McpClockLine(ec.clocks[i])));
+		if(!ec.researchQueue.empty()) f.push_back(std::make_pair(std::string("clock research queue"), McpQueueLine(ec.researchQueue)));
+		for(size_t i = 0; i < ec.notes.size(); ++i) f.push_back(std::make_pair(std::string("clock note"), ec.notes[i]));
+		for(size_t i = 0; i < ec.sources.size(); ++i) f.push_back(std::make_pair("sources " + ec.sources[i].first, ec.sources[i].second));
+		items.push_back(Item("empire", "empire:clocks", f));
 	}
 
 	void AddLines(const JObj& o, const char* key, std::vector<std::string>& out)
@@ -225,6 +242,7 @@ McpTurnViewData McpGatherTurnView(CvPlayer* me)
 {
 	McpTurnViewData d;
 	AddEmpire(d.items);
+	AddEmpireClocks(me, d.items);
 	AddCities(me, d.items, d.withoutOrder, d.cities);
 	AddUnits(me, d.items, d.withoutOrder);
 	AddOthersUnits(me, d.items);

@@ -10,6 +10,7 @@
 #include "McpCityStateFiles.h"
 #include "McpMapImage.h"
 #include "McpTurnView.h"
+#include "McpClocksGame.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -228,6 +229,12 @@ namespace
 				const JObj& written = wi->second.get<JObj>();
 				for(JObj::const_iterator k = written.begin(); k != written.end(); ++k) plan.written[k->first] = ArgInt(written, k->first.c_str(), -1);
 			}
+			JObj::const_iterator ti = o.find("targets");
+			if(ti != o.end())
+			{
+				std::string ignored;
+				McpParseTargets(ti->second, -1000000, plan.targets, ignored);
+			}
 			plan.turn = ArgInt(o, "turn", plan.turn);
 			std::string entry = ArgStr(o, "log");
 			if(!entry.empty()) plan.log.push_back(entry);
@@ -248,6 +255,21 @@ namespace
 		JObj written;
 		for(std::map<std::string, int>::const_iterator it = plan.written.begin(); it != plan.written.end(); ++it) written[it->first] = J(it->second);
 		o["written"] = JVal(written);
+		JArr targets;
+		for(size_t i = 0; i < plan.targets.size(); ++i)
+		{
+			const McpTarget& t = plan.targets[i];
+			JObj to;
+			to["by"] = J(t.by);
+			if(!t.city.empty()) to["city"] = J(t.city);
+			if(t.kind == "tech") to["tech"] = J(t.subject);
+			else if(t.kind == "build") to["build"] = J(t.subject);
+			else if(t.kind == "size") to["size"] = J(t.amount);
+			else if(t.kind == "gold") to["gold"] = J(t.amount);
+			else to["policy"] = J("next");
+			targets.push_back(JVal(to));
+		}
+		o["targets"] = JVal(targets);
 		McpGameFileAppend(McpGameId(), "plans", PlanFile(me), "", JVal(o).serialize() + "\n");
 	}
 
@@ -414,7 +436,15 @@ MCP_TOOL(ToolPlanTurn)
 		bPlanChanged = game.log.size() != logBefore || game.turn != before;
 		if(bPlanChanged) SaveGamePlan(me, game);
 	}
-	else if(game.turn < 0)
+	JObj::const_iterator ti = args.find("targets");
+	if(ti != args.end())
+	{
+		std::vector<McpTarget> targets;
+		if(!McpParseTargets(ti->second, iTurn, targets, err)) return JVal();
+		game.targets = targets;
+		SaveGamePlan(me, game);
+	}
+	if(pi == args.end() && game.turn < 0)
 		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least direction (how you win from here, who is in the way, what would change it)");
 	std::vector<std::string> checks = CheckOrders(me, plan.orders);
 	warnings.insert(warnings.end(), checks.begin(), checks.end());
@@ -517,7 +547,13 @@ namespace
 		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, d.items, d.ticking, before != NULL);
 		std::string out = McpFormat("TURN %d · %s (%s)\n", GC.getGame().getGameTurn(), me->getCivilizationShortDescription(), me->getName());
 		if(before) out += "Marks: + new since your last turn · ~ changed (was: the old value) · - gone\n";
+		out += "Clocks: turns at the current rate, as the game counts them · need: more per turn to finish one turn sooner · "
+			"slack: how much less per turn still finishes on the same turn · queue: each item's own turns added up · "
+			"tiles: f food, p production, g gold, s science, c culture, fa faith\n";
 		out += "\nDIRECTION\n  " + McpGamePlanLine(plan, "direction") + "\n";
+		out += "\nTARGETS (yours; set them with plan_turn's targets)\n";
+		if(plan.targets.empty()) out += "  none set\n";
+		for(size_t i = 0; i < plan.targets.size(); ++i) out += "  " + McpTargetStatus(me, plan.targets[i]) + "\n";
 		std::set<std::string> shown;
 		shown.insert("direction");
 		added = changed = gone = 0;

@@ -5,6 +5,7 @@
 #include <vector>
 
 static int s_failures = 0;
+#define CHECK_EQ(a, b) do { std::string _a = (a), _b = (b); if(_a != _b) { std::printf("FAIL %s:%d:\n  got  %s\n  want %s\n", __FILE__, __LINE__, _a.c_str(), _b.c_str()); ++s_failures; } } while(0)
 #define CHECK(cond) do { if(!(cond)) { std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++s_failures; } } while(0)
 
 namespace
@@ -99,6 +100,45 @@ namespace
 		CHECK(!McpTickingField("yields per turn.gold"));
 		CHECK(!McpTickingField("hp"));
 	}
+	void TestTilesAreShort()
+	{
+		CHECK_EQ(McpTileShort(Parse("{\"feature\":\"Forest\",\"hills\":true,\"resource\":\"Deer\",\"terrain\":\"Grassland\",\"x\":25,\"y\":22,"
+			"\"yields\":{\"food\":2,\"gold\":0,\"production\":1}}").get<picojson::object>()), "deer forest hill (25,22) 2f 1p");
+		CHECK_EQ(McpTileShort(Parse("{\"improvement\":\"Plantation\",\"resource\":\"Incense\",\"terrain\":\"Grassland\",\"x\":27,\"y\":21,\"locked\":true,"
+			"\"yields\":{\"food\":2,\"gold\":2,\"production\":0,\"faith\":1}}").get<picojson::object>()), "incense plantation (27,21) 2f 2g 1fa locked");
+		CHECK_EQ(McpTileShort(Parse("{\"lake\":true,\"terrain\":\"Coast\",\"water\":true,\"x\":26,\"y\":21,"
+			"\"yields\":{\"food\":3,\"gold\":0,\"production\":0}}").get<picojson::object>()), "lake (26,21) 3f");
+		CHECK_EQ(McpTileShort(Parse("{\"terrain\":\"Plains\",\"x\":1,\"y\":2,\"yields\":{\"food\":1,\"production\":1,\"science\":2,\"culture\":1}}").get<picojson::object>()),
+			"plains (1,2) 1f 1p 2s 1c");
+	}
+
+	void TestCitizensBecomeWorksAndFree()
+	{
+		std::vector<std::pair<std::string, std::string> > f;
+		McpCitizensFields(Parse("{\"city\":\"Caen\",\"focus\":\"default\",\"how\":\"x\",\"population\":3,\"unemployed\":0,"
+			"\"worked_tiles\":[{\"terrain\":\"Plains\",\"x\":1,\"y\":1,\"yields\":{\"food\":2,\"production\":1}}],"
+			"\"workable_tiles\":[{\"terrain\":\"Coast\",\"lake\":true,\"x\":2,\"y\":2,\"yields\":{\"food\":3}},{\"terrain\":\"Grassland\",\"x\":3,\"y\":3,\"yields\":{\"food\":2}}]}").get<picojson::object>(), f);
+		std::string works, free, focus;
+		bool city = false, how = false;
+		for(size_t i = 0; i < f.size(); ++i)
+		{
+			if(f[i].first == "works") works = f[i].second;
+			if(f[i].first == "free") free = f[i].second;
+			if(f[i].first == "focus") focus = f[i].second;
+			if(f[i].first == "city") city = true;
+			if(f[i].first == "how") how = true;
+		}
+		CHECK_EQ(works, "[plains (1,1) 2f 1p]");
+		CHECK_EQ(free, "[lake (2,2) 3f; grassland (3,3) 2f]");
+		CHECK_EQ(focus, "default");
+		CHECK(!city && !how);
+	}
+
+	void TestClockFieldsTick()
+	{
+		CHECK(McpTickingField("clock build"));
+		CHECK(McpTickingField("sources science"));
+	}
 }
 
 int main()
@@ -109,6 +149,9 @@ int main()
 	TestFieldsAreTidied();
 	TestListsAreBracketed();
 	TestTickingFields();
+	TestTilesAreShort();
+	TestCitizensBecomeWorksAndFree();
+	TestClockFieldsTick();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all view item tests passed\n");
 	return 0;

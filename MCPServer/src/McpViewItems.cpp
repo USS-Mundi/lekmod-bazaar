@@ -192,6 +192,7 @@ void McpUniqueKeys(std::vector<McpViewItem>& items)
 bool McpTickingField(const std::string& name)
 {
 	if(In(TICKING_EXACT, name)) return true;
+	if(name.compare(0, 6, "clock ") == 0 || name.compare(0, 8, "sources ") == 0) return true;
 	size_t dot = name.rfind('.');
 	return In(TICKING_LAST, dot == std::string::npos ? name : name.substr(dot + 1));
 }
@@ -203,4 +204,79 @@ std::set<std::string> McpTickingFields(const std::vector<McpViewItem>& items)
 		for(size_t k = 0; k < items[i].fields.size(); ++k)
 			if(McpTickingField(items[i].fields[k].first)) out.insert(items[i].fields[k].first);
 	return out;
+}
+
+namespace
+{
+	std::string Lower(const std::string& s)
+	{
+		std::string out = s;
+		for(size_t i = 0; i < out.size(); ++i) if(out[i] >= 'A' && out[i] <= 'Z') out[i] = (char)(out[i] - 'A' + 'a');
+		return out;
+	}
+
+	std::string Text(const JObj& o, const char* key)
+	{
+		JObj::const_iterator it = o.find(key);
+		return it != o.end() && it->second.is<std::string>() ? it->second.get<std::string>() : std::string();
+	}
+
+	bool Flag(const JObj& o, const char* key)
+	{
+		JObj::const_iterator it = o.find(key);
+		return it != o.end() && it->second.is<bool>() && it->second.get<bool>();
+	}
+
+	std::string ShortTiles(const JObj& o, const char* key)
+	{
+		JObj::const_iterator it = o.find(key);
+		if(it == o.end() || !it->second.is<JArr>()) return "[]";
+		const JArr& a = it->second.get<JArr>();
+		std::string out;
+		for(size_t i = 0; i < a.size(); ++i)
+			if(a[i].is<JObj>()) out += (out.empty() ? "" : "; ") + McpTileShort(a[i].get<JObj>());
+		return "[" + out + "]";
+	}
+}
+
+std::string McpTileShort(const picojson::object& tile)
+{
+	std::string name;
+	const char* const parts[] = { "resource", "improvement", "feature" };
+	for(size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
+	{
+		std::string t = Text(tile, parts[i]);
+		if(!t.empty()) name += (name.empty() ? "" : " ") + Lower(t);
+	}
+	if(Flag(tile, "pillaged")) name += " (pillaged)";
+	if(Flag(tile, "hills")) name += (name.empty() ? "" : " ") + std::string("hill");
+	if(Flag(tile, "lake")) name += (name.empty() ? "" : " ") + std::string("lake");
+	if(name.empty()) name = Lower(Text(tile, "terrain"));
+	JObj::const_iterator x = tile.find("x"), y = tile.find("y");
+	if(x != tile.end() && y != tile.end()) name += " (" + Scalar(x->second) + "," + Scalar(y->second) + ")";
+	JObj::const_iterator yi = tile.find("yields");
+	if(yi != tile.end() && yi->second.is<JObj>())
+	{
+		const JObj& yields = yi->second.get<JObj>();
+		const char* const keys[] = { "food", "production", "gold", "science", "culture", "faith" };
+		const char* const marks[] = { "f", "p", "g", "s", "c", "fa" };
+		for(size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
+		{
+			JObj::const_iterator v = yields.find(keys[i]);
+			if(v == yields.end() || !v->second.is<double>() || v->second.get<double>() == 0) continue;
+			name += " " + Number(v->second.get<double>()) + marks[i];
+		}
+	}
+	if(Flag(tile, "locked")) name += " locked";
+	return name;
+}
+
+void McpCitizensFields(const picojson::object& citizens, std::vector<std::pair<std::string, std::string> >& out)
+{
+	out.push_back(std::make_pair(std::string("works"), ShortTiles(citizens, "worked_tiles")));
+	out.push_back(std::make_pair(std::string("free"), ShortTiles(citizens, "workable_tiles")));
+	JObj rest = citizens;
+	const char* const gone[] = { "worked_tiles", "workable_tiles", "city", "name", "how" };
+	for(size_t i = 0; i < sizeof(gone) / sizeof(gone[0]); ++i) rest.erase(gone[i]);
+	AddFields("", rest, out);
 }
