@@ -102,6 +102,27 @@ bool McpClockAtEdge(const McpClock& c)
 	return McpClockSlack(c) == 0;
 }
 
+int McpDrainTurns(long long have100, long long rate100)
+{
+	if(have100 < 0) return 0;
+	if(rate100 >= 0) return -1;
+	return (int)(have100 / -rate100) + 1;
+}
+
+std::string McpDrainBody(long long have100, long long rate100)
+{
+	std::string head = McpAmount(have100, false) + " at " + McpAmount(rate100, false) + "/t: ";
+	int t = McpDrainTurns(have100, rate100);
+	if(t < 0) return head + "not falling";
+	return head + (t == 0 ? std::string("below zero now") : "below zero in " + Num(t) + "t");
+}
+
+std::string McpDrainLands(long long have100, long long rate100, int nowTurn)
+{
+	int t = McpDrainTurns(have100, rate100);
+	return t < 0 ? std::string("never") : "T" + Num(nowTurn + t);
+}
+
 std::string McpQueueLine(const std::vector<std::pair<std::string, int> >& items)
 {
 	std::string out;

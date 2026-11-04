@@ -105,6 +105,22 @@ namespace
 	}
 }
 
+namespace
+{
+	void TestADrainCountsTheTurnItGoesBelowZero()
+	{
+		CHECK(McpDrainTurns(1300, -400) == 4);   // 13, 9, 5, 1, then -3
+		CHECK(McpDrainTurns(1200, -400) == 4);   // 12, 8, 4, 0, then -4
+		CHECK(McpDrainTurns(0, -400) == 1);
+		CHECK(McpDrainTurns(-100, -400) == 0);
+		CHECK(McpDrainTurns(1300, 0) == -1);
+		CHECK(McpDrainTurns(1300, 200) == -1);
+		CHECK_EQ(McpDrainBody(1300, -400), "13 at -4/t: below zero in 4t");
+		CHECK_EQ(McpDrainBody(-100, -400), "-1 at -4/t: below zero now");
+		CHECK_EQ(McpDrainLands(1300, -400, 57), "T61");
+	}
+}
+
 int main()
 {
 	TestTurnsFollowTheGamesCount();
@@ -115,6 +131,7 @@ int main()
 	TestLandingTurnAndEdge();
 	TestQueueAddsEachItemsOwnTurns();
 	TestTargets();
+	TestADrainCountsTheTurnItGoesBelowZero();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all clock tests passed\n");
 	return 0;

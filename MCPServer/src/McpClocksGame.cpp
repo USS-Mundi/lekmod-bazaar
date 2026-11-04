@@ -94,9 +94,21 @@ McpCityClocks McpGatherCityClocks(CvCity* c)
 	if(c->getOrderQueueLength() == 0) out.notes.push_back("nothing being built");
 	else if(c->isProductionProcess()) out.notes.push_back(std::string("producing ") + c->getProductionName() + " (ongoing)");
 	else
+	{
 		out.clocks.push_back(Clock(c->getProductionName(), c->getProductionTimes100(), (long long)c->getProductionNeeded() * 100,
 			c->getCurrentProductionDifferenceTimes100(false, true), c->getCurrentProductionDifferenceTimes100(false, false),
 			GameCount(c->getProductionTurnsLeft(), c->getCurrentProductionDifferenceTimes100(false, false))));
+		int price = -1;
+		UnitTypes eUnit = c->getProductionUnit();
+		BuildingTypes eBuilding = c->getProductionBuilding();
+		if(eUnit != NO_UNIT && c->IsCanPurchase(false, true, eUnit, NO_BUILDING, NO_PROJECT, YIELD_GOLD)) price = c->GetPurchaseCost(eUnit);
+		else if(eBuilding != NO_BUILDING && c->IsCanPurchase(false, true, NO_UNIT, eBuilding, NO_PROJECT, YIELD_GOLD)) price = c->GetPurchaseCost(eBuilding);
+		if(price > 0)
+		{
+			int gold = GET_PLAYER(c->getOwner()).GetTreasury()->GetGold();
+			out.notes.push_back(McpFormat("buy %s now: %d gold (you have %d)", c->getProductionName(), price, gold));
+		}
+	}
 	if(c->isFoodProduction()) out.notes.push_back(std::string("growth paused while it builds ") + c->getProductionName() + " (its surplus food goes into it)");
 	else
 	{
@@ -164,7 +176,17 @@ McpEmpireClocks McpGatherEmpireClocks(CvPlayer* me)
 		long long rate = excess > 0 ? (long long)excess * 100 : 0;
 		out.clocks.push_back(Clock("golden age", (long long)me->GetGoldenAgeProgressMeter() * 100, (long long)me->GetGoldenAgeProgressThreshold() * 100, rate, rate, -1));
 	}
-	out.notes.push_back(McpFormat("gold %d, %+d a turn", me->GetTreasury()->GetGold(), me->calculateGoldRate()));
+	int gold = me->GetTreasury()->GetGold(), goldRate = me->calculateGoldRate();
+	if(goldRate < 0)
+	{
+		McpDrain d;
+		d.name = "treasury";
+		d.have100 = (long long)gold * 100;
+		d.rate100 = (long long)goldRate * 100;
+		d.then = "then the shortfall comes out of science, and units can be disbanded";
+		out.drains.push_back(d);
+	}
+	else out.notes.push_back(McpFormat("gold %d, %+d a turn", gold, goldRate));
 	out.sources.push_back(std::make_pair(std::string("science"), Sources(me, (int)(science / 100), CityScience)));
 	out.sources.push_back(std::make_pair(std::string("culture"), Sources(me, me->GetTotalJONSCulturePerTurn(), CityCulture)));
 	out.sources.push_back(std::make_pair(std::string("faith"), Sources(me, me->GetTotalFaithPerTurn(), CityFaith)));
@@ -259,6 +281,8 @@ MCP_TOOL(ToolClocks)
 	{
 		McpEmpireClocks ec = McpGatherEmpireClocks(me);
 		clocks = ec.clocks;
+		for(size_t i = 0; i < ec.drains.size(); ++i)
+			notes.push_back(J(ec.drains[i].name + " " + McpDrainBody(ec.drains[i].have100, ec.drains[i].rate100) + ", " + ec.drains[i].then));
 		for(size_t i = 0; i < ec.notes.size(); ++i) notes.push_back(J(ec.notes[i]));
 		if(!ec.researchQueue.empty()) o["research_queue"] = J(McpQueueLine(ec.researchQueue));
 		JObj sources;

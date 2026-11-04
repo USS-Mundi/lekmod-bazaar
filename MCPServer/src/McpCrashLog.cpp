@@ -107,6 +107,32 @@ namespace
 		}
 	}
 
+	// One word of a stack that may be damaged: false when it cannot be read.
+	bool ReadWord(const DWORD* p, DWORD& out)
+	{
+		__try { out = *p; return true; }
+		__except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+	}
+
+	// The words above esp that point into a loaded module, nearest first. Return addresses among them name the calls
+	// that led to the crash, which the dump cannot show when the stack lies outside the range it records.
+	void WriteStack(FILE* f, DWORD esp)
+	{
+		fprintf(f, "Words above esp that point into a module, nearest first (offset from esp, value, where):\n");
+		int found = 0;
+		for(DWORD i = 0; i < 4096 && found < 32; ++i)
+		{
+			DWORD w = 0;
+			if(!ReadWord((const DWORD*)esp + i, w)) { fprintf(f, "  the stack cannot be read past esp+0x%lX\n", i * 4); break; }
+			DWORD offset = 0;
+			std::string module = ModuleAt((void*)w, offset);
+			if(module == "(no module)") continue;
+			fprintf(f, "  esp+0x%04lX  %08lX  %s+0x%lX\n", i * 4, w, module.c_str(), offset);
+			++found;
+		}
+		if(!found) fprintf(f, "  none\n");
+	}
+
 	void WriteReport(EXCEPTION_POINTERS* ep, const std::string& stem)
 	{
 		FILE* f = fopen((stem + ".txt").c_str(), "w");
@@ -129,6 +155,13 @@ namespace
 		DWORD now = GetTickCount();
 		WriteHeapLine(f, now);
 		WriteTrail(f, now);
+#if defined(_M_IX86)
+		if(ep && ep->ContextRecord)
+		{
+			fprintf(f, "\n");
+			WriteStack(f, ep->ContextRecord->Esp);
+		}
+#endif
 		fclose(f);
 	}
 

@@ -43,6 +43,13 @@ bool McpClockAtEdge(const McpClock& c);
 // The briefing's line: "<name> <have>/<need> at <rate>/t: <turns>t · need +<n> for <turns-1>t · slack <s>". When the
 // game keeps its own count and it differs, the game's count is shown and need and slack are withheld.
 std::string McpClockLine(const McpClock& c);
+// A store a negative rate empties, such as a treasury losing gold: the turns until it is below zero (0 when it already
+// is), -1 when it is not falling.
+int McpDrainTurns(long long have100, long long rate100);
+// "13 at -4/t: below zero in 4t", "-1 at -4/t: below zero now", "13 at +2/t: not falling".
+std::string McpDrainBody(long long have100, long long rate100);
+// The turn it goes below zero ("T61"), "never" when it is not falling.
+std::string McpDrainLands(long long have100, long long rate100, int nowTurn);
 // A queue: each item's own turns, added up ("Settler 4t → Library 15t").
 std::string McpQueueLine(const std::vector<std::pair<std::string, int> >& items);
 // A target: the clock to complete by turn byTurn, it being turn nowTurn.

@@ -18,6 +18,13 @@ namespace
 		return v;
 	}
 
+	std::string Join(const std::vector<std::pair<std::string, std::string> >& f)
+	{
+		std::string out;
+		for(size_t i = 0; i < f.size(); ++i) out += (i ? " · " : "") + f[i].first + " " + f[i].second;
+		return out;
+	}
+
 	const McpViewItem* Find(const std::vector<McpViewItem>& items, const std::string& key)
 	{
 		for(size_t i = 0; i < items.size(); ++i) if(items[i].key == key) return &items[i];
@@ -145,6 +152,45 @@ namespace
 	}
 }
 
+namespace
+{
+	void TestNotesHealingFallingTurnsAndDemographicsTick()
+	{
+		CHECK(McpTickingField("note"));
+		CHECK(McpTickingField("heals"));
+		CHECK(McpTickingField("falling"));
+		CHECK(McpTickingField("turns"));
+		CHECK(McpTickingField("research.turns"));
+		CHECK(McpTickingField("demographics.approval.rank"));
+		CHECK(McpTickingField("demographics.gnp.value"));
+		CHECK(!McpTickingField("lands"));
+		CHECK(!McpTickingField("hp"));
+	}
+
+	void TestUnitLinesLeaveOutWhatDoesNotApply()
+	{
+		std::vector<std::pair<std::string, std::string> > f;
+		f.push_back(std::make_pair(std::string("name"), std::string("Warrior")));
+		f.push_back(std::make_pair(std::string("can found city here"), std::string("no")));
+		f.push_back(std::make_pair(std::string("embarked"), std::string("no")));
+		f.push_back(std::make_pair(std::string("hp"), std::string("71")));
+		f.push_back(std::make_pair(std::string("max hp"), std::string("100")));
+		f.push_back(std::make_pair(std::string("needs orders"), std::string("no")));
+		f.push_back(std::make_pair(std::string("strength"), std::string("8")));
+		McpTrimUnitFields(f);
+		CHECK_EQ(Join(f), "name Warrior · hp 71 · strength 8");
+
+		std::vector<std::pair<std::string, std::string> > g;
+		g.push_back(std::make_pair(std::string("name"), std::string("Settler")));
+		g.push_back(std::make_pair(std::string("can found city here"), std::string("yes")));
+		g.push_back(std::make_pair(std::string("embarked"), std::string("yes")));
+		g.push_back(std::make_pair(std::string("max hp"), std::string("120")));
+		g.push_back(std::make_pair(std::string("needs orders"), std::string("yes")));
+		McpTrimUnitFields(g);
+		CHECK_EQ(Join(g), "name Settler · can found city here yes · embarked yes · max hp 120 · needs orders yes");
+	}
+}
+
 int main()
 {
 	TestAListGoingFromEmptyToOneKeepsTheOtherListsNames();
@@ -156,6 +202,8 @@ int main()
 	TestTilesAreShort();
 	TestCitizensBecomeWorksAndFree();
 	TestClockFieldsTick();
+	TestNotesHealingFallingTurnsAndDemographicsTick();
+	TestUnitLinesLeaveOutWhatDoesNotApply();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all view item tests passed\n");
 	return 0;

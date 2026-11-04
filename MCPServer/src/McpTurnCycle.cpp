@@ -1,5 +1,6 @@
 #include "McpTurnCycle.h"
 #include <algorithm>
+#include <cstdlib>
 #include <sstream>
 
 namespace
@@ -440,6 +441,35 @@ int McpTurnsToAfford(int cost, int gold, int rate)
 	if(gold >= cost) return 0;
 	if(rate <= 0) return -1;
 	return (cost - gold + rate - 1) / rate;
+}
+
+namespace
+{
+	bool HpOf(const McpViewItem& it, int& hp)
+	{
+		for(size_t i = 0; i < it.fields.size(); ++i)
+			if(it.fields[i].first == "hp") { hp = atoi(it.fields[i].second.c_str()); return true; }
+		return false;
+	}
+}
+
+void McpAddFallClocks(const std::vector<McpViewItem>& before, std::vector<McpViewItem>& now)
+{
+	std::map<std::string, const McpViewItem*> was;
+	for(size_t i = 0; i < before.size(); ++i) was[before[i].key] = &before[i];
+	for(size_t i = 0; i < now.size(); ++i)
+	{
+		McpViewItem& it = now[i];
+		if(it.section != "cities" && it.section.compare(0, 13, "known cities:") != 0) continue;
+		int hpNow = 0, hpBefore = 0;
+		std::map<std::string, const McpViewItem*>::const_iterator w = was.find(it.key);
+		if(!HpOf(it, hpNow) || w == was.end() || !HpOf(*w->second, hpBefore) || hpNow >= hpBefore) continue;
+		int drop = hpBefore - hpNow;
+		std::string body = "-" + Num(drop) + " since your last turn: ";
+		if(hpNow <= 0) body += "at 0, a melee unit can take it now";
+		else body += "0 in " + Num((hpNow + drop - 1) / drop) + "t at this rate; at 0 a melee unit can take it";
+		it.fields.push_back(std::make_pair(std::string("falling"), body));
+	}
 }
 
 McpEndTurnState McpEndTurnOutcome(bool bTurnOver, bool bMyTurn)

@@ -403,9 +403,9 @@ MCP_TOOL(ToolPlanTurn)
 	CvPlayer* me = Me(err);
 	if(!me || !RequireIdentity(err)) return JVal();
 	JObj::const_iterator it = args.find("orders");
-	if(it == args.end() || !it->second.is<JArr>() || it->second.get<JArr>().empty())
+	if(it == args.end() || !it->second.is<JArr>())
 	{
-		err = "orders is required: the orders you will give next turn, in order, each {tool, args}";
+		err = "orders is required: the orders you will give next turn, in order, each {tool, args}; [] for none yet";
 		return JVal();
 	}
 	SeatPlan plan;
@@ -544,8 +544,14 @@ namespace
 	std::string TurnViewText(CvPlayer* me, const McpTurnViewData& d, const McpGamePlan& plan, const std::vector<McpViewItem>* before,
 		const std::set<int>& plannedUnits, const std::set<int>& plannedCities, int& added, int& changed, int& gone)
 	{
-		std::vector<McpViewItem> none;
-		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, d.items, d.ticking, before != NULL);
+		std::vector<McpViewItem> none, items = d.items;
+		std::set<std::string> ticking = d.ticking;
+		if(before)
+		{
+			McpAddFallClocks(*before, items);
+			ticking.insert("falling");
+		}
+		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, items, ticking, before != NULL);
 		std::string out = McpFormat("TURN %d · %s (%s)\n", GC.getGame().getGameTurn(), me->getCivilizationShortDescription(), me->getName());
 		if(before) out += "Marks: + new since your last turn · ~ changed (was: the old value) · - gone\n";
 		out += "Clocks: turns at the current rate, as the game counts them · need: more per turn to finish one turn sooner · "

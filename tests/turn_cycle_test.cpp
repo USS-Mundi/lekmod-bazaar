@@ -529,6 +529,54 @@ namespace
 	}
 }
 
+namespace
+{
+	McpViewItem HpItem(const char* section, const char* key, const char* hp)
+	{
+		McpViewItem it;
+		it.section = section;
+		it.key = key;
+		it.fields.push_back(std::make_pair(std::string("name"), std::string(key)));
+		if(hp) it.fields.push_back(std::make_pair(std::string("hp"), std::string(hp)));
+		return it;
+	}
+
+	std::string FieldOf(const McpViewItem& it, const char* name)
+	{
+		for(size_t i = 0; i < it.fields.size(); ++i) if(it.fields[i].first == name) return it.fields[i].second;
+		return "";
+	}
+
+	void TestAFallingCityGetsAClock()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(HpItem("cities", "Rouen", "182"));
+		before.push_back(HpItem("known cities: cities", "Pataliputra", "300"));
+		before.push_back(HpItem("cities", "Caen", "225"));
+		before.push_back(HpItem("military units", "Warrior", "100"));
+		before.push_back(HpItem("known cities: cities", "Sfax", "200"));
+		now.push_back(HpItem("cities", "Rouen", "107"));
+		now.push_back(HpItem("known cities: cities", "Pataliputra", "40"));
+		now.push_back(HpItem("cities", "Caen", "225"));
+		now.push_back(HpItem("military units", "Warrior", "30"));
+		now.push_back(HpItem("known cities: cities", "Sfax", NULL));
+		now.push_back(HpItem("cities", "Bayeux", "150"));
+		McpAddFallClocks(before, now);
+		CHECK(FieldOf(now[0], "falling") == "-75 since your last turn: 0 in 2t at this rate; at 0 a melee unit can take it");
+		CHECK(FieldOf(now[1], "falling") == "-260 since your last turn: 0 in 1t at this rate; at 0 a melee unit can take it");
+		CHECK(FieldOf(now[2], "falling") == "");
+		CHECK(FieldOf(now[3], "falling") == "");
+		CHECK(FieldOf(now[4], "falling") == "");
+		CHECK(FieldOf(now[5], "falling") == "");
+
+		std::vector<McpViewItem> b2, n2;
+		b2.push_back(HpItem("cities", "Rouen", "40"));
+		n2.push_back(HpItem("cities", "Rouen", "0"));
+		McpAddFallClocks(b2, n2);
+		CHECK(FieldOf(n2[0], "falling") == "-40 since your last turn: at 0, a melee unit can take it now");
+	}
+}
+
 int main()
 {
 	TestNothingChanged();
@@ -567,6 +615,7 @@ int main()
 	TestTiesGoToTheTighterPicture();
 	TestNoCitiesNoPictures();
 	TestEndTurnWaitsUntilTheGameHasRunTheQueuedMoves();
+	TestAFallingCityGetsAClock();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
 	return 0;

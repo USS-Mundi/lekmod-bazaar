@@ -30,7 +30,11 @@ std::string McpTileShort(const picojson::object& tile);
 // specialists, unemployed...), without the city's name and the how text.
 void McpCitizensFields(const picojson::object& citizens, std::vector<std::pair<std::string, std::string> >& out);
 // A field that moves every turn on its own: stocks (gold, culture, faith), the turn and year, counters (progress,
-// turns left, turns to grow, food stored, score, influence), a unit's moves, activity and need for orders, and the
-// clocks and their sources, which are recomputed every turn (fields named "clock ..." and "sources ...").
+// turns left, turns, turns to grow, food stored, score, influence), a unit's moves, activity, need for orders and
+// healing, a city's fall, the demographics, and the clocks, their notes and their sources, which are recomputed every
+// turn (fields named "clock ...", "note" and "sources ...").
 bool McpTickingField(const std::string& name);
 std::set<std::string> McpTickingFields(const std::vector<McpViewItem>& items);
+// A unit's own line without what does not apply to it: can found city here, embarked and needs orders when "no", and
+// max hp when it is the usual 100.
+void McpTrimUnitFields(std::vector<std::pair<std::string, std::string> >& fields);

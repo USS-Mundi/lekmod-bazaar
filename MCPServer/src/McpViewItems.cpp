@@ -19,9 +19,10 @@ namespace
 
 	const char* const FIRST[] = { "name", "civ", "civilization", "leader", "owner" };
 	const char* const DROPPED[] = { "help", "how", "is_combat", "is_worker" };
-	const char* const TICKING_EXACT[] = { "gold", "culture", "faith", "turn", "year", "end turn blocking", "golden age turns left" };
+	const char* const TICKING_EXACT[] = { "gold", "culture", "faith", "turn", "year", "end turn blocking", "golden age turns left",
+		"note", "heals", "falling" };
 	const char* const TICKING_LAST[] = { "progress", "turns left", "turns to grow", "food stored", "score", "influence", "moves left",
-		"activity", "needs orders" };
+		"activity", "needs orders", "turns" };
 
 	template <size_t N> bool In(const char* const (&list)[N], const std::string& s)
 	{
@@ -193,8 +194,23 @@ bool McpTickingField(const std::string& name)
 {
 	if(In(TICKING_EXACT, name)) return true;
 	if(name == "clock" || name.compare(0, 6, "clock ") == 0 || name.compare(0, 8, "sources ") == 0) return true;
+	if(name.compare(0, 13, "demographics.") == 0) return true;
 	size_t dot = name.rfind('.');
 	return In(TICKING_LAST, dot == std::string::npos ? name : name.substr(dot + 1));
+}
+
+void McpTrimUnitFields(std::vector<std::pair<std::string, std::string> >& fields)
+{
+	std::vector<std::pair<std::string, std::string> > kept;
+	for(size_t i = 0; i < fields.size(); ++i)
+	{
+		const std::string& k = fields[i].first;
+		const std::string& v = fields[i].second;
+		if((k == "can found city here" || k == "embarked" || k == "needs orders") && v == "no") continue;
+		if(k == "max hp" && v == "100") continue;
+		kept.push_back(fields[i]);
+	}
+	fields.swap(kept);
 }
 
 std::set<std::string> McpTickingFields(const std::vector<McpViewItem>& items)

@@ -100,7 +100,15 @@ namespace
 			const JObj& o = list[k].get<JObj>();
 			Fields f;
 			McpObjectFields(o, f);
+			McpTrimUnitFields(f);
 			CvUnit* u = me->getUnit(ArgInt(o, "id", -1));
+			if(u && u->getDamage() > 0)
+			{
+				int rate = u->healRate(u->plot());
+				f.push_back(std::make_pair(std::string("heals"), rate > 0
+					? McpFormat("+%d/t while it does not move or attack: full in %dt", rate, (u->getDamage() + rate - 1) / rate)
+					: std::string("not on this tile")));
+			}
 			bool bMilitary = u && u->IsCombatUnit();
 			if(u && ArgBool(o, "needs_orders", false))
 				withoutOrder.push_back(Waiting(false, u->GetID(), McpFormat("%s %d", UnitTypeName(u->getUnitType()), u->GetID())));
@@ -237,6 +245,16 @@ namespace
 	{
 		McpEmpireClocks ec = McpGatherEmpireClocks(me);
 		AddClockItems("empire", "empire", "", ec.clocks, ec.notes, ec.researchQueue, items);
+		int now = GC.getGame().getGameTurn();
+		for(size_t i = 0; i < ec.drains.size(); ++i)
+		{
+			const McpDrain& dr = ec.drains[i];
+			Fields f;
+			f.push_back(std::make_pair(std::string("name"), dr.name));
+			f.push_back(std::make_pair(std::string("clock"), McpDrainBody(dr.have100, dr.rate100) + ", " + dr.then));
+			f.push_back(std::make_pair(std::string("lands"), McpDrainLands(dr.have100, dr.rate100, now)));
+			items.push_back(Item("empire", "empire:drain:" + dr.name, f));
+		}
 		Fields f;
 		f.push_back(std::make_pair(std::string("name"), std::string("where it comes from")));
 		for(size_t i = 0; i < ec.sources.size(); ++i) f.push_back(std::make_pair("sources " + ec.sources[i].first, ec.sources[i].second));
@@ -273,7 +291,18 @@ McpTurnViewData McpGatherTurnView(CvPlayer* me)
 	AddCities(me, d.items, d.withoutOrder, d.cities);
 	AddUnits(me, d.items, d.withoutOrder);
 	AddOthersUnits(me, d.items);
-	McpScreenItems("research", Call(ToolResearchOptions), d.items);
+	// The research clock and the research queue in the empire's clocks already count the current research.
+	JVal research = Call(ToolResearchOptions);
+	if(research.is<JObj>())
+	{
+		JObj::iterator ri = research.get<JObj>().find("research");
+		if(ri != research.get<JObj>().end() && ri->second.is<JObj>())
+		{
+			const char* const counted[] = { "cost", "progress", "turns_left", "queued_after" };
+			for(size_t i = 0; i < sizeof(counted) / sizeof(counted[0]); ++i) ri->second.get<JObj>().erase(counted[i]);
+		}
+	}
+	McpScreenItems("research", research, d.items);
 	McpScreenItems("policies", Call(ToolPolicyOptions), d.items);
 	McpScreenItems("religion", Call(ToolReligionOverview), d.items);
 	AddPlayers(me, d.items);
@@ -282,7 +311,10 @@ McpTurnViewData McpGatherTurnView(CvPlayer* me)
 	McpScreenItems("known cities", Call(ToolKnownCities), d.items);
 	McpScreenItems("rankings", Call(ToolRankings), d.items);
 	McpScreenItems("economy", Call(ToolEconomicOverview), d.items);
-	McpScreenItems("military overview", Call(ToolMilitaryOverview), d.items);
+	// Its unit list repeats the military and civilian units above.
+	JVal military = Call(ToolMilitaryOverview);
+	if(military.is<JObj>()) military.get<JObj>().erase("units");
+	McpScreenItems("military overview", military, d.items);
 	McpScreenItems("trade routes", Call(ToolTradeRoutes), d.items);
 	McpScreenItems("victory", Call(ToolVictoryProgress), d.items);
 	McpUniqueKeys(d.items);

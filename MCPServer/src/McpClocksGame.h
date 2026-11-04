@@ -16,14 +16,23 @@ class CvCity;
 struct McpCityClocks
 {
 	std::vector<McpClock> clocks;                       // build, growth, next border tile, those that apply
-	std::vector<std::string> notes;                     // growth paused or starving, nothing being built
+	std::vector<std::string> notes;                     // growth paused or starving, nothing being built, the price to buy the build
 	std::vector<std::pair<std::string, int> > queue;    // each queued item and its own turns
+};
+
+// A store a negative rate empties (McpDrainBody), and what happens once it is below zero.
+struct McpDrain
+{
+	std::string name;
+	long long have100, rate100;
+	std::string then;
 };
 
 struct McpEmpireClocks
 {
 	std::vector<McpClock> clocks;                       // research, next policy, pantheon, golden age
-	std::vector<std::string> notes;                     // gold, a golden age under way, a pantheon founded
+	std::vector<McpDrain> drains;                       // the treasury, while gold is falling
+	std::vector<std::string> notes;                     // gold while not falling, a golden age under way, a pantheon founded
 	std::vector<std::pair<std::string, int> > researchQueue;
 	std::vector<std::pair<std::string, std::string> > sources; // science, culture, faith: "Caen 6 · Bayeux 3 · other 2"
 };
