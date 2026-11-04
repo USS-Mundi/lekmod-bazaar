@@ -139,7 +139,7 @@ McpEmpireClocks McpGatherEmpireClocks(CvPlayer* me)
 	{
 		long long have = (long long)GET_TEAM(me->getTeam()).GetTeamTechs()->GetResearchProgress(eTech) * 100;
 		long long need = (long long)me->GetPlayerTechs()->GetResearchCost(eTech) * 100;
-		out.clocks.push_back(Clock(TechTitle(eTech), have, need, science + (long long)me->getOverflowResearch() * 100, science,
+		out.clocks.push_back(Clock("research: " + TechTitle(eTech), have, need, science + (long long)me->getOverflowResearch() * 100, science,
 			GameCount(me->GetPlayerTechs()->GetResearchTurnsLeft(eTech, true), science)));
 	}
 	const CLLNode<TechTypes>* node = me->headResearchQueueNode();

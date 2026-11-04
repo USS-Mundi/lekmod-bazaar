@@ -136,8 +136,12 @@ namespace
 
 	void TestClockFieldsTick()
 	{
+		CHECK(McpTickingField("clock"));
 		CHECK(McpTickingField("clock build"));
 		CHECK(McpTickingField("sources science"));
+		// Where a clock lands and whether it is at its edge are compared: they move only when something did.
+		CHECK(!McpTickingField("lands"));
+		CHECK(!McpTickingField("edge"));
 	}
 }
 

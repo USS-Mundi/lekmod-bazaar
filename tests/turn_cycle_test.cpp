@@ -439,6 +439,20 @@ namespace
 		CHECK(McpParseTargets(v, 23, t, err) && t.empty());
 	}
 
+	void TestAClockIsMarkedOnlyWhenItsLandingMoves()
+	{
+		std::vector<McpViewItem> before, now;
+		std::set<std::string> ticking;
+		ticking.insert("clock");
+		before.push_back(Item("cities", "city:1:clock:Swordsman", "name", "Caen: Swordsman", "clock", "15/37 at 12/t: 2t"));
+		before.back().fields.push_back(std::make_pair(std::string("lands"), std::string("T49")));
+		now.push_back(Item("cities", "city:1:clock:Swordsman", "name", "Caen: Swordsman", "clock", "27/37 at 12/t: 1t"));
+		now.back().fields.push_back(std::make_pair(std::string("lands"), std::string("T49")));
+		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "  Caen: Swordsman · clock 27/37 at 12/t: 1t · lands T49"));
+		now.back().fields.back().second = "T51";
+		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "~ Caen: Swordsman · clock 27/37 at 12/t: 1t · lands T51  (was: lands T49)"));
+	}
+
 	void TestTurnsToAfford()
 	{
 		CHECK(McpTurnsToAfford(300, 320, 10) == 0);
@@ -533,6 +547,7 @@ int main()
 	TestOldPlanHeadingsMoveToTheNewOnes();
 	TestTargetsAreReadFromPlanTurn();
 	TestBadTargetsAreRefusedWithTheReason();
+	TestAClockIsMarkedOnlyWhenItsLandingMoves();
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
 	TestOnePictureWhenTheCitiesFit();

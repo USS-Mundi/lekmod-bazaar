@@ -66,9 +66,9 @@ std::string McpAmount(long long x100, bool bUp)
 	return (bNegative ? "-" : "") + s;
 }
 
-std::string McpClockLine(const McpClock& c)
+std::string McpClockBody(const McpClock& c)
 {
-	std::string head = c.name + " " + Whole(c.have100) + "/" + Whole(c.need100) + " at " + McpAmount(c.rate100, false) + "/t: ";
+	std::string head = Whole(c.have100) + "/" + Whole(c.need100) + " at " + McpAmount(c.rate100, false) + "/t: ";
 	int t = McpClockTurns(c);
 	if(c.gameTurns >= 0 && c.gameTurns != t)
 		return head + Num(c.gameTurns) + "t by the game's count · need and slack unavailable";
@@ -81,6 +81,25 @@ std::string McpClockLine(const McpClock& c)
 	std::string out = head + Num(t) + "t";
 	if(t > 1) out += " · need +" + McpAmount(McpClockNeedFor(c, t - 1), true) + " for " + Num(t - 1) + "t";
 	return out + " · slack " + McpAmount(McpClockSlack(c), false);
+}
+
+std::string McpClockLine(const McpClock& c)
+{
+	return c.name + " " + McpClockBody(c);
+}
+
+std::string McpClockLands(const McpClock& c, int nowTurn)
+{
+	int t = McpClockTurns(c);
+	if(c.gameTurns >= 0 && c.gameTurns != t) t = c.gameTurns;
+	return t < 0 ? std::string("never") : "T" + Num(nowTurn + t);
+}
+
+bool McpClockAtEdge(const McpClock& c)
+{
+	int t = McpClockTurns(c);
+	if(t < 0 || (c.gameTurns >= 0 && c.gameTurns != t)) return false;
+	return McpClockSlack(c) == 0;
 }
 
 std::string McpQueueLine(const std::vector<std::pair<std::string, int> >& items)

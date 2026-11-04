@@ -34,6 +34,12 @@ long long McpClockSlack(const McpClock& c);
 long long McpClockSlackFor(const McpClock& c, int k);
 // An amount in hundredths as text with at most one decimal: rounded up (bUp, for a need) or down (for a slack).
 std::string McpAmount(long long x100, bool bUp);
+// The clock without its name: "<have>/<need> at <rate>/t: <turns>t · need +<n> for <turns-1>t · slack <s>".
+std::string McpClockBody(const McpClock& c);
+// The turn it completes on at the current rate ("T49"), by the game's count when the game keeps one; "never".
+std::string McpClockLands(const McpClock& c, int nowTurn);
+// At its edge: the counts agree and its slack is 0, so any less per turn makes it a turn later.
+bool McpClockAtEdge(const McpClock& c);
 // The briefing's line: "<name> <have>/<need> at <rate>/t: <turns>t · need +<n> for <turns-1>t · slack <s>". When the
 // game keeps its own count and it differs, the game's count is shown and need and slack are withheld.
 std::string McpClockLine(const McpClock& c);

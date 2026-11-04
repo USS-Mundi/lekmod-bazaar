@@ -192,7 +192,7 @@ void McpUniqueKeys(std::vector<McpViewItem>& items)
 bool McpTickingField(const std::string& name)
 {
 	if(In(TICKING_EXACT, name)) return true;
-	if(name.compare(0, 6, "clock ") == 0 || name.compare(0, 8, "sources ") == 0) return true;
+	if(name == "clock" || name.compare(0, 6, "clock ") == 0 || name.compare(0, 8, "sources ") == 0) return true;
 	size_t dot = name.rfind('.');
 	return In(TICKING_LAST, dot == std::string::npos ? name : name.substr(dot + 1));
 }

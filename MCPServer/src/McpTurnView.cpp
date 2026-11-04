@@ -52,6 +52,40 @@ namespace
 		return Call(tool, none);
 	}
 
+	// One line per clock, marked only when where it lands moves or it reaches its edge (slack 0): its numbers tick
+	// every turn and are shown, not compared. Notes and the queue's order are compared; the queue's turns are not.
+	void AddClockItems(const std::string& section, const std::string& key, const std::string& prefix, const std::vector<McpClock>& clocks,
+		const std::vector<std::string>& notes, const std::vector<std::pair<std::string, int> >& queue, std::vector<McpViewItem>& items)
+	{
+		int now = GC.getGame().getGameTurn();
+		for(size_t i = 0; i < clocks.size(); ++i)
+		{
+			Fields f;
+			f.push_back(std::make_pair(std::string("name"), prefix + clocks[i].name));
+			f.push_back(std::make_pair(std::string("clock"), McpClockBody(clocks[i])));
+			f.push_back(std::make_pair(std::string("lands"), McpClockLands(clocks[i], now)));
+			if(McpClockAtEdge(clocks[i])) f.push_back(std::make_pair(std::string("edge"), std::string("slack 0")));
+			items.push_back(Item(section, key + ":clock:" + clocks[i].name, f));
+		}
+		for(size_t i = 0; i < notes.size(); ++i)
+		{
+			Fields f;
+			f.push_back(std::make_pair(std::string("name"), prefix + "note"));
+			f.push_back(std::make_pair(std::string("note"), notes[i]));
+			items.push_back(Item(section, key + ":note:" + notes[i].substr(0, notes[i].find(' ')), f));
+		}
+		if(!queue.empty())
+		{
+			std::string order;
+			for(size_t i = 0; i < queue.size(); ++i) order += (i ? " → " : "") + queue[i].first;
+			Fields f;
+			f.push_back(std::make_pair(std::string("name"), prefix + "queue"));
+			f.push_back(std::make_pair(std::string("order"), order));
+			f.push_back(std::make_pair(std::string("clock"), McpQueueLine(queue)));
+			items.push_back(Item(section, key + ":queue", f));
+		}
+	}
+
 	// The seat's units, military and civilian apart.
 	void AddUnits(CvPlayer* me, std::vector<McpViewItem>& items, std::vector<McpWithoutOrder>& withoutOrder)
 	{
@@ -174,12 +208,7 @@ namespace
 			JObj args;
 			args["city_id"] = J(c->GetID());
 			McpCityClocks cc = McpGatherCityClocks(c);
-			Fields kf;
-			kf.push_back(std::make_pair(std::string("name"), std::string(c->getName().c_str()) + " clocks"));
-			for(size_t i = 0; i < cc.clocks.size(); ++i) kf.push_back(std::make_pair("clock " + cc.clocks[i].name, McpClockLine(cc.clocks[i])));
-			for(size_t i = 0; i < cc.notes.size(); ++i) kf.push_back(std::make_pair(std::string("clock note"), cc.notes[i]));
-			if(!cc.queue.empty()) kf.push_back(std::make_pair(std::string("clock queue"), McpQueueLine(cc.queue)));
-			items.push_back(Item("cities", key + ":clocks", kf));
+			AddClockItems("cities", key, std::string(c->getName().c_str()) + ": ", cc.clocks, cc.notes, cc.queue, items);
 			JVal citizens = Call(ToolCityCitizens, args);
 			if(citizens.is<JObj>())
 			{
@@ -207,13 +236,11 @@ namespace
 	void AddEmpireClocks(CvPlayer* me, std::vector<McpViewItem>& items)
 	{
 		McpEmpireClocks ec = McpGatherEmpireClocks(me);
+		AddClockItems("empire", "empire", "", ec.clocks, ec.notes, ec.researchQueue, items);
 		Fields f;
-		f.push_back(std::make_pair(std::string("name"), std::string("clocks")));
-		for(size_t i = 0; i < ec.clocks.size(); ++i) f.push_back(std::make_pair("clock " + ec.clocks[i].name, McpClockLine(ec.clocks[i])));
-		if(!ec.researchQueue.empty()) f.push_back(std::make_pair(std::string("clock research queue"), McpQueueLine(ec.researchQueue)));
-		for(size_t i = 0; i < ec.notes.size(); ++i) f.push_back(std::make_pair(std::string("clock note"), ec.notes[i]));
+		f.push_back(std::make_pair(std::string("name"), std::string("where it comes from")));
 		for(size_t i = 0; i < ec.sources.size(); ++i) f.push_back(std::make_pair("sources " + ec.sources[i].first, ec.sources[i].second));
-		items.push_back(Item("empire", "empire:clocks", f));
+		items.push_back(Item("empire", "empire:sources", f));
 	}
 
 	void AddLines(const JObj& o, const char* key, std::vector<std::string>& out)

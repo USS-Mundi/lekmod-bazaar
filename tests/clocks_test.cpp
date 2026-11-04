@@ -72,6 +72,21 @@ namespace
 		CHECK_EQ(McpClockLine(Clock("Settler", 1500, 4600, 800, 800, 5)), "Settler 15/46 at 8/t: 5t by the game's count · need and slack unavailable");
 	}
 
+	void TestLandingTurnAndEdge()
+	{
+		McpClock c = Clock("Settler", 1500, 4600, 800, 800);    // 4 turns
+		CHECK_EQ(McpClockLands(c, 45), "T49");
+		CHECK_EQ(McpClockBody(c), "15/46 at 8/t: 4t · need +2.4 for 3t · slack 0.2");
+		CHECK(!McpClockAtEdge(c));
+		McpClock tight = Clock("Settler", 1500, 4600, 800, 800);
+		tight.have100 = 2200;                                      // 24 left at 8: 3 turns, slack 0
+		CHECK(McpClockAtEdge(tight));
+		CHECK_EQ(McpClockLands(Clock("growth", 1200, 2600, 0, 0), 45), "never");
+		// The game counting differently: the landing turn follows the game's count.
+		CHECK_EQ(McpClockLands(Clock("Settler", 1500, 4600, 800, 800, 5), 45), "T50");
+		CHECK(!McpClockAtEdge(Clock("Settler", 1500, 4600, 800, 800, 5)));
+	}
+
 	void TestQueueAddsEachItemsOwnTurns()
 	{
 		std::vector<std::pair<std::string, int> > q;
@@ -97,6 +112,7 @@ int main()
 	TestSlackIsTheMostThatCanGoWithoutSlipping();
 	TestAmountsRoundTheSafeWay();
 	TestLines();
+	TestLandingTurnAndEdge();
 	TestQueueAddsEachItemsOwnTurns();
 	TestTargets();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
