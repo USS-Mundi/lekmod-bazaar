@@ -58,6 +58,8 @@ namespace
 	{
 		HMODULE module = NULL;
 		offset = 0;
+		// Wine answers a null address with the game's own module; no module is mapped in the first 64 KB.
+		if((DWORD_PTR)address < 0x10000) return "(no module)";
 		if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)address, &module) || !module)
 			return "(no module)";
 		char name[MAX_PATH] = "";

@@ -254,6 +254,30 @@ static void AfterMinorTurn(CvMinorCivAI* self)
 	McpTrail("city-state turn: plugin done", self->GetPlayer()->GetID());
 }
 
+// The crash trail through the AI's part of the turn, where every crash so far came: each player's turn and unit
+// moves, the barbarians' units, and each unit stepping onto a tile, so a report names whose move it died in.
+static bool BeforePlayerTurn(CvPlayer* self) { McpTrail("player turn begins", self->GetID()); return false; }
+static void AfterPlayerTurn(CvPlayer* self) { McpTrail("player turn done", self->GetID()); }
+static bool BeforePlayerTurnUnits(CvPlayer* self) { McpTrail("player units' turn begins", self->GetID()); return false; }
+static void AfterPlayerTurnUnits(CvPlayer* self) { McpTrail("player units' turn done", self->GetID()); }
+static bool BeforeBarbarianUnits() { McpTrail("barbarian units begin"); return false; }
+static void AfterBarbarianUnits() { McpTrail("barbarian units done"); }
+
+// The AI moves its units many times a turn; only a change of player is recorded, so the trail keeps its reach.
+static int s_lastUnitUpdate = -1;
+static bool BeforeAIUnitUpdate(CvPlayerAI* self)
+{
+	if(self->GetID() != s_lastUnitUpdate) McpTrail("AI moving units of player", self->GetID());
+	s_lastUnitUpdate = self->GetID();
+	return false;
+}
+
+static bool TrailBeforeUnitSetXY(CvUnit* self, int x, int y, bool, bool, bool, bool, bool)
+{
+	McpTrail("unit to tile (id, x*1000+y)", self->GetID(), x * 1000 + y);
+	return false;
+}
+
 // Counts the pathfinder hooks' calls that overlap across threads, for the overlap report and a crash report.
 struct PathHookCall
 {
@@ -280,6 +304,7 @@ static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam:
 // What a switched-on city-state's units see stays uncovered on its ally's map; a unit sharing live sight takes it along.
 static void AfterUnitSetXY(CvUnit* self, int, int, bool, bool, bool, bool, bool)
 {
+	McpTrail("unit on tile (owner, id)", self->getOwner(), self->GetID());
 	if(!McpCsAnySwitchedOn() || !McpCsIsSwitchedOn(self->getOwner())) return;
 	McpCsRevealAround(self);
 	McpCsSightAfterMove(self);
@@ -364,6 +389,14 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuestsForPlayer");
 #endif
 	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
+	Check(CivRegisterBefore<CivHooks::CvPlayer_doTurn>(host, &BeforePlayerTurn), "before CvPlayer::doTurn");
+	Check(CivRegisterAfter<CivHooks::CvPlayer_doTurn>(host, &AfterPlayerTurn), "after CvPlayer::doTurn");
+	Check(CivRegisterBefore<CivHooks::CvPlayer_doTurnUnits>(host, &BeforePlayerTurnUnits), "before CvPlayer::doTurnUnits");
+	Check(CivRegisterAfter<CivHooks::CvPlayer_doTurnUnits>(host, &AfterPlayerTurnUnits), "after CvPlayer::doTurnUnits");
+	Check(CivRegisterBefore<CivHooks::CvBarbarians_DoUnits>(host, &BeforeBarbarianUnits), "before CvBarbarians::DoUnits");
+	Check(CivRegisterAfter<CivHooks::CvBarbarians_DoUnits>(host, &AfterBarbarianUnits), "after CvBarbarians::DoUnits");
+	Check(CivRegisterBefore<CivHooks::CvPlayerAI_AI_unitUpdate>(host, &BeforeAIUnitUpdate), "before CvPlayerAI::AI_unitUpdate");
+	Check(CivRegisterBefore<CivHooks::CvUnit_setXY>(host, &TrailBeforeUnitSetXY), "before CvUnit::setXY");
 	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
 	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
 	Check(CivRegisterAfter<CivHooks::CvUnit_setXY>(host, &AfterUnitSetXY), "after CvUnit::setXY");
