@@ -19,8 +19,8 @@ namespace
 
 	const char* const FIRST[] = { "name", "civ", "civilization", "leader", "owner" };
 	const char* const DROPPED[] = { "help", "how", "is_combat", "is_worker" };
-	const char* const TICKING_EXACT[] = { "gold", "culture", "faith", "turn", "year", "end turn blocking", "golden age turns left",
-		"note", "heals", "falling" };
+	const char* const TICKING_EXACT[] = { "gold", "culture", "faith", "science", "turn", "year", "end turn blocking", "golden age turns left",
+		"note", "heals", "falling", "moves", "yields", "near", "nearest", "army" };
 	const char* const TICKING_LAST[] = { "progress", "turns left", "turns to grow", "food stored", "score", "influence", "moves left",
 		"activity", "needs orders", "turns" };
 
@@ -190,8 +190,10 @@ void McpUniqueKeys(std::vector<McpViewItem>& items)
 	}
 }
 
-bool McpTickingField(const std::string& name)
+bool McpTickingField(const std::string& field)
 {
+	// "_at" and "at" are the same field; the underscore only says the value is shown without its name.
+	std::string name = !field.empty() && field[0] == '_' ? field.substr(1) : field;
 	if(In(TICKING_EXACT, name)) return true;
 	if(name == "clock" || name.compare(0, 6, "clock ") == 0 || name.compare(0, 8, "sources ") == 0) return true;
 	if(name.compare(0, 13, "demographics.") == 0) return true;
@@ -292,7 +294,31 @@ void McpCitizensFields(const picojson::object& citizens, std::vector<std::pair<s
 	out.push_back(std::make_pair(std::string("works"), ShortTiles(citizens, "worked_tiles")));
 	out.push_back(std::make_pair(std::string("free"), ShortTiles(citizens, "workable_tiles")));
 	JObj rest = citizens;
-	const char* const gone[] = { "worked_tiles", "workable_tiles", "city", "name", "how" };
+	// The city's own line has its size; a default focus, no unemployed and growth not avoided go without saying.
+	const char* const gone[] = { "worked_tiles", "workable_tiles", "city", "name", "how", "population", "specialists" };
 	for(size_t i = 0; i < sizeof(gone) / sizeof(gone[0]); ++i) rest.erase(gone[i]);
+	JObj::iterator it = rest.find("focus");
+	if(it != rest.end() && it->second.is<std::string>() && it->second.get<std::string>() == "default") rest.erase(it);
+	it = rest.find("unemployed");
+	if(it != rest.end() && it->second.is<double>() && it->second.get<double>() == 0) rest.erase(it);
+	it = rest.find("avoid_growth");
+	if(it != rest.end() && it->second.is<bool>() && !it->second.get<bool>()) rest.erase(it);
 	AddFields("", rest, out);
+	JObj::const_iterator sp = citizens.find("specialists");
+	if(sp != citizens.end() && sp->second.is<JArr>() && !sp->second.get<JArr>().empty())
+	{
+		std::string list;
+		const JArr& a = sp->second.get<JArr>();
+		for(size_t i = 0; i < a.size(); ++i)
+		{
+			if(!a[i].is<JObj>()) continue;
+			const JObj& o = a[i].get<JObj>();
+			JObj::const_iterator name = o.find("specialist"), count = o.find("count"), max = o.find("max"), building = o.find("building");
+			if(name == o.end() || !name->second.is<std::string>()) continue;
+			list += (list.empty() ? "" : ", ") + name->second.get<std::string>();
+			if(count != o.end() && max != o.end()) list += " " + Scalar(count->second) + "/" + Scalar(max->second);
+			if(building != o.end() && building->second.is<std::string>()) list += " (" + building->second.get<std::string>() + ")";
+		}
+		if(!list.empty()) out.push_back(std::make_pair(std::string("specialists"), list));
+	}
 }

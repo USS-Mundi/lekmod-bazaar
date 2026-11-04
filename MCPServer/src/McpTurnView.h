@@ -1,11 +1,13 @@
 #pragma once
 
-// The turn view: everything the seat can see, one thing per line, gathered from the same tools the model can call
-// (cities and their citizens, units, research, policies, the overview screens), plus what the game says happened
-// and what it is waiting on. McpTurnPlan.cpp marks what changed since the seat's last turn (McpMarkView) and sets each
+// The turn view: what a player looks at every turn, one thing per line, gathered from the same tools the model can
+// call: the top bar and the empire's clocks, others' units and cities in sight, the seat's units, its cities with
+// their clocks and tiles, research and policies open now, the players and city-states met, plus what the game says
+// happened and what it is waiting on. The other screens stay with their tools; the view says which changed. McpTurnPlan.cpp marks what changed since the seat's last turn (McpMarkView) and sets each
 // part of the seat's game plan beside the state it is about. On the game thread.
 
 #include "McpTurnCycle.h"
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -30,6 +32,7 @@ struct McpTurnViewData
 	std::vector<std::string> decisions;  // what the game is waiting on: pending choices, requests, what blocks the turn
 	std::vector<McpWithoutOrder> withoutOrder; // units waiting for orders and cities with nothing to build
 	std::vector<std::string> cities;     // the seat's city names
+	std::map<std::string, std::string> screens; // each screen left to its tool, by tool name, reduced to its words
 };
 
 // The items, the fields that tick and what has no order. Reads only; safe at a turn's end and its start.

@@ -57,7 +57,7 @@ namespace
 		for(int shift = 0; shift <= 16; shift += 8)
 		{
 			int t = (terrain >> shift) & 255, o = (owner >> shift) & 255;
-			out |= (unsigned)((t * 75 + o * 25) / 100) << shift;
+			out |= (unsigned)((t * 78 + o * 22) / 100) << shift;
 		}
 		return out;
 	}
@@ -107,6 +107,45 @@ namespace
 		g.DrawString(w.c_str(), (INT)w.size(), &font, PointF(x, y), &fmt, &brush);
 	}
 
+	// A health bar centered on (cx, cy): green for what is left, red for what is lost.
+	void DrawHpBar(Graphics& g, float cx, float cy, float w, float h, int hp)
+	{
+		if(hp < 0) hp = 0;
+		SolidBrush lost(Color(255, 210, 30, 30)), left(Color(255, 60, 220, 60));
+		Pen edge(Color(255, 0, 0, 0), 1.0f);
+		g.FillRectangle(&lost, cx - w / 2, cy - h / 2, w, h);
+		g.FillRectangle(&left, cx - w / 2, cy - h / 2, w * hp / 100.0f, h);
+		g.DrawRectangle(&edge, cx - w / 2, cy - h / 2, w, h);
+	}
+
+	// The key's lines broken at " · " so each fits the picture's width.
+	std::vector<std::string> WrapKey(const std::vector<std::string>& key, const Font& font, float width)
+	{
+		Bitmap probe(1, 1, PixelFormat24bppRGB);
+		Graphics g(&probe);
+		std::vector<std::string> out;
+		for(size_t i = 0; i < key.size(); ++i)
+		{
+			std::string line;
+			size_t at = 0;
+			while(at <= key[i].size())
+			{
+				size_t next = key[i].find(" · ", at);
+				std::string part = key[i].substr(at, next == std::string::npos ? std::string::npos : next - at);
+				std::string candidate = line.empty() ? part : line + " · " + part;
+				std::wstring w = Wide(candidate);
+				RectF r;
+				g.MeasureString(w.c_str(), (INT)w.size(), &font, PointF(0, 0), &r);
+				if(r.Width > width && !line.empty()) { out.push_back(line); line = "   " + part; }
+				else line = candidate;
+				if(next == std::string::npos) break;
+				at = next + 4;
+			}
+			if(!line.empty()) out.push_back(line);
+		}
+		return out;
+	}
+
 	bool PngEncoderClsid(CLSID& out)
 	{
 		UINT num = 0, size = 0;
@@ -143,7 +182,8 @@ namespace
 	}
 }
 
-std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vector<McpMapLegendEntry>& legend, const std::string& footer, int x0, int y1, int cols, int rows, int wrapWidth, std::string& err)
+std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vector<McpMapLegendEntry>& legend, const std::string& footer, int x0, int y1, int cols, int rows, int wrapWidth, std::string& err,
+	const std::vector<std::string>& key)
 {
 	if(!EnsureGdiplus()) { err = "the picture could not be drawn: Windows drawing is unavailable"; return ""; }
 	float scale = BASE_SCALE;
@@ -153,7 +193,10 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 	int gridW = L.GridW(cols);
 	int gridH = (int)(L.rowH * (rows - 1) + 2 * L.hexR + 2 * L.margin + L.colLabels);
 	int legendRows = ((int)legend.size() + 2) / 3;
-	int height = (int)(gridH + (legendRows + 1) * L.legendRow + L.margin);
+	FontFamily measureFamily(L"Verdana");
+	Font measureFont(&measureFamily, 12 * s, FontStyleRegular, UnitPixel);
+	std::vector<std::string> keyLines = WrapKey(key, measureFont, gridW - 2 * L.margin);
+	int height = (int)(gridH + (legendRows + (int)keyLines.size() + 1) * L.legendRow + L.margin);
 
 	Bitmap bmp(gridW, height, PixelFormat24bppRGB);
 	Graphics g(&bmp);
@@ -165,8 +208,8 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 	FontFamily family(L"Verdana");
 	Font labelFont(&family, 11 * s, FontStyleRegular, UnitPixel);
 	Font coordFont(&family, 10 * s, FontStyleBold, UnitPixel);
-	Font unitFont(&family, 10 * s, FontStyleBold, UnitPixel);
-	Font cityFont(&family, 11 * s, FontStyleBold, UnitPixel);
+	Font unitFont(&family, 11 * s, FontStyleBold, UnitPixel);
+	Font cityFont(&family, 10.5f * s, FontStyleBold, UnitPixel);
 	Font centerFont(&family, 13 * s, FontStyleBold, UnitPixel);
 	Font legendFont(&family, 12 * s, FontStyleRegular, UnitPixel);
 	Pen gridPen(Color(255, 10, 10, 12), 2 * s);
@@ -210,21 +253,6 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		Corners(centers[i].X, centers[i].Y, L.hexR, c);
 		SolidBrush fill(h.unexplored ? Color(255, 52, 52, 60) : Rgb(h.owned ? Tinted(h.fill, h.borderColor) : h.fill));
 		g.FillPolygon(&fill, c, 6);
-		if(h.owned)
-		{
-			// Territory also carries a grid of dots in the owner's color, which reads at a glance
-			// and leaves the terrain color between the dots recognizable.
-			GraphicsPath path;
-			path.AddPolygon(c, 6);
-			g.SetClip(&path);
-			SolidBrush dot(Rgb(h.borderColor));
-			float step = 11 * s, r = 2.2f * s;
-			int row = 0;
-			for(float gy = centers[i].Y - L.hexR; gy <= centers[i].Y + L.hexR; gy += step, ++row)
-				for(float gx = centers[i].X - L.hexW / 2 + (row & 1 ? step / 2 : 0); gx <= centers[i].X + L.hexW / 2; gx += step)
-					g.FillEllipse(&dot, gx - r, gy - r, 2 * r, 2 * r);
-			g.ResetClip();
-		}
 		g.DrawPolygon(&gridPen, c, 6);
 	}
 	for(size_t i = 0; i < hexes.size(); ++i)
@@ -313,11 +341,18 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 			Pen cityHex(Color(255, 255, 255, 255), 2 * s);
 			g.DrawPolygon(&cityHex, c, 6);
 			SolidBrush box(Rgb(h.cityColor));
-			Pen boxEdge(Color(255, 0, 0, 0), 1 * s);
-			RectF r(px - 29 * s, py - 9 * s, 58 * s, 18 * s);
+			Pen boxEdge(h.cityAtWar ? Color(255, 240, 40, 40) : Color(255, 0, 0, 0), (h.cityAtWar ? 3.5f : 1.0f) * s);
+			std::wstring wl = Wide(h.cityLabel);
+			RectF measured;
+			g.MeasureString(wl.c_str(), (INT)wl.size(), &cityFont, PointF(0, 0), &measured);
+			float bw = measured.Width + 6 * s;
+			if(bw < 46 * s) bw = 46 * s;
+			if(bw > L.hexW * 1.05f) bw = L.hexW * 1.05f;
+			RectF r(px - bw / 2, py - 10 * s, bw, 20 * s);
 			g.FillRectangle(&box, r);
 			g.DrawRectangle(&boxEdge, r);
 			DrawCentered(g, h.cityLabel, cityFont, TextOn(h.cityColor), px, py, 0);
+			if(h.cityHp < 100) DrawHpBar(g, px, py + 14 * s, 50 * s, 5 * s, h.cityHp);
 		}
 		else if(!h.units.empty())
 		{
@@ -326,12 +361,13 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 			for(int k = 0; k < shown; ++k)
 			{
 				const McpMapUnit& u = h.units[k];
-				float ux = px + (k - (shown - 1) / 2.0f) * 23 * s;
+				float ux = px + (k - (shown - 1) / 2.0f) * 27 * s;
 				SolidBrush fill(Rgb(u.fill));
 				Pen edge(Rgb(u.ring), 4 * s);
-				g.FillEllipse(&fill, ux - 10 * s, py - 10.5f * s, 20 * s, 20 * s);
-				g.DrawEllipse(&edge, ux - 10 * s, py - 10.5f * s, 20 * s, 20 * s);
-				DrawCentered(g, u.label, unitFont, TextOn(u.fill), ux, py - 0.5f * s, 0);
+				g.FillEllipse(&fill, ux - 12.5f * s, py - 12.5f * s, 25 * s, 25 * s);
+				g.DrawEllipse(&edge, ux - 12.5f * s, py - 12.5f * s, 25 * s, 25 * s);
+				DrawCentered(g, u.label, unitFont, TextOn(u.fill), ux, py, 0);
+				if(u.hp < 100) DrawHpBar(g, ux, py + 17 * s, 24 * s, 4.5f * s, u.hp);
 			}
 		}
 		else if(!h.centerLabel.empty())
@@ -351,10 +387,15 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		std::wstring w = Wide(legend[k].name);
 		g.DrawString(w.c_str(), (INT)w.size(), &legendFont, PointF(lx + 19 * s, row + 3 * s), &white);
 	}
+	for(size_t k = 0; k < keyLines.size(); ++k)
+	{
+		std::wstring w = Wide(keyLines[k]);
+		g.DrawString(w.c_str(), (INT)w.size(), &legendFont, PointF(L.margin, ly + (legendRows + k) * L.legendRow + 3 * s), &white);
+	}
 	{
 		SolidBrush grey(Color(255, 200, 200, 200));
 		std::wstring w = Wide(footer);
-		g.DrawString(w.c_str(), (INT)w.size(), &legendFont, PointF(L.margin, ly + legendRows * L.legendRow + 3 * s), &grey);
+		g.DrawString(w.c_str(), (INT)w.size(), &legendFont, PointF(L.margin, ly + (legendRows + keyLines.size()) * L.legendRow + 3 * s), &grey);
 	}
 
 	g.Flush(FlushIntentionSync);

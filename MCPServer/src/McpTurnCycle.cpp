@@ -314,14 +314,20 @@ std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vec
 
 namespace
 {
-	std::string Render(const McpViewItem& item)
+	// A field shown by its value alone: the thing's name or type, a clock's body, and any field named "_...".
+	bool Unlabeled(const std::string& f) { return f == "name" || f == "type" || f == "clock" || (!f.empty() && f[0] == '_'); }
+
+	// The item as one line; a note after a field (what it was) goes right after its value.
+	std::string Render(const McpViewItem& item, const std::map<std::string, std::string>& notes = std::map<std::string, std::string>())
 	{
 		std::string out;
 		for(size_t i = 0; i < item.fields.size(); ++i)
 		{
 			const std::string& f = item.fields[i].first;
 			if(i) out += " · ";
-			out += (f == "name" || f == "type") ? item.fields[i].second : f + " " + item.fields[i].second;
+			out += Unlabeled(f) ? item.fields[i].second : f + " " + item.fields[i].second;
+			std::map<std::string, std::string>::const_iterator n = notes.find(f);
+			if(n != notes.end()) out += " " + n->second;
 		}
 		return out;
 	}
@@ -374,30 +380,35 @@ namespace
 		return out.empty() ? std::string("reordered") : out;
 	}
 
-	// The fields that changed, outside the ticking ones, as "<field> <old value>"; empty when nothing did.
-	std::string Was(const McpViewItem& before, const McpViewItem& now, const std::set<std::string>& ticking)
+	// What changed, outside the ticking fields: a note for each changed field to follow its value ("(was 3)", for a list
+	// "(was: removed ...; added ...)", "(new)" for a field it did not have), and the fields it no longer has as
+	// "<field> <old value>". False when nothing changed.
+	bool Was(const McpViewItem& before, const McpViewItem& now, const std::set<std::string>& ticking,
+		std::map<std::string, std::string>& notes, std::string& gone)
 	{
 		std::map<std::string, std::string> oldValues, newValues;
 		for(size_t i = 0; i < before.fields.size(); ++i) oldValues[before.fields[i].first] = before.fields[i].second;
 		for(size_t i = 0; i < now.fields.size(); ++i) newValues[now.fields[i].first] = now.fields[i].second;
-		std::vector<std::string> names;
-		for(size_t i = 0; i < before.fields.size(); ++i) names.push_back(before.fields[i].first);
+		bool bChanged = false;
 		for(size_t i = 0; i < now.fields.size(); ++i)
-			if(!oldValues.count(now.fields[i].first)) names.push_back(now.fields[i].first);
-		std::string out;
-		for(size_t i = 0; i < names.size(); ++i)
 		{
-			const std::string& f = names[i];
+			const std::string& f = now.fields[i].first;
 			if(ticking.count(f)) continue;
-			std::map<std::string, std::string>::const_iterator o = oldValues.find(f), n = newValues.find(f);
-			std::string was = o == oldValues.end() ? std::string("none") : o->second;
-			if(n != newValues.end() && o != oldValues.end() && n->second == o->second) continue;
-			if(!out.empty()) out += "; ";
-			if(o != oldValues.end() && n != newValues.end() && IsListText(o->second) && IsListText(n->second))
-				out += f + ": " + ListChange(o->second, n->second);
-			else out += f + " " + was;
+			std::map<std::string, std::string>::const_iterator o = oldValues.find(f);
+			if(o == oldValues.end()) { notes[f] = "(new)"; bChanged = true; continue; }
+			if(o->second == now.fields[i].second) continue;
+			notes[f] = IsListText(o->second) && IsListText(now.fields[i].second)
+				? "(was: " + ListChange(o->second, now.fields[i].second) + ")" : "(was " + o->second + ")";
+			bChanged = true;
 		}
-		return out;
+		for(size_t i = 0; i < before.fields.size(); ++i)
+		{
+			const std::string& f = before.fields[i].first;
+			if(ticking.count(f) || newValues.count(f)) continue;
+			gone += (gone.empty() ? "" : "; ") + (Unlabeled(f) ? before.fields[i].second : f + " " + before.fields[i].second);
+			bChanged = true;
+		}
+		return bChanged;
 	}
 
 	McpViewSection& SectionNamed(std::vector<McpViewSection>& view, const std::string& name)
@@ -426,8 +437,10 @@ std::vector<McpViewSection> McpMarkView(const std::vector<McpViewItem>& before, 
 		else if(old == was.end()) s.lines.push_back("+ " + line);
 		else
 		{
-			std::string changed = Was(before[old->second], now[i], ticking);
-			s.lines.push_back(changed.empty() ? "  " + line : "~ " + line + "  (was: " + changed + ")");
+			std::map<std::string, std::string> notes;
+			std::string gone;
+			if(!Was(before[old->second], now[i], ticking, notes, gone)) s.lines.push_back("  " + line);
+			else s.lines.push_back("~ " + Render(now[i], notes) + (gone.empty() ? std::string() : "  (gone: " + gone + ")"));
 		}
 	}
 	if(bHasBefore)
@@ -460,7 +473,7 @@ void McpAddFallClocks(const std::vector<McpViewItem>& before, std::vector<McpVie
 	for(size_t i = 0; i < now.size(); ++i)
 	{
 		McpViewItem& it = now[i];
-		if(it.section != "cities" && it.section.compare(0, 13, "known cities:") != 0) continue;
+		if(it.section != "cities" && it.section != "their cities") continue;
 		int hpNow = 0, hpBefore = 0;
 		std::map<std::string, const McpViewItem*>::const_iterator w = was.find(it.key);
 		if(!HpOf(it, hpNow) || w == was.end() || !HpOf(*w->second, hpBefore) || hpNow >= hpBefore) continue;

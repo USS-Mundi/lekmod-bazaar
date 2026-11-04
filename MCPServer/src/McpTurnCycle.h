@@ -150,8 +150,8 @@ int McpTurnsToAfford(int cost, int gold, int rate);
 int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn);
 
 // A city losing hit points gets a "falling" field: what it lost since the seat's last turn and when it reaches 0 at
-// that rate, at which a melee unit can take it. For the seat's own cities (section "cities") and the cities it sees
-// ("known cities: ..."), against the same item in before; a city it no longer sees, or one not losing, gets none.
+// that rate, at which a melee unit can take it. For the seat's own cities (section "cities") and the others' cities it
+// knows ("their cities"), against the same item in before; a city it no longer sees, or one not losing, gets none.
 void McpAddFallClocks(const std::vector<McpViewItem>& before, std::vector<McpViewItem>& now);
 
 // After a seat asks to end its turn, the game runs its units' queued moves, and those can hand the turn back (a unit

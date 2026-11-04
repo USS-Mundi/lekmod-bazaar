@@ -122,7 +122,8 @@ namespace
 	void TestCitizensBecomeWorksAndFree()
 	{
 		std::vector<std::pair<std::string, std::string> > f;
-		McpCitizensFields(Parse("{\"city\":\"Caen\",\"focus\":\"default\",\"how\":\"x\",\"population\":3,\"unemployed\":0,"
+		McpCitizensFields(Parse("{\"city\":\"Caen\",\"focus\":\"default\",\"how\":\"x\",\"population\":3,\"unemployed\":0,\"avoid_growth\":false,"
+			"\"specialists\":[{\"building\":\"Market\",\"can_add\":true,\"count\":0,\"max\":1,\"specialist\":\"Merchant\",\"type\":\"BUILDING_MARKET\"}],"
 			"\"worked_tiles\":[{\"terrain\":\"Plains\",\"x\":1,\"y\":1,\"yields\":{\"food\":2,\"production\":1}}],"
 			"\"workable_tiles\":[{\"terrain\":\"Coast\",\"lake\":true,\"x\":2,\"y\":2,\"yields\":{\"food\":3}},{\"terrain\":\"Grassland\",\"x\":3,\"y\":3,\"yields\":{\"food\":2}}]}").get<picojson::object>(), f);
 		std::string works, free, focus;
@@ -137,8 +138,9 @@ namespace
 		}
 		CHECK_EQ(works, "[plains (1,1) 2f 1p]");
 		CHECK_EQ(free, "[lake (2,2) 3f; grassland (3,3) 2f]");
-		CHECK_EQ(focus, "default");
+		CHECK_EQ(focus, "");
 		CHECK(!city && !how);
+		CHECK_EQ(Join(f), "works [plains (1,1) 2f 1p] · free [lake (2,2) 3f; grassland (3,3) 2f] · specialists Merchant 0/1 (Market)");
 	}
 
 	void TestClockFieldsTick()
@@ -163,6 +165,12 @@ namespace
 		CHECK(McpTickingField("research.turns"));
 		CHECK(McpTickingField("demographics.approval.rank"));
 		CHECK(McpTickingField("demographics.gnp.value"));
+		CHECK(McpTickingField("_activity"));
+		CHECK(McpTickingField("moves"));
+		CHECK(McpTickingField("yields"));
+		CHECK(McpTickingField("near"));
+		CHECK(McpTickingField("army"));
+		CHECK(!McpTickingField("_at"));
 		CHECK(!McpTickingField("lands"));
 		CHECK(!McpTickingField("hp"));
 	}

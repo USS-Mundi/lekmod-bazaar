@@ -48,6 +48,7 @@ namespace
 	std::map<int, int> s_landShown; // the game turn each seat was last shown its land
 	std::map<int, int> s_viewShown; // the game turn each seat was last shown its turn view
 	std::map<int, std::vector<McpViewItem> > s_viewAtEnd; // what each seat could see when it last ended a turn
+	std::map<int, std::map<std::string, std::string> > s_screensAtEnd; // the screens left to tools, as they were then
 	std::map<int, std::string> s_viewText;  // the turn view each seat was last shown, sent again on a later wait that turn
 
 	// Waiting, planning and the seat's own housekeeping are not orders.
@@ -508,12 +509,12 @@ namespace
 	// The plan heading shown after a group of sections.
 	const char* PlanAfter(const std::string& group)
 	{
+		if(group == "your military units") return "military";
 		if(group == "cities") return "cities";
-		if(group == "military units") return "military";
-		if(group == "civilian units") return "civilians";
+		if(group == "your civilians") return "civilians";
 		if(group == "research") return "research";
 		if(group == "policies") return "policy";
-		if(group == "diplomacy") return "relations";
+		if(group == "players") return "relations";
 		return NULL;
 	}
 
@@ -539,10 +540,12 @@ namespace
 		return out;
 	}
 
-	// The whole turn view as text: every section with what changed marked, each part of the game plan after the
-	// state it is about, then what happened, what the game waits on, and what has no plan or no order.
+	// The whole turn view as text: what happened and what the game waits on first, then each section with what changed
+	// marked and each part of the game plan after the state it is about, then the screens left to tools that changed,
+	// and what has no plan or no order.
 	std::string TurnViewText(CvPlayer* me, const McpTurnViewData& d, const McpGamePlan& plan, const std::vector<McpViewItem>* before,
-		const std::set<int>& plannedUnits, const std::set<int>& plannedCities, int& added, int& changed, int& gone)
+		const std::map<std::string, std::string>* screensBefore, const std::set<int>& plannedUnits, const std::set<int>& plannedCities,
+		int& added, int& changed, int& gone)
 	{
 		std::vector<McpViewItem> none, items = d.items;
 		std::set<std::string> ticking = d.ticking;
@@ -553,10 +556,12 @@ namespace
 		}
 		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, items, ticking, before != NULL);
 		std::string out = McpFormat("TURN %d · %s (%s)\n", GC.getGame().getGameTurn(), me->getCivilizationShortDescription(), me->getName());
-		if(before) out += "Marks: + new since your last turn · ~ changed (was: the old value) · - gone\n";
-		out += "Clocks: turns at the current rate, as the game counts them · need: more per turn to finish one turn sooner · "
-			"slack: how much less per turn still finishes on the same turn · queue: each item's own turns added up · "
-			"tiles: f food, p production, g gold, s science, c culture, fa faith\n";
+		if(before) out += "Marks: + new since your last turn · ~ changed, the old value in (was ...) · - gone\n";
+		out += "Clocks: turns at the current rate · need: more per turn to finish one turn sooner · slack: how much less per turn "
+			"still finishes on the same turn · tiles: f food, p production, g gold, s science, c culture, fa faith. "
+			"The picture shows where everything is; the tools show more of anything here.\n";
+		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(d.news, "nothing reported");
+		out += "\nTHE GAME IS WAITING ON\n" + JoinLines(d.decisions, "nothing");
 		out += "\nDIRECTION\n  " + McpGamePlanLine(plan, "direction") + "\n";
 		out += "\nTARGETS (yours; set them with plan_turn's targets)\n";
 		if(plan.targets.empty()) out += "  none set\n";
@@ -589,8 +594,20 @@ namespace
 		for(size_t i = 0; i < headings.size(); ++i)
 			if(!shown.count(headings[i])) rest += "  " + headings[i] + ": " + McpGamePlanLine(plan, headings[i]) + "\n";
 		if(!rest.empty()) out += "\nPLANS FOR WHAT IS NOT SHOWN ABOVE\n" + rest;
-		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(d.news, "nothing reported");
-		out += "\nTHE GAME IS WAITING ON\n" + JoinLines(d.decisions, "nothing");
+		std::string changedScreens, sameScreens;
+		for(std::map<std::string, std::string>::const_iterator it = d.screens.begin(); it != d.screens.end(); ++it)
+		{
+			bool bChanged = screensBefore && (!screensBefore->count(it->first) || screensBefore->find(it->first)->second != it->second);
+			std::string& list = bChanged ? changedScreens : sameScreens;
+			list += (list.empty() ? "" : ", ") + it->first;
+		}
+		out += "\nOTHER SCREENS (call the tool to see one)\n";
+		if(!screensBefore) out += "  " + sameScreens + "\n";
+		else
+		{
+			out += "  changed since your last turn: " + (changedScreens.empty() ? std::string("none") : changedScreens) + "\n";
+			if(!sameScreens.empty()) out += "  unchanged: " + sameScreens + "\n";
+		}
 		out += "\nWITHOUT A PLAN\n" + JoinLines(McpWithoutAPlan(plan, d.cities), "nothing");
 		std::vector<std::string> waiting;
 		for(size_t i = 0; i < d.withoutOrder.size(); ++i)
@@ -623,7 +640,9 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		if(due != s_plans.end()) PlannedIds(due->second.orders, plannedUnits, plannedCities);
 		std::map<int, std::vector<McpViewItem> >::const_iterator before = s_viewAtEnd.find(seat);
 		int added = 0, changed = 0, gone = 0;
-		std::string text = TurnViewText(me, d, game, before == s_viewAtEnd.end() ? NULL : &before->second, plannedUnits, plannedCities, added, changed, gone);
+		std::map<int, std::map<std::string, std::string> >::const_iterator screensBefore = s_screensAtEnd.find(seat);
+		std::string text = TurnViewText(me, d, game, before == s_viewAtEnd.end() ? NULL : &before->second,
+			screensBefore == s_screensAtEnd.end() ? NULL : &screensBefore->second, plannedUnits, plannedCities, added, changed, gone);
 		s_viewText[seat] = text;
 		o["turn_view"] = J(text);
 		if(McpPlanJournalOn())
@@ -722,7 +741,9 @@ void McpNoteTurnEnded(CvPlayer* me)
 	McpOwePlan(me->GetID());
 	s_lastEnded[(int)me->GetID()] = GC.getGame().getGameTurn();
 	McpTrail("turn view: end-of-turn snapshot begins", me->GetID(), GC.getGame().getGameTurn());
-	s_viewAtEnd[(int)me->GetID()] = McpGatherTurnView(me).items;
+	McpTurnViewData atEnd = McpGatherTurnView(me);
+	s_viewAtEnd[(int)me->GetID()] = atEnd.items;
+	s_screensAtEnd[(int)me->GetID()] = atEnd.screens;
 	McpTrail("turn view: end-of-turn snapshot done", me->GetID(), GC.getGame().getGameTurn());
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second)) return;
@@ -752,6 +773,7 @@ void McpTurnPlanReset()
 	s_landShown.clear();
 	s_viewShown.clear();
 	s_viewAtEnd.clear();
+	s_screensAtEnd.clear();
 	s_viewText.clear();
 }
 

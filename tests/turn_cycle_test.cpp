@@ -340,7 +340,7 @@ namespace
 		now.push_back(Item("units", "unit:7", "type", "Warrior", "at", "(5,5)"));
 		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
 		const std::vector<std::string>& cities = Section(view, "cities");
-		CHECK(Has(cities, "~ Roma · population 4  (was: population 3)"));
+		CHECK(Has(cities, "~ Roma · population 4 (was 3)"));
 		CHECK(Has(cities, "+ Milano · population 1"));
 		const std::vector<std::string>& units = Section(view, "units");
 		CHECK(Has(units, "  Warrior · at (5,5)"));
@@ -375,7 +375,7 @@ namespace
 		before.push_back(Item("cities", "city:1", "name", "Caen", "worked", "[(12,33) wheat 2f 1p; (14,33) deer 1f 2p]"));
 		now.push_back(Item("cities", "city:1", "name", "Caen", "worked", "[(12,33) wheat 2f 1p; (13,34) forest 1f 1p]"));
 		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
-		CHECK(Has(Section(view, "cities"), "~ Caen · worked [(12,33) wheat 2f 1p; (13,34) forest 1f 1p]  (was: worked: removed (14,33) deer 1f 2p; added (13,34) forest 1f 1p)"));
+		CHECK(Has(Section(view, "cities"), "~ Caen · worked [(12,33) wheat 2f 1p; (13,34) forest 1f 1p] (was: removed (14,33) deer 1f 2p; added (13,34) forest 1f 1p)"));
 	}
 
 	void TestOldPlanHeadingsMoveToTheNewOnes()
@@ -448,9 +448,9 @@ namespace
 		before.back().fields.push_back(std::make_pair(std::string("lands"), std::string("T49")));
 		now.push_back(Item("cities", "city:1:clock:Swordsman", "name", "Caen: Swordsman", "clock", "27/37 at 12/t: 1t"));
 		now.back().fields.push_back(std::make_pair(std::string("lands"), std::string("T49")));
-		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "  Caen: Swordsman · clock 27/37 at 12/t: 1t · lands T49"));
+		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "  Caen: Swordsman · 27/37 at 12/t: 1t · lands T49"));
 		now.back().fields.back().second = "T51";
-		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "~ Caen: Swordsman · clock 27/37 at 12/t: 1t · lands T51  (was: lands T49)"));
+		CHECK(Has(Section(McpMarkView(before, now, ticking, true), "cities"), "~ Caen: Swordsman · 27/37 at 12/t: 1t · lands T51 (was T49)"));
 	}
 
 	void TestTurnsToAfford()
@@ -551,15 +551,15 @@ namespace
 	{
 		std::vector<McpViewItem> before, now;
 		before.push_back(HpItem("cities", "Rouen", "182"));
-		before.push_back(HpItem("known cities: cities", "Pataliputra", "300"));
+		before.push_back(HpItem("their cities", "Pataliputra", "300"));
 		before.push_back(HpItem("cities", "Caen", "225"));
 		before.push_back(HpItem("military units", "Warrior", "100"));
-		before.push_back(HpItem("known cities: cities", "Sfax", "200"));
+		before.push_back(HpItem("their cities", "Sfax", "200"));
 		now.push_back(HpItem("cities", "Rouen", "107"));
-		now.push_back(HpItem("known cities: cities", "Pataliputra", "40"));
+		now.push_back(HpItem("their cities", "Pataliputra", "40"));
 		now.push_back(HpItem("cities", "Caen", "225"));
 		now.push_back(HpItem("military units", "Warrior", "30"));
-		now.push_back(HpItem("known cities: cities", "Sfax", NULL));
+		now.push_back(HpItem("their cities", "Sfax", NULL));
 		now.push_back(HpItem("cities", "Bayeux", "150"));
 		McpAddFallClocks(before, now);
 		CHECK(FieldOf(now[0], "falling") == "-75 since your last turn: 0 in 2t at this rate; at 0 a melee unit can take it");
@@ -574,6 +574,21 @@ namespace
 		n2.push_back(HpItem("cities", "Rouen", "0"));
 		McpAddFallClocks(b2, n2);
 		CHECK(FieldOf(n2[0], "falling") == "-40 since your last turn: at 0, a melee unit can take it now");
+	}
+}
+
+namespace
+{
+	void TestUnlabeledFieldsAndNewAndGoneFields()
+	{
+		std::vector<McpViewItem> before, now;
+		before.push_back(Item("units", "unit:7", "name", "Warrior 7", "_at", "(5,5)"));
+		before.back().fields.push_back(std::make_pair(std::string("embarked"), std::string("yes")));
+		now.push_back(Item("units", "unit:7", "name", "Warrior 7", "_at", "(6,5)"));
+		now.back().fields.push_back(std::make_pair(std::string("pact"), std::string("yes")));
+		std::vector<McpViewSection> view = McpMarkView(before, now, std::set<std::string>(), true);
+		CHECK(Has(Section(view, "units"), "~ Warrior 7 · (6,5) (was (5,5)) · pact yes (new)  (gone: embarked yes)"));
+		CHECK(Has(Section(McpMarkView(before, before, std::set<std::string>(), true), "units"), "  Warrior 7 · (5,5) · embarked yes"));
 	}
 }
 
@@ -615,6 +630,7 @@ int main()
 	TestTiesGoToTheTighterPicture();
 	TestNoCitiesNoPictures();
 	TestEndTurnWaitsUntilTheGameHasRunTheQueuedMoves();
+	TestUnlabeledFieldsAndNewAndGoneFields();
 	TestAFallingCityGetsAClock();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
