@@ -517,6 +517,18 @@ namespace
 	}
 }
 
+namespace
+{
+	void TestEndTurnWaitsUntilTheGameHasRunTheQueuedMoves()
+	{
+		CHECK(McpEndTurnOutcome(false, false) == MCP_TURN_ENDING);
+		CHECK(McpEndTurnOutcome(true, false) == MCP_TURN_ENDED);
+		CHECK(McpEndTurnOutcome(false, true) == MCP_TURN_HANDED_BACK);
+		// A turn that passed counts as ended even if the next one has already come round.
+		CHECK(McpEndTurnOutcome(true, true) == MCP_TURN_ENDED);
+	}
+}
+
 int main()
 {
 	TestNothingChanged();
@@ -554,6 +566,7 @@ int main()
 	TestSpreadCitiesTakeMorePicturesUpToTheLimit();
 	TestTiesGoToTheTighterPicture();
 	TestNoCitiesNoPictures();
+	TestEndTurnWaitsUntilTheGameHasRunTheQueuedMoves();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
 	return 0;

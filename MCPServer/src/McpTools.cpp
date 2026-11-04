@@ -1,6 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpTools.h"
 #include "McpTurnPlan.h"
+#include "McpTurnCycle.h"
 #include "McpToolSupport.h"
 #include "McpRules.h"
 #include "McpSeat.h"
@@ -916,11 +917,53 @@ MCP_TOOL(ToolSetResearch)
 	return JVal(o);
 }
 
+namespace
+{
+	// The turn each seat asked to end, while the game runs its units' queued moves: those can hand the turn back.
+	std::map<int, int> s_endingTurn;
+
+	// Run once the game has taken the end of turn, and again on each retry until the queued moves have run.
+	JVal EndTurnOutcome(CvPlayer* me, int iTurn, std::string& err)
+	{
+		bool bOver = !me->isTurnActive() || GC.getGame().getGameTurn() != iTurn;
+		McpEndTurnState eState = McpEndTurnOutcome(bOver, McpIsPlayerTurn(*me));
+		if(eState == MCP_TURN_ENDING)
+		{
+			err = "the turn is ending: the game is still running your units' queued moves; wait_for_my_turn returns at once if it hands the turn back";
+			McpBridge::RetryLater();
+			return JVal();
+		}
+		s_endingTurn.erase(me->GetID());
+		if(eState == MCP_TURN_HANDED_BACK)
+		{
+			err = "the game handed the turn back after running your units' queued moves - " + BlockingName(EndTurnBlocking(me));
+			const CvUnit* u = me->hasReadyUnit() ? me->GetFirstReadyUnit() : NULL;
+			if(u) err += McpFormat("; first: %s %d at (%d,%d)", u->getName().GetCString(), u->GetID(), u->getX(), u->getY());
+			return JVal();
+		}
+		JObj o;
+		o["ok"] = J(true);
+		o["ended_turn"] = J(iTurn);
+		o["next"] = J("plan your next turn with plan_turn while the others play, then call wait_for_my_turn; the turn comes back to you early if a unit finishes a queued move with moves to spare");
+		McpNoteTurnEnded(me);
+		McpAddPlanningView(me, o);
+		return JVal(o);
+	}
+}
+
 MCP_TOOL(ToolEndTurn)
 {
+	CvGame& g = GC.getGame();
+	CvPlayer* seat = Me(err);
+	if(!seat) return JVal();
+	std::map<int, int>::iterator it = s_endingTurn.find(seat->GetID());
+	if(it != s_endingTurn.end())
+	{
+		if(McpBridge::Retrying()) return EndTurnOutcome(seat, it->second, err);
+		s_endingTurn.erase(it);
+	}
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
-	CvGame& g = GC.getGame();
 	bool bForce = ArgBool(args, "force", false);
 	std::string capture = PendingCaptureDecision(me);
 	if(!capture.empty()) { err = "end of turn blocked - " + capture; return JVal(); }
@@ -954,13 +997,8 @@ MCP_TOOL(ToolEndTurn)
 			return JVal();
 		}
 	}
-	JObj o;
-	o["ok"] = J(true);
-	o["ended_turn"] = J(g.getGameTurn());
-	o["next"] = J("plan your next turn with plan_turn while the others play, then call wait_for_my_turn; the turn comes back to you early if a unit finishes a queued move with moves to spare");
-	McpNoteTurnEnded(me);
-	McpAddPlanningView(me, o);
-	return JVal(o);
+	s_endingTurn[me->GetID()] = g.getGameTurn();
+	return EndTurnOutcome(me, g.getGameTurn(), err);
 }
 
 MCP_TOOL(ToolAcknowledgeMessages)

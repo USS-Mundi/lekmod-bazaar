@@ -875,10 +875,12 @@ void McpBridge::Impl::ResetForNewGame()
 namespace
 {
 	bool s_retryRequested = false;
+	bool s_retrying = false;
 	const DWORD MCP_RETRY_WINDOW_MS = 4000;
 }
 
 void McpBridge::RetryLater() { s_retryRequested = true; }
+bool McpBridge::Retrying() { return s_retrying; }
 
 // A call from a session with no civilization yet (take_seat) is logged after it ran, for
 // the civilization it plays then: a claim of an opponent civilization is hidden with the
@@ -953,6 +955,7 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	if(bLogged && bFirstTry && ePlayerBefore != NO_PLAYER) Append((int)ePlayerBefore, McpIdentityLabel(before.identity), szCategory, McpDescribeCall(*pTool, pJob->args));
 	McpCrashSetContext((pJob->tool + " " + picojson::value(pJob->args).serialize()).c_str());
 	s_retryRequested = false;
+	s_retrying = !bFirstTry;
 	pJob->error.clear();
 	try
 	{
@@ -971,6 +974,7 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 		s_retryRequested = false;
 	}
 	McpCrashSetContext("");
+	s_retrying = false;
 	bool bRetry = false;
 	if(s_retryRequested)
 	{

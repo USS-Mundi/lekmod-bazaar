@@ -81,6 +81,8 @@ public:
 	// A tool that cannot finish this frame (a unit is still animating) calls this
 	// instead of failing; the bridge runs it again on a later frame, for a few seconds.
 	static void RetryLater();
+	// During a job: whether this run is one of those later runs.
+	static bool Retrying();
 
 	// Game thread, during a job: the session whose tool is running. Outside a job the
 	// token is "". Identity is empty until the model calls set_identity; every new MCP

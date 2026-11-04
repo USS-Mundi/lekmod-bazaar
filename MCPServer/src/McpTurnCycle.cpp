@@ -442,6 +442,12 @@ int McpTurnsToAfford(int cost, int gold, int rate)
 	return (cost - gold + rate - 1) / rate;
 }
 
+McpEndTurnState McpEndTurnOutcome(bool bTurnOver, bool bMyTurn)
+{
+	if(bTurnOver) return MCP_TURN_ENDED;
+	return bMyTurn ? MCP_TURN_HANDED_BACK : MCP_TURN_ENDING;
+}
+
 int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn)
 {
 	if(bMyTurn || lastEndedTurn < 0 || lastEndedTurn > gameTurn) return gameTurn;

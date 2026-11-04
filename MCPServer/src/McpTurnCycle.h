@@ -149,6 +149,12 @@ int McpTurnsToAfford(int cost, int gold, int rate);
 // last ended (-1 if none since the game loaded), since the game may already be on the turn the seat is waiting for.
 int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn);
 
+// After a seat asks to end its turn, the game runs its units' queued moves, and those can hand the turn back (a unit
+// that finished with moves left, or woke needing orders). bTurnOver once the seat's turn has passed; bMyTurn while it
+// is the seat's turn and not ending.
+enum McpEndTurnState { MCP_TURN_ENDING, MCP_TURN_ENDED, MCP_TURN_HANDED_BACK };
+McpEndTurnState McpEndTurnOutcome(bool bTurnOver, bool bMyTurn);
+
 // One picture of a seat's land: the candidate center it is drawn around, the cities within reach of it, and the
 // distance to the farthest of them.
 struct McpPicture
