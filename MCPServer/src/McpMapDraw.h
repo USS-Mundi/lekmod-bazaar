@@ -10,9 +10,11 @@
 struct McpMapUnit
 {
 	std::string label;
+	std::string tag;       // the owner's short code, written under the unit
 	unsigned fill, ring;   // 0xRRGGBB
+	bool atWar;            // its owner is at war with the viewer: a thicker ring
 	int hp;                // percent of full; under 100 a bar shows it
-	McpMapUnit() : fill(0), ring(0), hp(100) {}
+	McpMapUnit() : fill(0), ring(0), atWar(false), hp(100) {}
 };
 
 struct McpMapHex
@@ -28,15 +30,15 @@ struct McpMapHex
 	bool border[6];                     // the owner changes across that edge
 	unsigned borderColor;               // the owner's color
 	std::string topLeft, topRight, bottomLeft, coords;
-	std::string centerLabel;            // drawn in the middle when there is no city and no unit (MTN)
+	std::string centerLabel;            // drawn in the middle when there is no city and no unit (MTN); FOG is added out of sight
 	bool city;
 	unsigned cityColor;
 	std::string cityLabel;              // the name and its size: "Tunis 7"
 	int cityHp;                         // percent of full; under 100 a bar shows it
 	bool cityAtWar;                     // its owner is at war with the viewer: a red outline
-	std::vector<McpMapUnit> units;   // up to three; two are drawn, the rest counted in the +N
+	std::vector<McpMapUnit> units;   // up to three; two are drawn, the rest counted in the +N; in a city, under its box
 	int extraUnits;
-	bool worked;                        // a citizen of the viewer's city works it: a white dot under the ground label
+	bool worked;                        // a citizen of the viewer's city works it: a W on the ground line
 
 	McpMapHex() : x(0), y(0), fill(0), fogged(false), unexplored(false), riverE(false), riverSE(false), riverSW(false), hasRoad(false), owned(false), borderColor(0), city(false), cityColor(0), cityHp(100), cityAtWar(false), extraUnits(0), worked(false)
 	{

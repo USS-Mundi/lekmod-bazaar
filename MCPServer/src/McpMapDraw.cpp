@@ -118,6 +118,29 @@ namespace
 		g.DrawRectangle(&edge, cx - w / 2, cy - h / 2, w, h);
 	}
 
+	// Up to two units side by side, each a badge filled in its owner's color: the unit's code on top, the owner's short
+	// code under it, the border the relation (thicker at war) and a health bar just under it when hurt.
+	// Everything stays inside the hex, above the ground line.
+	void DrawUnits(Graphics& g, const McpMapHex& h, float cx, float cy, float s, const Font& unitFont, const Font& tagFont)
+	{
+		int shown = (int)h.units.size();
+		if(shown > 2) shown = 2;
+		float w = 29 * s, ht = 22 * s;
+		for(int k = 0; k < shown; ++k)
+		{
+			const McpMapUnit& u = h.units[k];
+			float ux = cx + (k - (shown - 1) / 2.0f) * 31 * s;
+			SolidBrush fill(Rgb(u.fill));
+			Pen edge(Rgb(u.ring), (u.atWar ? 4.5f : 2.5f) * s);
+			RectF r(ux - w / 2, cy - ht / 2, w, ht);
+			g.FillRectangle(&fill, r);
+			g.DrawRectangle(&edge, r);
+			DrawCentered(g, u.label, unitFont, TextOn(u.fill), ux, cy - 5 * s, 0);
+			if(!u.tag.empty()) DrawCentered(g, u.tag, tagFont, TextOn(u.fill), ux, cy + 5 * s, 0);
+			if(u.hp < 100) DrawHpBar(g, ux, cy + ht / 2 + 3 * s, w, 3.5f * s, u.hp);
+		}
+	}
+
 	// The key's lines broken at " · " so each fits the picture's width.
 	std::vector<std::string> WrapKey(const std::vector<std::string>& key, const Font& font, float width)
 	{
@@ -209,6 +232,7 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 	Font labelFont(&family, 11 * s, FontStyleRegular, UnitPixel);
 	Font coordFont(&family, 10 * s, FontStyleBold, UnitPixel);
 	Font unitFont(&family, 11 * s, FontStyleBold, UnitPixel);
+	Font tagFont(&family, 8.5f * s, FontStyleBold, UnitPixel);
 	Font cityFont(&family, 10.5f * s, FontStyleBold, UnitPixel);
 	Font centerFont(&family, 13 * s, FontStyleBold, UnitPixel);
 	Font legendFont(&family, 12 * s, FontStyleRegular, UnitPixel);
@@ -324,16 +348,13 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		}
 		DrawCentered(g, top, coordFont, ink, px, py - 16 * s);
 		std::string ground = h.topLeft;
+		if(h.fogged && !h.centerLabel.empty()) ground += (ground.empty() ? "" : " ") + h.centerLabel;
 		if(!h.topRight.empty()) ground += (ground.empty() ? "" : " ") + h.topRight;
 		if(!h.bottomLeft.empty() && ground.size() + h.bottomLeft.size() <= 11) ground += (ground.empty() ? "" : " ") + h.bottomLeft;
-		if(!ground.empty()) DrawCentered(g, ground, labelFont, ink, px, py + 14 * s);
-		if(h.worked)
-		{
-			SolidBrush dot(Color(255, 255, 255, 255));
-			Pen dotEdge(Color(255, 0, 0, 0), 1 * s);
-			g.FillEllipse(&dot, px - 4 * s, py + 21 * s, 8 * s, 8 * s);
-			g.DrawEllipse(&dotEdge, px - 4 * s, py + 21 * s, 8 * s, 8 * s);
-		}
+		// The ground line sits under whatever stands on the hex, so nothing covers it; a city's ground is left out. A
+		// worked tile says so there in a letter, which reads surely where a dot was missed.
+		if(h.worked) ground += ground.empty() ? "W" : " W";
+		if(!ground.empty() && !h.city) DrawCentered(g, ground, labelFont, ink, px, py + 19 * s);
 		if(h.city)
 		{
 			PointF c[6];
@@ -353,27 +374,26 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 			g.DrawRectangle(&boxEdge, r);
 			DrawCentered(g, h.cityLabel, cityFont, TextOn(h.cityColor), px, py, 0);
 			if(h.cityHp < 100) DrawHpBar(g, px, py + 14 * s, 50 * s, 5 * s, h.cityHp);
-		}
-		else if(!h.units.empty())
-		{
-			int shown = (int)h.units.size();
-			if(shown > 2) shown = 2;
-			for(int k = 0; k < shown; ++k)
+			// The units standing in the city (always its owner's), by their codes on a dark strip under the box.
+			if(!h.units.empty())
 			{
-				const McpMapUnit& u = h.units[k];
-				float ux = px + (k - (shown - 1) / 2.0f) * 27 * s;
-				SolidBrush fill(Rgb(u.fill));
-				Pen edge(Rgb(u.ring), 4 * s);
-				g.FillEllipse(&fill, ux - 12.5f * s, py - 12.5f * s, 25 * s, 25 * s);
-				g.DrawEllipse(&edge, ux - 12.5f * s, py - 12.5f * s, 25 * s, 25 * s);
-				DrawCentered(g, u.label, unitFont, TextOn(u.fill), ux, py, 0);
-				if(u.hp < 100) DrawHpBar(g, ux, py + 17 * s, 24 * s, 4.5f * s, u.hp);
+				std::string in;
+				for(size_t k = 0; k < h.units.size(); ++k) in += (k ? " " : "") + h.units[k].label;
+				if(h.extraUnits > 0) { char more[16]; sprintf_s(more, " +%d", h.extraUnits); in += more; }
+				std::wstring wi = Wide(in);
+				RectF mi;
+				g.MeasureString(wi.c_str(), (INT)wi.size(), &tagFont, PointF(0, 0), &mi);
+				SolidBrush dark(Color(255, 16, 16, 18));
+				g.FillRectangle(&dark, px - mi.Width / 2 - 2 * s, py + 17 * s, mi.Width + 4 * s, 11 * s);
+				DrawCentered(g, in, tagFont, Color(255, 255, 255, 255), px, py + 22.5f * s, 0);
 			}
 		}
+		else if(!h.units.empty())
+			DrawUnits(g, h, px, py + 1 * s, s, unitFont, tagFont);
+		else if(h.fogged)
+			DrawCentered(g, "FOG", centerFont, ink, px, py);
 		else if(!h.centerLabel.empty())
-		{
 			DrawCentered(g, h.centerLabel, centerFont, ink, px, py);
-		}
 	}
 
 	float ly = (float)gridH;

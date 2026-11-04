@@ -63,14 +63,77 @@ namespace
 		return "?";
 	}
 
-	unsigned OwnerColor(PlayerTypes e)
+	unsigned ColorOf(int eColor)
 	{
-		CvPlayerColorInfo* pc = GC.GetPlayerColorInfo(GET_PLAYER(e).getPlayerColor());
-		CvColorInfo* ci = pc ? GC.GetColorInfo((ColorTypes)pc->GetColorTypePrimary()) : NULL;
+		CvColorInfo* ci = eColor >= 0 ? GC.GetColorInfo((ColorTypes)eColor) : NULL;
 		if(!ci) return Rgb(200, 200, 200);
 		const CvColorA& c = ci->GetColor();
 		return Rgb((int)(c.r * 255), (int)(c.g * 255), (int)(c.b * 255));
 	}
+
+	bool Close(unsigned a, unsigned b)
+	{
+		int dr = (int)((a >> 16) & 255) - (int)((b >> 16) & 255), dg = (int)((a >> 8) & 255) - (int)((b >> 8) & 255), db = (int)(a & 255) - (int)(b & 255);
+		return dr * dr + dg * dg + db * db < 90 * 90;
+	}
+
+	// Each owner in one picture gets a color no other owner in it shares (its primary, else the secondary color the
+	// game's strategic view tells city-states apart by, else a spare one) and a short code written on its units,
+	// because a reader tells letters apart surely and close shades not. The viewer is registered first.
+	struct OwnerStyle
+	{
+		PlayerTypes eMe;
+		std::map<PlayerTypes, unsigned> color;
+		std::map<PlayerTypes, std::string> code;
+		std::set<std::string> used;
+		int unmet;
+		explicit OwnerStyle(PlayerTypes me) : eMe(me), unmet(0) { Color(me); Code(me); }
+
+		unsigned Color(PlayerTypes e)
+		{
+			std::map<PlayerTypes, unsigned>::iterator it = color.find(e);
+			if(it != color.end()) return it->second;
+			static const unsigned spare[] = { 0x2E86DE, 0xF1C40F, 0x17BEBB, 0xE84393, 0x8E44AD, 0x27AE60, 0xD35400, 0xBDC3C7, 0x6C5CE7, 0x00B894, 0xFD79A8, 0xA0522D };
+			CvPlayerColorInfo* pc = GC.GetPlayerColorInfo(GET_PLAYER(e).getPlayerColor());
+			std::vector<unsigned> options;
+			if(pc) { options.push_back(ColorOf(pc->GetColorTypePrimary())); options.push_back(ColorOf(pc->GetColorTypeSecondary())); }
+			for(size_t i = 0; i < sizeof(spare) / sizeof(spare[0]); ++i) options.push_back(spare[i]);
+			unsigned pick = options.empty() ? 0xC8C8C8 : options[0];
+			for(size_t i = 0; i < options.size(); ++i)
+			{
+				bool bFree = true;
+				for(std::map<PlayerTypes, unsigned>::iterator c = color.begin(); c != color.end() && bFree; ++c) bFree = !Close(options[i], c->second);
+				if(bFree) { pick = options[i]; break; }
+			}
+			color[e] = pick;
+			return pick;
+		}
+
+		// Three capitals from the civilization's name ("MAU" Maurya, "BAR" Barbarians); a civilization the viewer has
+		// not met is "U1", "U2"... so its name is not given away.
+		std::string Code(PlayerTypes e)
+		{
+			std::map<PlayerTypes, std::string>::iterator it = code.find(e);
+			if(it != code.end()) return it->second;
+			TeamTypes eTeam = GET_PLAYER(eMe).getTeam();
+			bool bKnown = GET_PLAYER(e).getTeam() == eTeam || GET_TEAM(eTeam).isHasMet(GET_PLAYER(e).getTeam()) || GET_PLAYER(e).isBarbarian();
+			std::string c;
+			if(bKnown)
+			{
+				std::string name = CivName(e), letters;
+				for(size_t i = 0; i < name.size(); ++i)
+					if(isalpha((unsigned char)name[i])) letters += (char)toupper((unsigned char)name[i]);
+				c = letters.substr(0, 3);
+				for(size_t n = 3; used.count(c) && n < letters.size(); ++n) c = letters.substr(0, 2) + letters[n];
+				for(int k = 2; used.count(c) || c.empty(); ++k) c = letters.substr(0, 2) + McpFormat("%d", k);
+			}
+			else
+				do c = McpFormat("U%d", ++unmet); while(used.count(c));
+			used.insert(c);
+			code[e] = c;
+			return c;
+		}
+	};
 
 	// Cuts to at most n characters without splitting a UTF-8 sequence.
 	std::string Cut(const std::string& s, size_t n)
@@ -180,7 +243,7 @@ namespace
 
 	// One tile as a picture shows it, at grid position (x, y). The strategic picture leaves resources and improvements
 	// to the map tool and names units by their codes; both give a city's and a unit's health.
-	McpMapHex HexOf(PlayerTypes eMe, int x, int y, CvPlot* p, bool bStrategic, UnitCodes& codes, std::set<PlayerTypes>& owners,
+	McpMapHex HexOf(PlayerTypes eMe, int x, int y, CvPlot* p, bool bStrategic, UnitCodes& codes, OwnerStyle& style, std::set<PlayerTypes>& owners,
 		JArr& cities, JArr& units, HexCounts& counts)
 	{
 		TeamTypes eTeam = GET_PLAYER(eMe).getTeam();
@@ -205,7 +268,7 @@ namespace
 		RouteTypes eRoute = p->getRevealedRouteType(eTeam);
 		h.hasRoad = eRoute != NO_ROUTE;
 		PlayerTypes eOwner = p->getRevealedOwner(eTeam);
-		if(eOwner != NO_PLAYER) { h.owned = true; h.borderColor = OwnerColor(eOwner); owners.insert(eOwner); }
+		if(eOwner != NO_PLAYER) { h.owned = true; h.borderColor = style.Color(eOwner); owners.insert(eOwner); }
 		CvCity* pWorker = p->isBeingWorked() ? p->getWorkingCity() : NULL;
 		h.worked = pWorker && pWorker->getOwner() == eMe && !p->isCity();
 		if(h.worked) counts.anyWorked = true;
@@ -239,7 +302,7 @@ namespace
 			// Under fog the city is shown as last seen: its owner then, grey if it has changed hands since.
 			PlayerTypes eCityOwner = h.fogged ? eOwner : city->getOwner();
 			h.city = true;
-			h.cityColor = eCityOwner != NO_PLAYER ? OwnerColor(eCityOwner) : Rgb(120, 120, 120);
+			h.cityColor = eCityOwner != NO_PLAYER ? style.Color(eCityOwner) : Rgb(120, 120, 120);
 			h.cityLabel = Cut(city->getName(), 9);
 			if(h.cityLabel.size() < city->getName().size()) h.cityLabel = Cut(city->getName(), 8) + ".";
 			if(bStrategic && !h.fogged) h.cityLabel += McpFormat(" %d", city->getPopulation());
@@ -254,7 +317,7 @@ namespace
 			if(h.fogged) co["out_of_sight"] = J(true);
 			cities.push_back(JVal(co));
 		}
-		else if(!h.fogged)
+		if(!h.fogged)
 		{
 			for(int k = 0; k < p->getNumUnits(); ++k)
 			{
@@ -272,7 +335,9 @@ namespace
 				if(h.units.size() >= 3) { ++h.extraUnits; continue; }
 				McpMapUnit mu;
 				mu.label = bStrategic ? codes.For(UnitTypeName(u->getUnitType())) : Abbrev(UnitTypeName(u->getUnitType()));
-				mu.fill = OwnerColor(u->getOwner());
+				mu.fill = style.Color(u->getOwner());
+				mu.tag = style.Code(u->getOwner());
+				mu.atWar = myTeam.isAtWar(u->getTeam());
 				mu.ring = u->getOwner() == eMe ? Rgb(255, 255, 255)
 				        : u->getTeam() == eTeam ? Rgb(60, 230, 90)
 				        : myTeam.isAtWar(u->getTeam()) ? Rgb(240, 40, 40)
@@ -284,7 +349,7 @@ namespace
 		return h;
 	}
 
-	std::vector<McpMapLegendEntry> LegendOf(PlayerTypes eMe, const std::set<PlayerTypes>& owners)
+	std::vector<McpMapLegendEntry> LegendOf(PlayerTypes eMe, const std::set<PlayerTypes>& owners, OwnerStyle& style)
 	{
 		TeamTypes eTeam = GET_PLAYER(eMe).getTeam();
 		CvTeam& myTeam = GET_TEAM(eTeam);
@@ -292,9 +357,9 @@ namespace
 		for(std::set<PlayerTypes>::const_iterator it = owners.begin(); it != owners.end(); ++it)
 		{
 			McpMapLegendEntry e;
-			e.color = OwnerColor(*it);
-			bool bKnown = GET_PLAYER(*it).getTeam() == eTeam || myTeam.isHasMet(GET_PLAYER(*it).getTeam());
-			e.name = bKnown ? CivName(*it) : "unmet civilization";
+			e.color = style.Color(*it);
+			bool bKnown = GET_PLAYER(*it).getTeam() == eTeam || myTeam.isHasMet(GET_PLAYER(*it).getTeam()) || GET_PLAYER(*it).isBarbarian();
+			e.name = style.Code(*it) + " " + (bKnown ? CivName(*it) : std::string("unmet civilization"));
 			if(*it == eMe) e.name += " (you)";
 			else if(GET_PLAYER(*it).getTeam() == eTeam) e.name += " (teammate)";
 			else if(myTeam.isAtWar(GET_PLAYER(*it).getTeam())) e.name += " (at war)";
@@ -311,18 +376,19 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 	std::vector<McpMapHex> hexes;
 	std::set<PlayerTypes> owners;
 	UnitCodes codes;
+	OwnerStyle style(eMe);
 	HexCounts counts;
 	for(int y = cy - radius; y <= cy + radius; ++y)
 		for(int x = x0; x <= cx + radius + 1; ++x)
 		{
 			if(plotDistance(cx, cy, x, y) > radius) continue;
 			CvPlot* p = map.plot(x, y);
-			if(p) hexes.push_back(HexOf(eMe, x, y, p, false, codes, owners, cities, units, counts));
+			if(p) hexes.push_back(HexOf(eMe, x, y, p, false, codes, style, owners, cities, units, counts));
 		}
-	std::string footer = McpFormat("center %d,%d  radius %d  hatched = out of sight now  ? = unexplored", cx, cy, radius);
-	if(counts.anyWorked) footer += "  white dot = worked by your city";
+	std::string footer = McpFormat("center %d,%d  radius %d  FOG (hatched) = out of sight now  ? = unexplored  under each unit: its owner's code (legend)", cx, cy, radius);
+	if(counts.anyWorked) footer += "  W on the ground line = worked by your city";
 	std::string err;
-	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners), footer, x0, y1, 2 * radius + 3, 2 * radius + 1, map.isWrapX() ? map.getGridWidth() : 0, err);
+	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners, style), footer, x0, y1, 2 * radius + 3, 2 * radius + 1, map.isWrapX() ? map.getGridWidth() : 0, err);
 	if(png.empty()) { summary = err; return ""; }
 	McpSaveMapCopy(png);
 	summary = McpFormat("%d tiles drawn around (%d,%d); %d of them out of sight now; %d unexplored, marked ?", (int)hexes.size() - counts.unexplored, cx, cy, counts.fogged, counts.unexplored);
@@ -362,22 +428,23 @@ std::string McpRenderStrategicPng(PlayerTypes eMe, std::string& summary)
 	std::vector<McpMapHex> hexes;
 	std::set<PlayerTypes> owners;
 	UnitCodes codes;
+	OwnerStyle style(eMe);
 	HexCounts counts;
 	JArr cities, units;
 	for(int y = maxY; y >= minY; --y)
 		for(int x = minX; x <= maxX; ++x)
 		{
 			CvPlot* p = map.plot(x, y);
-			if(p) hexes.push_back(HexOf(eMe, x, y, p, true, codes, owners, cities, units, counts));
+			if(p) hexes.push_back(HexOf(eMe, x, y, p, true, codes, style, owners, cities, units, counts));
 		}
 	std::vector<std::string> key;
-	key.push_back("ring: white = yours · green = teammate · red = at war with you · grey = not at war · bar under a unit or city = its health");
+	key.push_back("ring: white = yours · green = teammate · thick red = at war with you · grey = not at war · under each unit: its owner's code (legend) · bar = its health · units in a city are drawn under its name");
 	if(!codes.byCode.empty()) key.push_back(codes.Key());
 	key.push_back("ground: F forest · J jungle · M marsh · fp flood plains · h hills · MTN mountain · NW natural wonder · brown line = road · blue edge = river"
-		" · hatched = out of sight now · ? = unexplored" + std::string(counts.anyWorked ? " · white dot = worked by your city" : ""));
+		" · FOG (hatched) = out of sight now, units there not shown · ? = unexplored" + std::string(counts.anyWorked ? " · W = worked by your city" : ""));
 	std::string footer = McpFormat("TURN %d · %s · x%d-x%d, y%d-y%d", GC.getGame().getGameTurn(), CivName(eMe).c_str(), minX, maxX, minY, maxY);
 	std::string err;
-	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners), footer, minX, maxY, maxX - minX + 1, maxY - minY + 1, map.isWrapX() ? map.getGridWidth() : 0, err, key);
+	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners, style), footer, minX, maxY, maxX - minX + 1, maxY - minY + 1, map.isWrapX() ? map.getGridWidth() : 0, err, key);
 	if(png.empty()) { summary = err; return ""; }
 	McpSaveMapCopy(png);
 	summary = McpFormat("x%d-x%d, y%d-y%d: every city and unit of yours and every unit and city in sight; %d units, %d cities shown",

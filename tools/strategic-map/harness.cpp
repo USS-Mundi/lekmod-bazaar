@@ -8,7 +8,7 @@
 //   FOOTER  text
 //   HEX     x y fill fogged unexplored rivers(E,SE,SW as 0/1) hasRoad roads(6 x 0/1) owned borders(6 x 0/1) borderColor
 //           worked topRight centerLabel coords city cityColor cityLabel cityHp cityAtWar
-//   UNIT    x y label fill ring hp
+//   UNIT    x y label fill ring hp [ownerTag atWar(0/1)]
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -78,6 +78,7 @@ int main(int argc, char** argv)
 			if(it == at.end()) continue;
 			McpMapUnit u;
 			u.label = t[3]; u.fill = Color(t[4]); u.ring = Color(t[5]); u.hp = Int(t[6]);
+			if(t.size() >= 9) { u.tag = t[7]; u.atWar = t[8] == "1"; }
 			McpMapHex& h = hexes[it->second];
 			if(h.units.size() >= 3) ++h.extraUnits;
 			else h.units.push_back(u);

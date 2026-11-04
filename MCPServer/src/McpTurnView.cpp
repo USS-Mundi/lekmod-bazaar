@@ -100,6 +100,9 @@ namespace
 		return v == (int)v ? McpFormat("%d", (int)v) : McpFormat("%.1f", v);
 	}
 
+	// The list under key in a tool's result. It points into v, so keep v in a variable for as long as the list is read:
+	// a call's temporary result is freed at the end of the statement, and its list with it (that left the cities and
+	// research sections empty in play).
 	const JArr* ListIn(const JVal& v, const char* key)
 	{
 		if(!v.is<JObj>()) return NULL;
@@ -263,7 +266,8 @@ namespace
 	void AddUnits(CvPlayer* me, bool bMilitary, std::vector<McpViewItem>& items, std::vector<McpWithoutOrder>& withoutOrder)
 	{
 		std::map<int, JObj> byId;
-		const JArr* list = ListIn(Call(ToolUnits), "units");
+		JVal result = Call(ToolUnits);
+		const JArr* list = ListIn(result, "units");
 		for(size_t k = 0; list && k < list->size(); ++k)
 			if((*list)[k].is<JObj>()) byId[ArgInt((*list)[k].get<JObj>(), "id", -1)] = (*list)[k].get<JObj>();
 		std::vector<std::pair<std::string, McpViewItem> > rows;
@@ -328,7 +332,8 @@ namespace
 	// (build, growth, next border tile, the price to buy the build), its queue, and the tiles it works and could work.
 	void AddCities(CvPlayer* me, std::vector<McpViewItem>& items, std::vector<McpWithoutOrder>& withoutOrder, std::vector<std::string>& names)
 	{
-		const JArr* list = ListIn(Call(ToolCities), "cities");
+		JVal result = Call(ToolCities);
+		const JArr* list = ListIn(result, "cities");
 		for(size_t k = 0; list && k < list->size(); ++k)
 		{
 			if(!(*list)[k].is<JObj>()) continue;
@@ -379,7 +384,8 @@ namespace
 	// The technologies open to research now, with their turns.
 	void AddResearch(std::vector<McpViewItem>& items)
 	{
-		const JArr* list = ListIn(Call(ToolResearchOptions), "available");
+		JVal result = Call(ToolResearchOptions);
+		const JArr* list = ListIn(result, "available");
 		if(!list || list->empty()) return;
 		std::string open;
 		for(size_t i = 0; i < list->size(); ++i)
