@@ -15,3 +15,7 @@ std::string McpCsFilePath(const std::string& gameId, const std::string& fileName
 // The same, for another folder of the game's: My Games\Sid Meier's Civilization 5\MCP\<game id>\<sub>\<file>.
 std::string McpGameFileRead(const std::string& gameId, const char* sub, const std::string& fileName);
 void McpGameFileAppend(const std::string& gameId, const char* sub, const std::string& fileName, const std::string& headerIfNew, const std::string& line);
+
+// The city-state switch-off file, My Games\Sid Meier's Civilization 5\MCPServer-city-states-off: while it exists the
+// plugin registers none of its city-state hooks at start, so the game runs city-states exactly as it would without it.
+bool McpCityStatesOffAtStart();

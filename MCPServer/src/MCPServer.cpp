@@ -21,6 +21,7 @@ namespace CivHooks
 #include "CvDllContext.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
+#include "McpCityStateFiles.h"
 #include "McpCrashLog.h"
 #include "McpToolSupport.h"
 #include "McpDiplomacy.h"
@@ -369,26 +370,31 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &AfterEqualizeDeal), "after CvDealAI::DoEqualizeDealWithHuman");
 	Check(CivRegisterReplace<CivHooks::CvDealAI_IsDealWithHumanAcceptable>(host, &ReplaceIsDealWithHumanAcceptable), "replace CvDealAI::IsDealWithHumanAcceptable");
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
-	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &AfterGoldGift), "after CvMinorCivAI::DoGoldGiftFromMajor");
-	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &BeforeUnitGift), "before CvMinorCivAI::DoUnitGiftFromMajor");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &AfterUnitGift), "after CvMinorCivAI::DoUnitGiftFromMajor");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTileImprovementGiftFromMajor>(host, &AfterImprovementGift), "after CvMinorCivAI::DoTileImprovementGiftFromMajor");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTeamDeclaredWarOnMe>(host, &AfterWarOnMinor), "after CvMinorCivAI::DoTeamDeclaredWarOnMe");
+	const bool bCityStates = !McpCityStatesOffAtStart();
+	if(!bCityStates) Log("city-state hooks off: MCPServer-city-states-off is in My Games\\Sid Meier's Civilization 5");
+	if(bCityStates)
+	{
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &AfterGoldGift), "after CvMinorCivAI::DoGoldGiftFromMajor");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &BeforeUnitGift), "before CvMinorCivAI::DoUnitGiftFromMajor");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &AfterUnitGift), "after CvMinorCivAI::DoUnitGiftFromMajor");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTileImprovementGiftFromMajor>(host, &AfterImprovementGift), "after CvMinorCivAI::DoTileImprovementGiftFromMajor");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTeamDeclaredWarOnMe>(host, &AfterWarOnMinor), "after CvMinorCivAI::DoTeamDeclaredWarOnMe");
 #ifdef MCP_LEKMOD
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout_with_PlayerTypes>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
-	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuests");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuests");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout_with_PlayerTypes>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuests");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuests>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuests");
 #else
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
-	Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuestsForPlayer");
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuestsForPlayer");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoBuyout>(host, &AfterBuyout), "after CvMinorCivAI::DoBuyout");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &BeforeQuestsDone), "before CvMinorCivAI::DoCompletedQuestsForPlayer");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoCompletedQuestsForPlayer>(host, &AfterQuestsDone), "after CvMinorCivAI::DoCompletedQuestsForPlayer");
 #endif
-	Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
+		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTurn>(host, &AfterMinorTurn), "after CvMinorCivAI::DoTurn");
+	}
 	Check(CivRegisterBefore<CivHooks::CvPlayer_doTurn>(host, &BeforePlayerTurn), "before CvPlayer::doTurn");
 	Check(CivRegisterAfter<CivHooks::CvPlayer_doTurn>(host, &AfterPlayerTurn), "after CvPlayer::doTurn");
 	Check(CivRegisterBefore<CivHooks::CvPlayer_doTurnUnits>(host, &BeforePlayerTurnUnits), "before CvPlayer::doTurnUnits");
@@ -397,10 +403,13 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvBarbarians_DoUnits>(host, &AfterBarbarianUnits), "after CvBarbarians::DoUnits");
 	Check(CivRegisterBefore<CivHooks::CvPlayerAI_AI_unitUpdate>(host, &BeforeAIUnitUpdate), "before CvPlayerAI::AI_unitUpdate");
 	Check(CivRegisterBefore<CivHooks::CvUnit_setXY>(host, &TrailBeforeUnitSetXY), "before CvUnit::setXY");
-	Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
-	Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
+	if(bCityStates)
+	{
+		Check(CivRegisterReplace<CivHooks::CvUnit_canEnterTerritory>(host, &ReplaceCanEnterTerritory), "replace CvUnit::canEnterTerritory");
+		Check(CivRegisterReplace<CivHooks::CvTeam_IsAllowsOpenBordersToTeam>(host, &ReplaceAllowsOpenBorders), "replace CvTeam::IsAllowsOpenBordersToTeam");
+		Check(CivRegisterBefore<CivHooks::CvUnit_kill>(host, &BeforeUnitKill), "before CvUnit::kill");
+	}
 	Check(CivRegisterAfter<CivHooks::CvUnit_setXY>(host, &AfterUnitSetXY), "after CvUnit::setXY");
-	Check(CivRegisterBefore<CivHooks::CvUnit_kill>(host, &BeforeUnitKill), "before CvUnit::kill");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)static_cast<CivPlayerQueryFn>(&IsPluginControlledPlayer)), "IsPluginControlledPlayer");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)static_cast<CivPlayerQueryFn>(&KeepDeadSlotOpen)), "KeepDeadSlotOpen");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)static_cast<CivPopupRaisedFn>(&PopupRaised)), "PopupRaised");
