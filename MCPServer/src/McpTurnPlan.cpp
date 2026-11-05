@@ -447,7 +447,7 @@ MCP_TOOL(ToolPlanTurn)
 		SaveGamePlan(me, game);
 	}
 	if(pi == args.end() && game.turn < 0)
-		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least direction (how you win from here, who is in the way, what would change it)");
+		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least direction (how you are optimizing your odds of winning from here)");
 	std::vector<std::string> checks = CheckOrders(me, plan.orders);
 	warnings.insert(warnings.end(), checks.begin(), checks.end());
 	plan.plannedTurn = McpPlanMadeOnTurn(iTurn, McpIsPlayerTurn(*me), LastEnded(me->GetID()));
@@ -476,7 +476,7 @@ MCP_TOOL(ToolPlanTurn)
 	if(bReplaced) o["replaced"] = J("your earlier plan");
 	if(bPlanChanged) o["game_plan"] = J("saved: each turn view shows each part beside the state it is about");
 	if(!warnings.empty()) o["warnings"] = JVal(Lines(warnings));
-	o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn comes it shows everything you can see, what changed marked in place, your plans beside it, and these orders"
+	o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn starts, call turn_view"
 		: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
 	return JVal(o);
 }
@@ -487,8 +487,25 @@ MCP_TOOL(ToolWaitForMyTurn)
 	if(!err.empty() || !v.is<JObj>()) return v;
 	std::string why;
 	CvPlayer* me = Me(why);
-	if(me && McpIsPlayerTurn(*me)) McpAddPlanToTurnStart(me, v.get<JObj>());
+	if(me && McpIsPlayerTurn(*me)) v.get<JObj>()["your_turn"] = J("Your turn has started. Call turn_view.");
 	return v;
+}
+
+MCP_TOOL(ToolCityDetail)
+{
+	CvPlayer* me = Me(err);
+	if(!me) return JVal();
+	return McpCityDetailText(me, ArgInt(args, "city_id", -1), err);
+}
+
+MCP_TOOL(ToolTurnView)
+{
+	CvPlayer* me = Me(err);
+	if(!me || !RequireIdentity(err)) return JVal();
+	if(!McpIsPlayerTurn(*me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
+	JObj o;
+	McpAddPlanToTurnStart(me, o);
+	return JVal(o);
 }
 
 namespace
@@ -556,18 +573,30 @@ namespace
 		}
 		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, items, ticking, before != NULL);
 		std::string out = McpFormat("TURN %d · %s (%s)\n", GC.getGame().getGameTurn(), me->getCivilizationShortDescription(), me->getName());
+		int iTurn = GC.getGame().getGameTurn();
+		out += McpTurnFramingTop(McpLastPlanTurn(plan)) + "\n\n";
 		if(before) out += "Marks: + new since your last turn · ~ changed, the old value in (was ...) · - gone\n";
+		std::string codes;
+		for(int i = 0; i < MAX_PLAYERS; ++i)
+		{
+			CvPlayer& p = GET_PLAYER((PlayerTypes)i);
+			if(!p.isAlive() || i == (int)me->GetID()) continue;
+			if(!p.isBarbarian() && !GET_TEAM(me->getTeam()).isHasMet(p.getTeam())) continue;
+			codes += (codes.empty() ? "" : " · ") + std::string("@") + CivCode((PlayerTypes)i) + " " + CivName((PlayerTypes)i);
+		}
+		out += "Codes: @" + CivCode(me->GetID()) + " you" + (codes.empty() ? std::string() : " · " + codes) + "\n";
+		out += "Units: [hp strength moves], ranged [hp strength r<ranged>/<range> moves], L level\n";
 		out += "Clocks: turns at the current rate · need: more per turn to finish one turn sooner · slack: how much less per turn "
-			"still finishes on the same turn · tiles: f food, p production, g gold, s science, c culture, fa faith. "
-			"The picture shows where everything is; the tools show more of anything here.\n";
-		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(d.news, "nothing reported");
-		out += "\nTHE GAME IS WAITING ON\n" + JoinLines(d.decisions, "nothing");
-		out += "\nDIRECTION\n  " + McpGamePlanLine(plan, "direction") + "\n";
-		out += "\nTARGETS (yours; set them with plan_turn's targets)\n";
-		if(plan.targets.empty()) out += "  none set\n";
-		for(size_t i = 0; i < plan.targets.size(); ++i) out += "  " + McpTargetStatus(me, plan.targets[i]) + "\n";
-		std::set<std::string> shown;
-		shown.insert("direction");
+			"still finishes on the same turn · tiles: f food, p production, g gold, s science, c culture, fa faith.\n";
+		out += "\nYOUR PLAN\n" + McpGamePlanBlock(plan, iTurn);
+		if(plan.targets.empty()) out += "  targets: none\n";
+		for(size_t i = 0; i < plan.targets.size(); ++i) out += "  target: " + McpTargetStatus(me, plan.targets[i]) + "\n";
+		std::vector<std::string> news = d.news;
+		for(size_t i = 0; i < d.state.size(); ++i) news.push_back("state: " + d.state[i]);
+		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(news, "nothing reported");
+		if(!d.blocks.empty()) out += "\nEND TURN BLOCKED UNTIL\n" + JoinLines(d.blocks, "");
+		if(!d.fromOthers.empty()) out += "\nFROM OTHER PLAYERS\n" + JoinLines(d.fromOthers, "");
+		if(!d.available.empty()) out += "\nAVAILABLE THIS TURN (none of it required)\n" + JoinLines(d.available, "");
 		added = changed = gone = 0;
 		for(size_t i = 0; i < view.size(); ++i)
 		{
@@ -580,20 +609,7 @@ namespace
 				else if(line.compare(0, 2, "- ") == 0) ++gone;
 				out += line + "\n";
 			}
-			std::string group = Group(view[i].name);
-			const char* heading = PlanAfter(group);
-			bool bLastOfGroup = i + 1 == view.size() || Group(view[i + 1].name) != group;
-			if(heading && bLastOfGroup && !shown.count(heading))
-			{
-				out += "  " + McpGamePlanLine(plan, heading) + "\n";
-				shown.insert(heading);
-			}
 		}
-		const std::vector<std::string>& headings = McpGamePlanHeadings();
-		std::string rest;
-		for(size_t i = 0; i < headings.size(); ++i)
-			if(!shown.count(headings[i])) rest += "  " + headings[i] + ": " + McpGamePlanLine(plan, headings[i]) + "\n";
-		if(!rest.empty()) out += "\nPLANS FOR WHAT IS NOT SHOWN ABOVE\n" + rest;
 		std::string changedScreens, sameScreens;
 		for(std::map<std::string, std::string>::const_iterator it = d.screens.begin(); it != d.screens.end(); ++it)
 		{
@@ -601,21 +617,15 @@ namespace
 			std::string& list = bChanged ? changedScreens : sameScreens;
 			list += (list.empty() ? "" : ", ") + it->first;
 		}
-		out += "\nOTHER SCREENS (call the tool to see one)\n";
+		out += "\nOTHER SCREENS (each is a tool)\n";
 		if(!screensBefore) out += "  " + sameScreens + "\n";
 		else
 		{
 			out += "  changed since your last turn: " + (changedScreens.empty() ? std::string("none") : changedScreens) + "\n";
 			if(!sameScreens.empty()) out += "  unchanged: " + sameScreens + "\n";
 		}
-		out += "\nWITHOUT A PLAN\n" + JoinLines(McpWithoutAPlan(plan, d.cities), "nothing");
-		std::vector<std::string> waiting;
-		for(size_t i = 0; i < d.withoutOrder.size(); ++i)
-		{
-			const McpWithoutOrder& w = d.withoutOrder[i];
-			if(!(w.city ? plannedCities : plannedUnits).count(w.id)) waiting.push_back(w.label);
-		}
-		out += "\nWITHOUT AN ORDER (your planned orders counted)\n" + JoinLines(waiting, "nothing");
+		(void)plannedUnits; (void)plannedCities;
+		out += "\n" + McpTurnFramingBottom() + "\n";
 		return out;
 	}
 }
@@ -685,6 +695,12 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err)
 	CvPlayer* me = Me(err);
 	if(!me || !RequireIdentity(err)) return JVal();
 	if(!McpIsPlayerTurn(*me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
+	std::map<int, int>::const_iterator seen = s_viewShown.find((int)me->GetID());
+	if(seen == s_viewShown.end() || seen->second != GC.getGame().getGameTurn())
+	{
+		err = "call turn_view first: your planned orders run against this turn as it stands";
+		return JVal();
+	}
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
 	if(it == s_plans.end() || !Due(it->second))
 	{

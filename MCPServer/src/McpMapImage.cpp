@@ -109,7 +109,7 @@ namespace
 			return pick;
 		}
 
-		// Three capitals from the civilization's name ("MAU" Maurya, "BAR" Barbarians); a civilization the viewer has
+		// The civilization's code (CivCode, the same in the text and in every game); a civilization the viewer has
 		// not met is "U1", "U2"... so its name is not given away.
 		std::string Code(PlayerTypes e)
 		{
@@ -118,15 +118,7 @@ namespace
 			TeamTypes eTeam = GET_PLAYER(eMe).getTeam();
 			bool bKnown = GET_PLAYER(e).getTeam() == eTeam || GET_TEAM(eTeam).isHasMet(GET_PLAYER(e).getTeam()) || GET_PLAYER(e).isBarbarian();
 			std::string c;
-			if(bKnown)
-			{
-				std::string name = CivName(e), letters;
-				for(size_t i = 0; i < name.size(); ++i)
-					if(isalpha((unsigned char)name[i])) letters += (char)toupper((unsigned char)name[i]);
-				c = letters.substr(0, 3);
-				for(size_t n = 3; used.count(c) && n < letters.size(); ++n) c = letters.substr(0, 2) + letters[n];
-				for(int k = 2; used.count(c) || c.empty(); ++k) c = letters.substr(0, 2) + McpFormat("%d", k);
-			}
+			if(bKnown) c = CivCode(e); // the same code the turn view's text uses
 			else
 				do c = McpFormat("U%d", ++unmet); while(used.count(c));
 			used.insert(c);
@@ -289,6 +281,14 @@ namespace
 		CvCity* city = p->getPlotCity();
 		if(city && !city->isRevealed(eTeam, false)) city = NULL;
 		ImprovementTypes eImp = p->getRevealedImprovementType(eTeam);
+		// The strategic picture leaves improvements out, except the two that are places to go: ancient ruins and
+		// barbarian camps.
+		if(eImp != NO_IMPROVEMENT && !city && bStrategic)
+		{
+			CvImprovementEntry* pImp = GC.getImprovementInfo(eImp);
+			if(pImp && pImp->IsGoody()) h.centerLabel = "RUINS";
+			else if(pImp && pImp->GetType() && strcmp(pImp->GetType(), "IMPROVEMENT_BARBARIAN_CAMP") == 0) h.centerLabel = "CAMP";
+		}
 		if(eImp != NO_IMPROVEMENT && !city && !bStrategic)
 		{
 			CvImprovementEntry* pImp = GC.getImprovementInfo(eImp);

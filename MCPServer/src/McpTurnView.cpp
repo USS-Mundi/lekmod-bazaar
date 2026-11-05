@@ -189,40 +189,55 @@ namespace
 		return best < 0 ? std::string("none") : McpFormat("%s, %d tiles", what.c_str(), best);
 	}
 
-	// Every unit of others the seat can see.
-	// Every unit of others in sight, nearest to the seat's own first: owner and type, where, at war or not, health,
-	// strength, moves, and which of the seat's units or cities is nearest.
+	// Every unit of others in sight, grouped by owner: a line for each owner (its code, name and whether you are at
+	// war), then its units nearest to yours first, each with its numbers in one bracket and how far it is from your
+	// nearest unit or city. Owners at war with you come first, then the nearest.
 	void AddOthersUnits(CvPlayer* me, std::vector<McpViewItem>& items)
 	{
 		TeamTypes eTeam = me->getTeam();
-		std::vector<std::pair<int, McpViewItem> > rows;
+		struct Group { bool war; int nearest; std::string code; std::vector<std::pair<int, McpViewItem> > rows; McpViewItem head; };
+		std::vector<Group> groups;
 		for(int i = 0; i < MAX_PLAYERS; ++i)
 		{
 			CvPlayer& p = GET_PLAYER((PlayerTypes)i);
 			if(!p.isAlive() || i == (int)me->GetID()) continue;
-			std::string who = p.isBarbarian() ? std::string("Barbarian") : CivName((PlayerTypes)i);
-			bool bEnemy = IsEnemyOf(me, (PlayerTypes)i);
+			Group g;
+			g.war = IsEnemyOf(me, (PlayerTypes)i);
+			g.nearest = 9999;
+			g.code = "@" + CivCode((PlayerTypes)i);
 			int iLoop;
 			for(CvUnit* u = p.firstUnit(&iLoop); u; u = p.nextUnit(&iLoop))
 			{
 				CvPlot* plot = u->plot();
 				if(!plot || !plot->isVisible(eTeam) || u->isInvisible(eTeam, false)) continue;
 				Fields f;
-				f.push_back(F("name", who + " " + UnitTypeName(u->getUnitType())));
+				f.push_back(F("name", g.code + " " + UnitTypeName(u->getUnitType())));
 				f.push_back(F("_at", McpFormat("(%d,%d)", u->getX(), u->getY())));
-				f.push_back(F("_war", bEnemy ? "AT WAR with you" : "not at war"));
-				f.push_back(F("hp", u->GetMaxHitPoints() == 100 ? McpFormat("%d", u->GetCurrHitPoints()) : McpFormat("%d/%d", u->GetCurrHitPoints(), u->GetMaxHitPoints())));
-				if(u->IsCombatUnit()) f.push_back(F("strength", McpFormat("%d", u->GetBaseCombatStrength())));
-				if(u->isRanged()) f.push_back(F("ranged", McpFormat("%d, range %d", u->GetBaseRangedCombatStrength(), u->GetRange())));
-				f.push_back(F("moves", Amount(Moves(u->maxMoves()))));
+				f.push_back(F("_stats", McpUnitStats(u->GetCurrHitPoints(), u->IsCombatUnit() ? u->GetBaseCombatStrength() : 0,
+					u->isRanged() ? u->GetBaseRangedCombatStrength() : 0, u->GetRange(), Amount(Moves(u->maxMoves())), -1)));
 				std::string nearest = NearestOfYours(me, u->getX(), u->getY());
-				f.push_back(F("nearest", nearest));
 				int dist = atoi(nearest.substr(nearest.rfind(", ") == std::string::npos ? 0 : nearest.rfind(", ") + 2).c_str());
-				rows.push_back(std::make_pair(dist, Item("units in sight", McpFormat("seen:%d:%d", i, u->GetID()), f)));
+				size_t comma = nearest.rfind(", ");
+				if(comma != std::string::npos) f.push_back(F("_near", McpFormat("%d from your %s", dist, nearest.substr(0, comma).c_str())));
+				g.rows.push_back(std::make_pair(dist, Item("others in sight", McpFormat("seen:%d:%d", i, u->GetID()), f)));
+				if(dist < g.nearest) g.nearest = dist;
 			}
+			if(g.rows.empty()) continue;
+			std::stable_sort(g.rows.begin(), g.rows.end(), FirstLess());
+			Fields h;
+			h.push_back(F("name", g.code + " " + CivName((PlayerTypes)i)));
+			h.push_back(F("_war", g.war ? "AT WAR with you" : "at peace"));
+			g.head = Item("others in sight", McpFormat("seen:%d", i), h);
+			groups.push_back(g);
 		}
-		std::stable_sort(rows.begin(), rows.end(), FirstLess());
-		for(size_t i = 0; i < rows.size(); ++i) items.push_back(rows[i].second);
+		for(size_t a = 0; a < groups.size(); ++a)
+			for(size_t b = a + 1; b < groups.size(); ++b)
+				if(groups[b].war > groups[a].war || (groups[b].war == groups[a].war && groups[b].nearest < groups[a].nearest)) std::swap(groups[a], groups[b]);
+		for(size_t k = 0; k < groups.size(); ++k)
+		{
+			items.push_back(groups[k].head);
+			for(size_t i = 0; i < groups[k].rows.size(); ++i) items.push_back(groups[k].rows[i].second);
+		}
 	}
 
 	// Others' cities the seat knows, nearest to its own first, at most twelve: owner, at war or not, and while in sight
@@ -241,9 +256,8 @@ namespace
 				if(!c->isRevealed(eTeam, false)) continue;
 				bool bSeen = c->plot()->isVisible(eTeam);
 				Fields f;
-				f.push_back(F("name", McpFormat("%s (%s)", c->getName().c_str(), p.isBarbarian() ? "Barbarian" : CivName((PlayerTypes)i).c_str())));
+				f.push_back(F("name", McpFormat("%s @%s", c->getName().c_str(), CivCode((PlayerTypes)i).c_str())));
 				f.push_back(F("_at", McpFormat("(%d,%d)", c->getX(), c->getY())));
-				f.push_back(F("_war", IsEnemyOf(me, (PlayerTypes)i) ? "AT WAR with you" : "not at war"));
 				if(bSeen)
 				{
 					f.push_back(F("pop", McpFormat("%d", c->getPopulation())));
@@ -281,25 +295,21 @@ namespace
 			f.push_back(F("_at", McpFormat("(%d,%d)", u->getX(), u->getY())));
 			std::string activity = jo != byId.end() ? ArgStr(jo->second, "activity") : std::string();
 			if(!activity.empty()) f.push_back(F("_activity", activity));
-			f.push_back(F("hp", u->GetMaxHitPoints() == 100 ? McpFormat("%d", u->GetCurrHitPoints()) : McpFormat("%d/%d", u->GetCurrHitPoints(), u->GetMaxHitPoints())));
+			std::string moves = Amount(Moves(u->getMoves())) + "/" + Amount(Moves(u->maxMoves()));
+			f.push_back(F("_stats", McpUnitStats(u->GetCurrHitPoints(), bMilitary ? u->GetBaseCombatStrength() : 0,
+				bMilitary && u->isRanged() ? u->GetBaseRangedCombatStrength() : 0, u->GetRange(), moves, bMilitary ? u->getLevel() : -1)));
 			if(u->getDamage() > 0)
 			{
 				int rate = u->healRate(u->plot());
-				f.push_back(F("heals", rate > 0 ? McpFormat("+%d/t while it does not move or attack: full in %dt", rate, (u->getDamage() + rate - 1) / rate)
-					: std::string("not on this tile")));
+				f.push_back(F("heals", rate > 0 ? McpFormat("+%d/t resting, whole in %dt", rate, (u->getDamage() + rate - 1) / rate) : std::string("not here")));
 			}
-			if(bMilitary)
-			{
-				f.push_back(F("strength", McpFormat("%d", u->GetBaseCombatStrength())));
-				if(u->isRanged()) f.push_back(F("ranged", McpFormat("%d, range %d", u->GetBaseRangedCombatStrength(), u->GetRange())));
-				f.push_back(F("level", McpFormat("%d, xp %d", u->getLevel(), u->getExperience())));
-			}
-			f.push_back(F("moves", Amount(Moves(u->getMoves())) + "/" + Amount(Moves(u->maxMoves()))));
+			if(u->isPromotionReady()) f.push_back(F("_promote", "can promote"));
+			if(u->CanUpgradeRightNow(false)) f.push_back(F("_upgrade", McpFormat("upgrade to %s %dg", UnitTypeName(u->GetUpgradeUnitType()), u->upgradePrice(u->GetUpgradeUnitType()))));
 			if(u->isEmbarked()) f.push_back(F("_embarked", "embarked"));
 			if(jo != byId.end() && ArgBool(jo->second, "can_found_city_here", false)) f.push_back(F("_found", "can found a city here"));
 			if(jo != byId.end() && ArgBool(jo->second, "needs_orders", false))
 			{
-				f.push_back(F("_orders", "NEEDS ORDERS"));
+				f.push_back(F("_orders", "idle"));
 				withoutOrder.push_back(Waiting(false, u->GetID(), McpFormat("%s %d", UnitTypeName(u->getUnitType()), u->GetID())));
 			}
 			int dist = -1;
@@ -328,8 +338,57 @@ namespace
 		return out;
 	}
 
-	// Each of the seat's cities: one line with its size, what it builds, health, defense and buildings; then its clocks
-	// (build, growth, next border tile, the price to buy the build), its queue, and the tiles it works and could work.
+	// One city in full: its line with buildings, its clocks (build, growth, next border tile, the price to buy the
+	// build), its queue, and the tiles it works and could work. What city_detail shows.
+	void AddCityDetail(CvPlayer* me, CvCity* c, const JObj& o, std::vector<McpViewItem>& items)
+	{
+		(void)me;
+		std::string name = c->getName().c_str();
+		std::string key = McpFormat("city:%d", c->GetID());
+		Fields f;
+		f.push_back(F("name", name));
+		f.push_back(F("_at", McpFormat("(%d,%d)", c->getX(), c->getY())));
+		f.push_back(F("id", McpFormat("%d", c->GetID())));
+		f.push_back(F("pop", McpFormat("%d", c->getPopulation())));
+		f.push_back(F("hp", McpFormat("%d/%d", c->GetMaxHitPoints() - c->getDamage(), c->GetMaxHitPoints())));
+		f.push_back(F("defense", McpFormat("%d", c->getStrengthValue() / 100)));
+		std::string yields = Yields(o);
+		if(!yields.empty()) f.push_back(F("yields", yields));
+		std::string focus = ArgStr(o, "focus");
+		if(!focus.empty() && focus != "default") f.push_back(F("focus", focus));
+		JObj::const_iterator b = o.find("buildings");
+		if(b != o.end() && b->second.is<JArr>())
+		{
+			std::string list;
+			const JArr& a = b->second.get<JArr>();
+			for(size_t i = 0; i < a.size(); ++i) if(a[i].is<std::string>()) list += (list.empty() ? "" : ", ") + a[i].get<std::string>();
+			if(!list.empty()) f.push_back(F("buildings", "[" + list + "]"));
+		}
+		items.push_back(Item("city", key, f));
+		McpCityClocks cc = McpGatherCityClocks(c);
+		AddClockItems("city", key, "", cc.clocks, cc.notes, cc.queue, items);
+		JObj args;
+		args["city_id"] = J(c->GetID());
+		JVal citizens = Call(ToolCityCitizens, args);
+		if(citizens.is<JObj>())
+		{
+			Fields cf;
+			cf.push_back(F("name", "tiles"));
+			McpCitizensFields(citizens.get<JObj>(), cf);
+			items.push_back(Item("city", key + ":citizens", cf));
+		}
+	}
+
+	// A clock's turns as a word: "5t", or "never" when it never completes at this rate.
+	std::string ClockTurns(const McpClock& c)
+	{
+		int t = McpClockTurns(c);
+		return t < 0 ? std::string("never") : McpFormat("%dt", t);
+	}
+
+	// Each of the seat's cities in one line: size, what it builds and in how many turns, when it grows and when its
+	// border next grows, its yields, its health when damaged, and anything stopping its growth. city_detail has the
+	// rest.
 	void AddCities(CvPlayer* me, std::vector<McpViewItem>& items, std::vector<McpWithoutOrder>& withoutOrder, std::vector<std::string>& names)
 	{
 		JVal result = Call(ToolCities);
@@ -342,42 +401,31 @@ namespace
 			if(!c) continue;
 			std::string name = c->getName().c_str();
 			names.push_back(name);
-			std::string key = McpFormat("city:%d", c->GetID());
+			McpCityClocks cc = McpGatherCityClocks(c);
+			std::string build = c->getOrderQueueLength() == 0 ? std::string("NOTHING") : std::string(c->getProductionName());
+			std::string grows = "?", border = "?";
+			for(size_t i = 0; i < cc.clocks.size(); ++i)
+			{
+				const McpClock& clk = cc.clocks[i];
+				if(clk.name == "growth") grows = ClockTurns(clk);
+				else if(clk.name == "next border tile") border = ClockTurns(clk);
+				else if(c->getOrderQueueLength() > 0 && clk.name == build) build += " " + ClockTurns(clk);
+			}
 			Fields f;
 			f.push_back(F("name", name));
-			f.push_back(F("_at", McpFormat("(%d,%d)", c->getX(), c->getY())));
 			f.push_back(F("id", McpFormat("%d", c->GetID())));
 			if(c->isCapital()) f.push_back(F("_capital", "capital"));
 			f.push_back(F("pop", McpFormat("%d", c->getPopulation())));
-			f.push_back(F("building", c->getOrderQueueLength() == 0 ? std::string("NOTHING") : std::string(c->getProductionName())));
-			f.push_back(F("hp", McpFormat("%d/%d", c->GetMaxHitPoints() - c->getDamage(), c->GetMaxHitPoints())));
-			f.push_back(F("defense", McpFormat("%d", c->getStrengthValue() / 100)));
+			f.push_back(F("builds", build));
+			f.push_back(F("grows", grows));
+			f.push_back(F("border", border));
 			std::string yields = Yields(o);
-			if(!yields.empty()) f.push_back(F("yields", yields));
-			std::string focus = ArgStr(o, "focus");
-			if(!focus.empty() && focus != "default") f.push_back(F("focus", focus));
-			JObj::const_iterator b = o.find("buildings");
-			if(b != o.end() && b->second.is<JArr>())
-			{
-				std::string list;
-				const JArr& a = b->second.get<JArr>();
-				for(size_t i = 0; i < a.size(); ++i) if(a[i].is<std::string>()) list += (list.empty() ? "" : ", ") + a[i].get<std::string>();
-				if(!list.empty()) f.push_back(F("buildings", "[" + list + "]"));
-			}
-			items.push_back(Item("cities", key, f));
+			if(!yields.empty()) f.push_back(F("_yields", yields));
+			if(c->getDamage() > 0) f.push_back(F("hp", McpFormat("%d/%d", c->GetMaxHitPoints() - c->getDamage(), c->GetMaxHitPoints())));
+			for(size_t i = 0; i < cc.notes.size(); ++i)
+				if(cc.notes[i].find("starv") != std::string::npos || cc.notes[i].find("paused") != std::string::npos) f.push_back(F("_note", cc.notes[i]));
+			items.push_back(Item("your cities (city_detail shows tiles, buildings and clocks)", McpFormat("city:%d", c->GetID()), f));
 			if(c->getOrderQueueLength() == 0) withoutOrder.push_back(Waiting(true, c->GetID(), name + "'s production"));
-			McpCityClocks cc = McpGatherCityClocks(c);
-			AddClockItems("cities", key, name + ": ", cc.clocks, cc.notes, cc.queue, items);
-			JObj args;
-			args["city_id"] = J(c->GetID());
-			JVal citizens = Call(ToolCityCitizens, args);
-			if(citizens.is<JObj>())
-			{
-				Fields cf;
-				cf.push_back(F("name", name + " tiles"));
-				McpCitizensFields(citizens.get<JObj>(), cf);
-				items.push_back(Item("cities", key + ":citizens", cf));
-			}
 		}
 	}
 
@@ -647,8 +695,36 @@ void McpGatherTurnNews(McpTurnViewData& d)
 	AddLines(o, "events", d.news);
 	AddLines(o, "game_messages", d.news);
 	AddLines(o, "units_gone_since_last_turn", d.news);
-	AddLines(o, "decisions_pending", d.decisions);
-	AddLines(o, "diplomacy_requests", d.decisions);
-	AddLines(o, "unread_messages", d.decisions);
-	AddLines(o, "warnings", d.decisions);
+	for(size_t i = 0; i < d.news.size(); ++i) d.news[i] = McpTrimNews(d.news[i]);
+	std::vector<std::string> pending;
+	AddLines(o, "decisions_pending", pending);
+	for(size_t i = 0; i < pending.size(); ++i)
+	{
+		if(pending[i].compare(0, 10, "promotion:") == 0 || pending[i].compare(0, 8, "upgrade:") == 0) continue;
+		McpDecisionKindType kind = McpDecisionKind(pending[i]);
+		(kind == MCP_DECISION_BLOCKS ? d.blocks : kind == MCP_DECISION_FROM_OTHERS ? d.fromOthers : d.available).push_back(pending[i]);
+	}
+	AddLines(o, "diplomacy_requests", d.fromOthers);
+	AddLines(o, "unread_messages", d.fromOthers);
+	AddLines(o, "warnings", d.state);
+}
+
+picojson::value McpCityDetailText(CvPlayer* me, int cityId, std::string& err)
+{
+	CvCity* c = me->getCity(cityId);
+	if(!c) { err = "no city of yours with that id; the turn view lists each city's id"; return picojson::value(); }
+	JVal result = Call(ToolCities);
+	const JArr* list = ListIn(result, "cities");
+	JObj found;
+	for(size_t k = 0; list && k < list->size(); ++k)
+		if((*list)[k].is<JObj>() && ArgInt((*list)[k].get<JObj>(), "id", -1) == cityId) found = (*list)[k].get<JObj>();
+	std::vector<McpViewItem> items;
+	AddCityDetail(me, c, found, items);
+	std::vector<McpViewSection> view = McpMarkView(std::vector<McpViewItem>(), items, std::set<std::string>(), false);
+	std::string text;
+	for(size_t i = 0; i < view.size(); ++i)
+		for(size_t k = 0; k < view[i].lines.size(); ++k) text += view[i].lines[k] + "\n";
+	JObj o;
+	o["city"] = J(text);
+	return JVal(o);
 }

@@ -119,6 +119,30 @@ void McpMigratePlan(McpGamePlan& plan);
 // name.
 std::vector<std::string> McpWithoutAPlan(const McpGamePlan& plan, const std::vector<std::string>& cities);
 
+// The whole plan as the turn view shows it, one heading a line in the usual order: "  <heading> (T<turn>, <n> turns
+// ago): <text>" ("this turn", "1 turn ago"), or "  <heading>: none written".
+std::string McpGamePlanBlock(const McpGamePlan& plan, int currentTurn);
+// The latest turn any heading was written on, -1 for an empty plan.
+int McpLastPlanTurn(const McpGamePlan& plan);
+// The question the turn view opens with, and the one it ends with. They ask; they never pick a side.
+std::string McpTurnFramingTop(int lastPlanTurn);
+std::string McpTurnFramingBottom();
+// What a briefing decision line is: something that stops the turn from ending (a city with nothing to build,
+// nothing researched, a free technology, a captured city's fate, or the game's own end-turn block), something another
+// player is waiting on, or something available that nothing requires.
+enum McpDecisionKindType { MCP_DECISION_BLOCKS, MCP_DECISION_FROM_OTHERS, MCP_DECISION_AVAILABLE };
+McpDecisionKindType McpDecisionKind(const std::string& line);
+// A news line without what the player already knows: a researched technology keeps its name, not its description.
+std::string McpTrimNews(const std::string& line);
+
+// A three-letter code for each civilization, in the order given: the first three letters of its name, upper case; on a
+// clash the third letter moves along the name, then becomes a digit. The same names in the same order always get the
+// same codes.
+std::vector<std::string> McpCivCodes(const std::vector<std::string>& names);
+// A unit's numbers in one bracket: "[hp strength moves]", a ranged unit "[hp strength r<ranged>/<range> moves]", a unit
+// without strength "[hp moves]", and " L<level>" at the end when level >= 0.
+std::string McpUnitStats(int hp, int strength, int ranged, int range, const std::string& moves, int level);
+
 // One line of the turn view: a thing the player can see (a city, a unit, a civilization...), under its section, with
 // a key that names the same thing turn after turn, and its fields in the order they are shown.
 struct McpViewItem

@@ -209,7 +209,7 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 	bool bFirst = plan.turn < 0;
 	if(bFirst && next.sections["direction"].empty())
 	{
-		err = "a first plan needs at least direction: how you win from here, who is in the way, what would change it";
+		err = "a first plan needs at least direction: how you are optimizing your odds of winning from here";
 		return false;
 	}
 	if(!bFirst && why.empty())
@@ -266,6 +266,110 @@ std::string McpGamePlanLine(const McpGamePlan& plan, const std::string& heading)
 {
 	std::string text = Section(plan, heading);
 	return text.empty() ? std::string("plan: none written") : "plan" + Written(plan, heading) + ": " + text;
+}
+
+std::string McpGamePlanBlock(const McpGamePlan& plan, int currentTurn)
+{
+	std::string out;
+	const std::vector<std::string>& headings = McpGamePlanHeadings();
+	for(size_t i = 0; i < headings.size(); ++i)
+	{
+		const std::string& h = headings[i];
+		std::string text = Section(plan, h);
+		if(text.empty()) { out += "  " + h + ": none written\n"; continue; }
+		std::map<std::string, int>::const_iterator w = plan.written.find(h);
+		std::string age;
+		if(w != plan.written.end())
+		{
+			int ago = currentTurn - w->second;
+			age = " (T" + Num(w->second) + ", " + (ago <= 0 ? std::string("this turn") : ago == 1 ? std::string("1 turn ago") : Num(ago) + " turns ago") + ")";
+		}
+		out += "  " + h + age + ": " + text + "\n";
+	}
+	return out;
+}
+
+int McpLastPlanTurn(const McpGamePlan& plan)
+{
+	int last = -1;
+	for(std::map<std::string, int>::const_iterator it = plan.written.begin(); it != plan.written.end(); ++it)
+		if(!Section(plan, it->first).empty() && it->second > last) last = it->second;
+	return last;
+}
+
+std::string McpTurnFramingTop(int lastPlanTurn)
+{
+	const std::string rest = " This view is a starting point: it is not everything, and nothing in it has to be done.";
+	if(lastPlanTurn < 0)
+		return "You have no plan yet. What is your position, and how will you optimize your odds of winning from it?" + rest;
+	return "Your plan was last revised on turn " + Num(lastPlanTurn) + ". What has changed since, and does each part of it hold, "
+		"need adjusting, or need dropping?" + rest;
+}
+
+std::string McpTurnFramingBottom()
+{
+	return "What here bears on your plan, and what do you need to know that this view does not show?";
+}
+
+namespace
+{
+	bool Starts(const std::string& s, const char* prefix)
+	{
+		return s.compare(0, std::string(prefix).size(), prefix) == 0;
+	}
+}
+
+McpDecisionKindType McpDecisionKind(const std::string& line)
+{
+	if(Starts(line, "end_turn is blocked") || Starts(line, "production:") || Starts(line, "research:") || Starts(line, "free_tech:")
+		|| Starts(line, "captured city:"))
+		return MCP_DECISION_BLOCKS;
+	if(Starts(line, "diplomacy:")) return MCP_DECISION_FROM_OTHERS;
+	return MCP_DECISION_AVAILABLE;
+}
+
+std::string McpTrimNews(const std::string& line)
+{
+	const std::string mark = "text Researched ";
+	size_t at = line.find(mark);
+	if(at == std::string::npos) return line;
+	size_t colon = line.find(':', at + mark.size());
+	if(colon == std::string::npos) return line;
+	size_t end = line.find(" · ", colon);
+	return line.substr(0, colon) + (end == std::string::npos ? std::string() : line.substr(end));
+}
+
+std::vector<std::string> McpCivCodes(const std::vector<std::string>& names)
+{
+	std::vector<std::string> out;
+	std::set<std::string> used;
+	for(size_t i = 0; i < names.size(); ++i)
+	{
+		std::string letters;
+		for(size_t k = 0; k < names[i].size(); ++k)
+		{
+			char c = names[i][k];
+			if(c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+			if(c >= 'A' && c <= 'Z') letters += c;
+		}
+		while(letters.size() < 3) letters += 'X';
+		std::string code = letters.substr(0, 3);
+		for(size_t n = 3; used.count(code) && n < letters.size(); ++n) code = letters.substr(0, 2) + letters[n];
+		for(int d = 2; used.count(code); ++d) code = letters.substr(0, 2) + Num(d % 10);
+		used.insert(code);
+		out.push_back(code);
+	}
+	return out;
+}
+
+std::string McpUnitStats(int hp, int strength, int ranged, int range, const std::string& moves, int level)
+{
+	std::string out = "[" + Num(hp);
+	if(strength > 0) out += " " + Num(strength);
+	if(ranged > 0) out += " r" + Num(ranged) + "/" + Num(range);
+	out += " " + moves;
+	if(level >= 0) out += " L" + Num(level);
+	return out + "]";
 }
 
 void McpMigratePlan(McpGamePlan& plan)

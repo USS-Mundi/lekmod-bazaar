@@ -9,6 +9,8 @@
 // McpTools.cpp
 MCP_TOOL(ToolStatus);
 MCP_TOOL(ToolWaitForMyTurn);
+MCP_TOOL(ToolTurnView);
+MCP_TOOL(ToolCityDetail);
 MCP_TOOL(ToolPlanTurn);
 MCP_TOOL(ToolOverview);
 MCP_TOOL(ToolUnits);

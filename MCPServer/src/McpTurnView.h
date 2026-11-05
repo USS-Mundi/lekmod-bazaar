@@ -7,6 +7,7 @@
 // part of the seat's game plan beside the state it is about. On the game thread.
 
 #include "McpTurnCycle.h"
+#include "picojson.h"
 #include <map>
 #include <set>
 #include <string>
@@ -29,7 +30,10 @@ struct McpTurnViewData
 	std::vector<McpViewItem> items;
 	std::set<std::string> ticking;       // fields that move every turn: shown, never counted as a change
 	std::vector<std::string> news;       // what happened since the last turn: the game's events and messages
-	std::vector<std::string> decisions;  // what the game is waiting on: pending choices, requests, what blocks the turn
+	std::vector<std::string> blocks;     // what stops the turn from ending (McpDecisionKind)
+	std::vector<std::string> fromOthers; // what other players are waiting on: requests, deals, messages
+	std::vector<std::string> available;  // what can be done this turn and nothing requires: promotions, upgrades, bombards
+	std::vector<std::string> state;      // the briefing's warnings: gold falling, unhappiness, starvation, damage
 	std::vector<McpWithoutOrder> withoutOrder; // units waiting for orders and cities with nothing to build
 	std::vector<std::string> cities;     // the seat's city names
 	std::map<std::string, std::string> screens; // each screen left to its tool, by tool name, reduced to its words
@@ -40,3 +44,5 @@ McpTurnViewData McpGatherTurnView(CvPlayer* me);
 // Adds what happened and what the game waits on, from the briefing. Once, at the turn's start: the briefing tracks what
 // it has already reported.
 void McpGatherTurnNews(McpTurnViewData& d);
+// One city in full, as text: its line with buildings, its clocks and queue, and its tiles.
+picojson::value McpCityDetailText(CvPlayer* me, int cityId, std::string& err);

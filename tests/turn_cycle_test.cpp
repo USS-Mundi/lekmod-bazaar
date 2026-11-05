@@ -303,6 +303,82 @@ namespace
 		CHECK(!Has(gaps, "direction") && !Has(gaps, "cities"));
 	}
 
+
+	void TestPlanBlockShowsEveryPartWithItsAge()
+	{
+		McpGamePlan plan;
+		std::string err;
+		std::vector<std::string> warn;
+		McpGamePlanApply(plan, Fields("direction", "science", "cities", "Roma: library"), "", 42, err, warn);
+		McpGamePlanApply(plan, Fields("research", "Philosophy"), "Writing landed", 47, err, warn);
+		std::string block = McpGamePlanBlock(plan, 50);
+		CHECK(block.find("  direction (T42, 8 turns ago): science\n") != std::string::npos);
+		CHECK(block.find("  research (T47, 3 turns ago): Philosophy\n") != std::string::npos);
+		CHECK(block.find("  military: none written\n") != std::string::npos);
+		CHECK(McpLastPlanTurn(plan) == 47);
+		McpGamePlanApply(plan, Fields("policy", "Piety"), "religion founded", 50, err, warn);
+		CHECK(McpGamePlanBlock(plan, 50).find("  policy (T50, this turn): Piety\n") != std::string::npos);
+		CHECK(McpLastPlanTurn(McpGamePlan()) == -1);
+	}
+
+	void TestFramingAsksWithoutPickingASide()
+	{
+		std::string top = McpTurnFramingTop(47);
+		CHECK(top.find("turn 47") != std::string::npos);
+		CHECK(top.find("hold") != std::string::npos && top.find("adjust") != std::string::npos && top.find("drop") != std::string::npos);
+		CHECK(top.find("not everything") != std::string::npos && top.find("nothing in it has to be done") != std::string::npos);
+		CHECK(McpTurnFramingTop(-1).find("no plan yet") != std::string::npos);
+		CHECK(!McpTurnFramingBottom().empty());
+	}
+
+	void TestOnlyRealBlockersBlock()
+	{
+		CHECK(McpDecisionKind("end_turn is blocked - production: a city needs a production choice") == MCP_DECISION_BLOCKS);
+		CHECK(McpDecisionKind("production: Pliska (id 8192) is building nothing (city_options, set_production)") == MCP_DECISION_BLOCKS);
+		CHECK(McpDecisionKind("research: nothing being researched (research_options, set_research)") == MCP_DECISION_BLOCKS);
+		CHECK(McpDecisionKind("free_tech: 1 free technology to claim (research_options, set_research)") == MCP_DECISION_BLOCKS);
+		CHECK(McpDecisionKind("captured city: decide the fate of Cordoba (id 3) with city_task: annex") == MCP_DECISION_BLOCKS);
+		CHECK(McpDecisionKind("diplomacy: 1 request(s) from other leaders await your answer") == MCP_DECISION_FROM_OTHERS);
+		CHECK(McpDecisionKind("promotion: Warrior (id 1) can be promoted (unit_options, promote_unit)") == MCP_DECISION_AVAILABLE);
+		CHECK(McpDecisionKind("upgrade: Archer (id 2) can upgrade to Composite Bowman for 40 gold (upgrade_unit)") == MCP_DECISION_AVAILABLE);
+		CHECK(McpDecisionKind("city_attack: Preslav can bombard an enemy this turn") == MCP_DECISION_AVAILABLE);
+		CHECK(McpDecisionKind("policy: you can adopt a social policy now (policy_options, adopt_policy)") == MCP_DECISION_AVAILABLE);
+	}
+
+	void TestNewsDropsWhatTheyAlreadyKnow()
+	{
+		CHECK(McpTrimNews("id 48 · text Researched Construction: Allows you to build the Composite Bowman, a powerful ranged unit. · turn 49")
+			== "id 48 · text Researched Construction · turn 49");
+		CHECK(McpTrimNews("at (38,19) · summary An Enemy is Near! · text An enemy unit has been spotted in our territory! · turn 49")
+			== "at (38,19) · summary An Enemy is Near! · text An enemy unit has been spotted in our territory! · turn 49");
+		CHECK(McpTrimNews("text Researched Writing: Allows the Library.") == "text Researched Writing");
+	}
+
+
+	void TestCivCodesAreUniqueAndStable()
+	{
+		std::vector<std::string> names;
+		names.push_back("Indonesia"); names.push_back("India"); names.push_back("Hong Kong"); names.push_back("Inca"); names.push_back("Ind");
+		std::vector<std::string> codes = McpCivCodes(names);
+		CHECK(codes.size() == 5);
+		CHECK(codes[0] == "IND");
+		CHECK(codes[1] == "INI");
+		CHECK(codes[2] == "HON");
+		CHECK(codes[3] == "INC");
+		CHECK(codes[4] == "IN2");
+		std::set<std::string> unique(codes.begin(), codes.end());
+		CHECK(unique.size() == codes.size());
+		CHECK(McpCivCodes(names) == codes);
+	}
+
+	void TestUnitStatsInBrackets()
+	{
+		CHECK(McpUnitStats(100, 15, 0, 0, "2", -1) == "[100 15 2]");
+		CHECK(McpUnitStats(7, 4, 7, 2, "2", -1) == "[7 4 r7/2 2]");
+		CHECK(McpUnitStats(79, 8, 0, 0, "2/2", 1) == "[79 8 2/2 L1]");
+		CHECK(McpUnitStats(100, 0, 0, 0, "2", -1) == "[100 2]");
+	}
+
 	McpViewItem Item(const char* section, const char* key, const char* f1, const char* v1, const char* f2 = NULL, const char* v2 = NULL)
 	{
 		McpViewItem it;
@@ -614,6 +690,12 @@ int main()
 	TestSevenHeadingsInOrder();
 	TestPlanTextShowsEveryHeadingWithItsTurn();
 	TestWithoutAPlan();
+	TestPlanBlockShowsEveryPartWithItsAge();
+	TestFramingAsksWithoutPickingASide();
+	TestOnlyRealBlockersBlock();
+	TestNewsDropsWhatTheyAlreadyKnow();
+	TestCivCodesAreUniqueAndStable();
+	TestUnitStatsInBrackets();
 	TestFirstViewHasNoMarks();
 	TestNewChangedSameAndGone();
 	TestTickingFieldsShowButDoNotMark();

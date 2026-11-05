@@ -1,12 +1,14 @@
 #include "CvGameCoreDLLPCH.h"
 #include <stdarg.h>
 #include "McpToolSupport.h"
+#include "McpTurnCycle.h"
 #include "McpSeat.h"
 #include "McpBridge.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
 #include "CvCity.h"
+#include "CvMinorCivAI.h"
 #include "CvCityCitizens.h"
 #include "CvUnit.h"
 #include "CvPlot.h"
@@ -192,6 +194,30 @@ namespace McpTool
 		CvPlayer& p = GET_PLAYER(e);
 		if(p.isBarbarian()) return "Barbarians";
 		return p.getCivilizationShortDescription();
+	}
+
+	std::string CivCode(PlayerTypes e)
+	{
+		static std::map<std::string, std::string> s_codes;
+		if(s_codes.empty())
+		{
+			std::vector<std::string> names(1, "Barbarians");
+			for(int i = 0; i < GC.getNumCivilizationInfos(); ++i)
+			{
+				CvCivilizationInfo* info = GC.getCivilizationInfo((CivilizationTypes)i);
+				if(info) names.push_back(Localized(info->getShortDescriptionKey()));
+			}
+			for(int i = 0; i < GC.getNumMinorCivInfos(); ++i)
+			{
+				CvMinorCivInfo* info = GC.getMinorCivInfo((MinorCivTypes)i);
+				if(info) names.push_back(Localized(info->getShortDescriptionKey()));
+			}
+			std::vector<std::string> codes = McpCivCodes(names);
+			for(size_t i = 0; i < names.size(); ++i) if(!s_codes.count(names[i])) s_codes[names[i]] = codes[i];
+		}
+		std::string name = CivName(e);
+		std::map<std::string, std::string>::const_iterator it = s_codes.find(name);
+		return it != s_codes.end() ? it->second : McpCivCodes(std::vector<std::string>(1, name))[0];
 	}
 
 	// Game markup ([ICON_...], [COLOR_...], [LINK=...], [NEWLINE]) is a [ then a capital or \; other brackets stay.

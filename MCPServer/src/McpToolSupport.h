@@ -79,6 +79,9 @@ namespace McpTool
 	const char* EraName(EraTypes e);
 	const char* PromotionName(PromotionTypes e);
 	std::string CivName(PlayerTypes e);
+	// The civilization's three-letter code (McpCivCodes), fixed for every civilization and city-state in the game's
+	// database, so it never changes between games: "IDN" Indonesia, "BAR" barbarians.
+	std::string CivCode(PlayerTypes e);
 	std::string StripMarkup(const std::string& s);
 	std::string Localized(const char* szKey);
 
