@@ -187,7 +187,21 @@ const char* McpLogCategory(const McpToolDef& tool, const JObj& args)
 std::string McpDescribeCall(const McpToolDef& tool, const JObj& args)
 {
 	const std::string name = tool.name;
-	if(name == "move_unit") return UnitText(args) + " moves to " + PlotText(args) + (ArgBool(args, "preview_only", false) ? " (preview only)" : "");
+	if(name == "move_unit")
+	{
+		std::string to = PlotText(args);
+		JObj::const_iterator pit = args.find("path");
+		if(pit != args.end() && pit->second.is<JArr>())
+		{
+			std::string route;
+			const JArr& steps = pit->second.get<JArr>();
+			for(size_t i = 0; i < steps.size(); ++i)
+				if(steps[i].is<JArr>() && steps[i].get<JArr>().size() == 2 && steps[i].get<JArr>()[0].is<double>() && steps[i].get<JArr>()[1].is<double>())
+					route += McpFormat("%s(%d,%d)", route.empty() ? "" : " > ", (int)steps[i].get<JArr>()[0].get<double>(), (int)steps[i].get<JArr>()[1].get<double>());
+			if(!route.empty()) to = route;
+		}
+		return UnitText(args) + " moves " + to + (ArgBool(args, "preview_only", false) ? " (preview only)" : "");
+	}
 	if(name == "attack") return UnitText(args) + " attacks " + TargetText(args) + (ArgBool(args, "preview_only", false) ? " (preview only)" : "");
 	if(name == "city_attack") return CityText(args, "city_id") + " bombards " + TargetText(args);
 	if(name == "unit_action")

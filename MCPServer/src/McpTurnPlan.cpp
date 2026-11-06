@@ -379,7 +379,19 @@ namespace
 				if(!u) { out.push_back(head + "no unit of yours has that unit_id"); continue; }
 				if(moved.count(id)) continue;
 				moved.insert(id);
-				CvPlot* dest = GC.getMap().plot(ArgInt(a, "x", -1), ArgInt(a, "y", -1));
+				int dx = -1, dy = -1;
+				JObj::const_iterator pit = a.find("path");
+				if(pit != a.end() && pit->second.is<JArr>() && !pit->second.get<JArr>().empty())
+				{
+					const JVal& last = pit->second.get<JArr>().back();
+					if(last.is<JArr>() && last.get<JArr>().size() == 2 && last.get<JArr>()[0].is<double>() && last.get<JArr>()[1].is<double>())
+					{
+						dx = (int)last.get<JArr>()[0].get<double>();
+						dy = (int)last.get<JArr>()[1].get<double>();
+					}
+				}
+				if(dx < 0) { out.push_back(head + "move_unit takes path: the tiles in order, [[x,y],...], ending at the destination"); continue; }
+				CvPlot* dest = GC.getMap().plot(dx, dy);
 				if(!dest) { out.push_back(head + "that tile is not on the map"); continue; }
 				std::string why = MoveRefusal(u, dest);
 				if(!why.empty()) out.push_back(head + "as things stand: " + why);

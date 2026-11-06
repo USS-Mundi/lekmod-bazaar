@@ -620,76 +620,123 @@ MCP_TOOL(ToolResearchOptions)
 
 // ------------------------------------------------------------------ actions
 
+// The route a move takes, as the player gives it: tiles in order, each next to the one before, the first next to the
+// unit. A destination alone is not taken: the route is the player's to choose.
+namespace
+{
+	bool ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err)
+	{
+		JObj::const_iterator it = args.find("path");
+		if(it == args.end() || !it->second.is<JArr>() || it->second.get<JArr>().empty())
+		{
+			err = "path must list the tiles to step through, in order, each next to the one before and the first next to the unit, ending at the destination: [[x,y],[x,y],...]";
+			return false;
+		}
+		const JArr& list = it->second.get<JArr>();
+		CvMap& map = GC.getMap();
+		int px = u->getX(), py = u->getY();
+		for(size_t i = 0; i < list.size(); ++i)
+		{
+			int x = -1, y = -1;
+			if(list[i].is<JArr>() && list[i].get<JArr>().size() == 2 && list[i].get<JArr>()[0].is<double>() && list[i].get<JArr>()[1].is<double>())
+			{
+				x = (int)list[i].get<JArr>()[0].get<double>();
+				y = (int)list[i].get<JArr>()[1].get<double>();
+			}
+			else if(list[i].is<JObj>())
+			{
+				x = ArgInt(list[i].get<JObj>(), "x", -1);
+				y = ArgInt(list[i].get<JObj>(), "y", -1);
+			}
+			std::string at = McpFormat("path step %d", (int)i + 1);
+			if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = at + " is not a tile on the map; give [x,y]"; return false; }
+			if(plotDistance(px, py, x, y) != 1)
+			{
+				err = at + McpFormat(" (%d,%d) is not next to (%d,%d); each step must be one of the six tiles around the one before", x, y, px, py);
+				return false;
+			}
+			CvPlot* p = map.plot(x, y);
+			if(!p->isRevealed(u->getTeam())) { err = at + McpFormat(" (%d,%d) is unexplored", x, y); return false; }
+			if(p->isMountain()) { err = at + McpFormat(" (%d,%d) is a mountain: impassable", x, y); return false; }
+			steps.push_back(p);
+			px = x; py = y;
+		}
+		return true;
+	}
+}
+
 MCP_TOOL(ToolMoveUnit)
 {
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
-	int x = 0, y = 0;
 	CvUnit* u = RequireUnit(me, args, err);
-	if(!u || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
-	CvMap& map = GC.getMap();
-	if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = "destination is off the map"; return JVal(); }
-	CvPlot* dest = map.plot(x, y);
-	if(!dest->isRevealed(me->getTeam())) { err = "destination tile is unexplored"; return JVal(); }
-	if(dest->isMountain()) { err = "destination is a mountain: impassable"; return JVal(); }
-	if(dest == u->plot()) { err = "the unit is already on that tile"; return JVal(); }
+	if(!u) return JVal();
+	std::vector<CvPlot*> steps;
+	if(!ReadPath(args, u, steps, err)) return JVal();
+	CvPlot* dest = steps.back();
+	int x = dest->getX(), y = dest->getY();
 	if(me->isMinorCiv())
 	{
 		std::string why = McpCsMoveRefusal(u, dest);
 		if(!why.empty()) { err = why; return JVal(); }
 	}
-	if(dest->isVisible(me->getTeam()))
+	for(size_t i = 0; i < steps.size(); ++i)
 	{
-		CvCity* c = dest->getPlotCity();
-		if((c && IsEnemyOf(me, c->getOwner())) || dest->isVisibleEnemyDefender(u))
+		CvPlot* p = steps[i];
+		if(!p->isVisible(me->getTeam())) continue;
+		CvCity* c = p->getPlotCity();
+		if((c && IsEnemyOf(me, c->getOwner())) || p->isVisibleEnemyDefender(u))
 		{
-			err = "a defending enemy is on that tile; use the attack tool instead of move_unit (a lone enemy civilian is captured by moving onto it)";
+			err = (i + 1 == steps.size())
+				? "a defending enemy is on that tile; use the attack tool instead of move_unit (a lone enemy civilian is captured by moving onto it)"
+				: McpFormat("path step %d (%d,%d) holds a defending enemy", (int)i + 1, p->getX(), p->getY());
 			return JVal();
 		}
 	}
-	int iTurns = 0;
-	if(!u->GeneratePath(dest, 0, false, &iTurns))
-	{
-		err = "cannot move there: " + MoveRefusal(u, dest);
-		return JVal();
-	}
 	if(ArgBool(args, "preview_only", false))
 	{
-		// The path, from the tile after the unit's to the destination, with the turn each is reached.
-		JArr path;
-		for(CvAStarNode* n = GC.getPathFinder().GetLastNode(); n; n = n->m_pParent)
-		{
-			if(n->m_iX == u->getX() && n->m_iY == u->getY()) continue;
-			JObj step;
-			step["x"] = J(n->m_iX);
-			step["y"] = J(n->m_iY);
-			step["turn"] = J(n->m_iData2);
-			path.insert(path.begin(), JVal(step));
-		}
 		JObj o;
 		o["previewed_only"] = J(true);
-		if(!u->canMove()) o["note"] = J("this unit has no moves left this turn; give the order next turn");
-		o["turns"] = J(iTurns);
-		o["path"] = JVal(path);
-		CvPlot* pEnd = u->GetPathEndTurnPlot();
-		if(pEnd) o["this_turn_ends_at"] = J(McpFormat("(%d,%d)", pEnd->getX(), pEnd->getY()));
+		o["note"] = J("every step is next to the one before and can be entered as far as the map shows; the unit spends its moves step by step, as terrain costs");
+		o["steps"] = J((int)steps.size());
 		return JVal(o);
 	}
 	if(!RequireMoves(u, err)) return JVal();
 	int fromX = u->getX(), fromY = u->getY();
+	// Step by step while moves last; the steps left go into the unit's queue and continue each turn.
+	size_t taken = 0;
+	std::string stopped;
 	{
 		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_MOVE_TO(), x, y, 0, false, true);
+		while(taken < steps.size() && u->canMove())
+		{
+			CvPlot* p = steps[taken];
+			u->PushMission(CvTypes::getMISSION_MOVE_TO(), p->getX(), p->getY(), 0, false, true);
+			if(u->plot() != p)
+			{
+				// Moves left but the step would not take: the rest of the path is dropped, for the player to choose again.
+				std::string why = MoveRefusal(u, p);
+				stopped = McpFormat("path step %d (%d,%d) cannot be entered%s; the rest of the path is dropped", (int)taken + 1, p->getX(), p->getY(),
+					why.empty() ? "" : (": " + why).c_str());
+				break;
+			}
+			++taken;
+		}
+		if(stopped.empty())
+			for(size_t i = taken; i < steps.size(); ++i)
+				u->PushMission(CvTypes::getMISSION_MOVE_TO(), steps[i]->getX(), steps[i]->getY(), 0, i > taken, true);
 	}
+	if(taken == 0 && !stopped.empty()) { err = stopped; return JVal(); }
 	JObj o;
 	o["unit_id"] = J(u->GetID());
 	o["from"] = J(McpFormat("(%d,%d)", fromX, fromY));
 	o["now_at"] = J(McpFormat("(%d,%d)", u->getX(), u->getY()));
 	o["destination"] = J(McpFormat("(%d,%d)", x, y));
+	o["steps_taken"] = J((int)taken);
 	bool bArrived = (u->getX() == x && u->getY() == y);
 	o["arrived"] = J(bArrived);
-	if(!bArrived) o["note"] = J("the unit continues toward the destination when you end the turn, so it is still here when your next turn opens; do not re-issue the order");
-	o["estimated_turns_total"] = J(iTurns);
+	if(!stopped.empty()) o["stopped"] = J(stopped);
+	if(!bArrived) o["note"] = J("the unit stands here until your next turn opens, then walks the rest of the path; do not re-issue the order");
 	o["moves_left"] = J(Moves(u->movesLeft()));
 	return JVal(o);
 }
@@ -1233,6 +1280,7 @@ namespace
 	const char* SCHEMA_EMPTY = "{\"type\":\"object\",\"properties\":{}}";
 	const char* SCHEMA_UNIT = "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"}},\"required\":[\"unit_id\"]}";
 	const char* SCHEMA_CITY = "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"}},\"required\":[\"city_id\"]}";
+	const char* SCHEMA_UNIT_PATH_PREVIEW = "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"path\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"preview_only\":{\"type\":\"boolean\"}},\"required\":[\"unit_id\",\"path\"]}";
 	const char* SCHEMA_UNIT_XY_PREVIEW = "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"},\"preview_only\":{\"type\":\"boolean\"}},\"required\":[\"unit_id\",\"x\",\"y\"]}";
 	const char* SCHEMA_CITY_XY = "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"city_id\",\"x\",\"y\"]}";
 
@@ -1299,8 +1347,8 @@ namespace
 		  "The rules of the game being played, read from its data tables as the Civilopedia shows them, mods' changes included. Give a type key: TECH_..., UNIT_..., BUILDING_... (wonders too), POLICY_..., POLICY_BRANCH_..., PROMOTION_..., IMPROVEMENT_..., RESOURCE_..., BELIEF_..., CIVILIZATION_..., TERRAIN_..., FEATURE_... (natural wonders too), SPECIALIST_... or PROJECT_..., or RULES for game-wide numbers such as unhappiness per city, heal rates and city-state influence levels. It gives costs, requirements, upgrades, upkeep and yields, and for a tech what it leads to. Once you hold a seat, costs are this game's and units and buildings are your civilization's own versions. Every item it names carries its key.",
 		  "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"}},\"required\":[\"type\"]}", ToolLookup, LOG_NONE, false },
 		{ "move_unit",
-		  "Order a unit to move to a tile. Multi-turn moves continue when you end each turn (the unit is still in place when your next turn opens); do not re-issue them. Fails with a reason if there is no path. preview_only=true shows the path and turns without moving. To attack, use attack.",
-		  SCHEMA_UNIT_XY_PREVIEW, ToolMoveUnit, LOG_MOVE, false },
+		  "Move a unit along the path you choose: path lists the tiles in order, [[x,y],[x,y],...], each next to the one before, the first next to the unit, the last the destination. The unit steps along it as far as its moves go this turn (terrain, rivers and zone of control cost as usual), stands where it stops through the other players' turns, and walks the rest when your next turns open; do not re-issue it. preview_only=true checks the path without moving. To attack, use attack.",
+		  SCHEMA_UNIT_PATH_PREVIEW, ToolMoveUnit, LOG_MOVE, false },
 		{ "unit_action",
 		  "Give a unit an order on its current tile. action is one of the names unit_options lists under actions, build (with build=BUILD_... from builds_here), rebase (aircraft, with x and y of one of your cities or carriers), air_sweep (fighters, x and y of the tile to clear of interceptors), paradrop (paratroopers, x and y of the landing tile), nuke (atomic bombs and nuclear missiles, x and y of the target), or disband. Aircraft bomb with the attack tool. stop_automation takes back a unit the game's AI was moving.",
 		  "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"action\":{\"type\":\"string\"},\"build\":{\"type\":\"string\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"unit_id\",\"action\"]}", ToolUnitAction, LOG_UNIT, false },
