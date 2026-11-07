@@ -258,18 +258,19 @@ namespace
 		CHECK(!McpGamePlanApply(plan, Fields("direction", "x", "arc", "y"), "", 1, err, warn) && err.find("arc") != std::string::npos);
 		CHECK(err.find("relations") != std::string::npos);
 		std::string longText;
-		for(int i = 0; i < 710; ++i) longText += "word ";
+		for(int i = 0; i < 1210; ++i) longText += "word ";
 		err.clear();
 		CHECK(McpGamePlanApply(plan, Fields("direction", longText.c_str(), "policy", "t"), "", 1, err, warn));
 		CHECK(warn.size() == 1 && warn[0].find("words") != std::string::npos);
 	}
 
-	void TestSevenHeadingsInOrder()
+	void TestHeadingsInOrder()
 	{
+		// Where you stand, then how you win, then what has to be true over the next turns, then each area's part.
 		const std::vector<std::string>& h = McpGamePlanHeadings();
-		const char* const want[] = { "direction", "cities", "military", "civilians", "research", "policy", "relations" };
-		CHECK(h.size() == 7);
-		for(size_t i = 0; i < h.size() && i < 7; ++i) CHECK(h[i] == want[i]);
+		const char* const want[] = { "position", "direction", "next_turns", "cities", "military", "civilians", "research", "policy", "relations" };
+		CHECK(h.size() == 9);
+		for(size_t i = 0; i < h.size() && i < 9; ++i) CHECK(h[i] == want[i]);
 	}
 
 	void TestPlanTextShowsEveryHeadingWithItsTurn()
@@ -327,6 +328,7 @@ namespace
 		CHECK(top.find("turn 47") != std::string::npos);
 		CHECK(top.find("hold") != std::string::npos && top.find("adjust") != std::string::npos && top.find("drop") != std::string::npos);
 		CHECK(top.find("not everything") != std::string::npos && top.find("nothing in it has to be done") != std::string::npos);
+		CHECK(top.find("top to bottom") != std::string::npos && top.find("follow") != std::string::npos);   // the layers agree
 		CHECK(McpTurnFramingTop(-1).find("no plan yet") != std::string::npos);
 		CHECK(!McpTurnFramingBottom().empty());
 	}
@@ -687,7 +689,7 @@ int main()
 	TestFirstPlanNeedsDirection();
 	TestChangesNeedWhyAndKeepTheRest();
 	TestUnknownHeadingAndLongPlan();
-	TestSevenHeadingsInOrder();
+	TestHeadingsInOrder();
 	TestPlanTextShowsEveryHeadingWithItsTurn();
 	TestWithoutAPlan();
 	TestPlanBlockShowsEveryPartWithItsAge();

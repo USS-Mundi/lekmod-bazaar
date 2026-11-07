@@ -153,7 +153,7 @@ const std::vector<std::string>& McpGamePlanHeadings()
 	static std::vector<std::string> headings;
 	if(headings.empty())
 	{
-		const char* const names[] = { "direction", "cities", "military", "civilians", "research", "policy", "relations" };
+		const char* const names[] = { "position", "direction", "next_turns", "cities", "military", "civilians", "research", "policy", "relations" };
 		headings.assign(names, names + sizeof(names) / sizeof(names[0]));
 	}
 	return headings;
@@ -161,7 +161,7 @@ const std::vector<std::string>& McpGamePlanHeadings()
 
 namespace
 {
-	const int PLAN_WORDS_SHOWN = 700;
+	const int PLAN_WORDS_SHOWN = 1200;
 	const size_t PLAN_LOG_SHOWN = 8;
 	const size_t PLAN_LOG_KEPT = 40;
 
@@ -193,7 +193,9 @@ bool McpGamePlanApply(McpGamePlan& plan, const std::map<std::string, std::string
 	for(std::map<std::string, std::string>::const_iterator it = changes.begin(); it != changes.end(); ++it)
 		if(std::find(headings.begin(), headings.end(), it->first) == headings.end())
 		{
-			err = "'" + it->first + "' is not a heading of the plan; use direction, cities, military, civilians, research, policy and relations";
+			std::string all;
+			for(size_t i = 0; i < headings.size(); ++i) all += (i ? ", " : "") + headings[i];
+			err = "'" + it->first + "' is not a heading of the plan; use " + all;
 			return false;
 		}
 	McpGamePlan next = plan;
@@ -302,8 +304,9 @@ std::string McpTurnFramingTop(int lastPlanTurn)
 	const std::string rest = " This view is a starting point: it is not everything, and nothing in it has to be done.";
 	if(lastPlanTurn < 0)
 		return "You have no plan yet. What is your position, and how will you optimize your odds of winning from it?" + rest;
-	return "Your plan was last revised on turn " + Num(lastPlanTurn) + ". What has changed since, and does each part of it hold, "
-		"need adjusting, or need dropping?" + rest;
+	return "Your plan was last revised on turn " + Num(lastPlanTurn) + ". Read it top to bottom against what has changed: position, "
+		"direction, next turns, each area, the orders. Does each part follow from the one above it, and does any part contradict "
+		"another or where you stand? Then hold each part, adjust it or drop it, and fit the orders to it." + rest;
 }
 
 std::string McpTurnFramingBottom()

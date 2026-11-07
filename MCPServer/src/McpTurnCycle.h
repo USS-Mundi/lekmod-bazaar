@@ -57,6 +57,7 @@ struct McpPlannedOrder
 {
 	std::string tool;
 	std::string args;
+	std::string serves;   // the part of the plan the order serves, and how (end_turn needs none)
 };
 
 // The orders run_plan carries out: the plan without the dropped ones (numbered from 1), with the added ones before a

@@ -64,7 +64,7 @@ namespace
 	{
 		for(size_t i = 0; i < list.size(); ++i)
 		{
-			if(!list[i].is<JObj>()) { err = McpFormat("order %d: each order is {tool, args}", (int)i + 1); return false; }
+			if(!list[i].is<JObj>()) { err = McpFormat("order %d: each order is {tool, args, serves}", (int)i + 1); return false; }
 			const JObj& o = list[i].get<JObj>();
 			std::string tool = ArgStr(o, "tool");
 			const McpToolDef* def = McpFindTool(tool);
@@ -82,6 +82,12 @@ namespace
 			McpPlannedOrder p;
 			p.tool = tool;
 			p.args = JVal(a).serialize();
+			p.serves = ArgStr(o, "serves");
+			if(p.serves.empty() && tool != "end_turn")
+			{
+				err = McpFormat("order %d (%s): serves is required: the part of your plan this order serves, and how", (int)i + 1, tool.c_str());
+				return false;
+			}
 			out.push_back(p);
 		}
 		return true;
@@ -98,6 +104,7 @@ namespace
 			JVal a;
 			picojson::parse(a, orders[i].args);
 			o["args"] = a;
+			if(!orders[i].serves.empty()) o["serves"] = J(orders[i].serves);
 			list.push_back(JVal(o));
 		}
 		return list;
@@ -418,7 +425,7 @@ MCP_TOOL(ToolPlanTurn)
 	JObj::const_iterator it = args.find("orders");
 	if(it == args.end() || !it->second.is<JArr>())
 	{
-		err = "orders is required: the orders you will give next turn, in order, each {tool, args}; [] for none yet";
+		err = "orders is required: the orders you will give next turn, in order, each {tool, args, serves}; [] for none yet";
 		return JVal();
 	}
 	SeatPlan plan;
@@ -436,7 +443,7 @@ MCP_TOOL(ToolPlanTurn)
 	JObj::const_iterator pi = args.find("plan");
 	if(pi != args.end())
 	{
-		if(!pi->second.is<JObj>()) { err = "plan must be an object of headings: direction, cities, military, civilians, research, policy, relations"; return JVal(); }
+		if(!pi->second.is<JObj>()) { err = "plan must be an object of headings: position, direction, next_turns, cities, military, civilians, research, policy, relations"; return JVal(); }
 		std::map<std::string, std::string> changes;
 		const JObj& given = pi->second.get<JObj>();
 		for(JObj::const_iterator k = given.begin(); k != given.end(); ++k)
