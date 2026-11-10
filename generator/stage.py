@@ -69,7 +69,14 @@ def modinfo(mod_id, version, name, teaser, description, authors, deps, refs, blo
 
 
 def stage_mod(folder, sources, mod_id, version, **kw):
-    """Copies sources [(src path, rel path, import)] into the mod folder and writes its modinfo."""
+    """Copies sources [(src path, rel path, import)] into the mod folder and writes its modinfo. A plugin DLL loads
+    only through a DllPlugins row, so a plugin DLL (one not imported, as the game core is) that no staged SQL registers
+    stops the build."""
+    sql = "".join(open(src, encoding="utf-8").read() for src, rel, _ in sources if rel.lower().endswith(".sql"))
+    for _, rel, imp in sources:
+        name = os.path.basename(rel)
+        if name.lower().endswith(".dll") and not imp and "INSERT INTO DllPlugins (File) VALUES ('%s')" % name not in sql:
+            sys.exit("%s: no SQL registers %s in DllPlugins, so the game would never load it" % (kw["name"], name))
     files = []
     for src, rel, imp in sources:
         dst = os.path.join(folder, rel)
