@@ -9,6 +9,7 @@
 #include "CvUnit.h"
 #include "CvCity.h"
 #include "CvPlot.h"
+#include "CvImprovementClasses.h"
 #include "CvGlobals.h"
 #include "CvGameCoreUtils.h"
 #include <algorithm>
@@ -187,6 +188,34 @@ namespace
 			if(best < 0 || d < best) { best = d; what = c->getName().c_str(); }
 		}
 		return best < 0 ? std::string("none") : McpFormat("%s, %d tiles", what.c_str(), best);
+	}
+
+	// Every ancient ruin the seat knows of, the nearest to its units and cities first, with how far that is.
+	void AddRuins(CvPlayer* me, std::vector<McpViewItem>& items)
+	{
+		TeamTypes eTeam = me->getTeam();
+		CvMap& map = GC.getMap();
+		std::vector<std::pair<int, McpViewItem> > rows;
+		for(int i = 0; i < map.numPlots(); ++i)
+		{
+			CvPlot* p = map.plotByIndexUnchecked(i);
+			if(!p || !p->isRevealed(eTeam)) continue;
+			ImprovementTypes eImp = p->getRevealedImprovementType(eTeam);
+			if(eImp == NO_IMPROVEMENT) continue;
+			CvImprovementEntry* pImp = GC.getImprovementInfo(eImp);
+			if(!pImp || !pImp->IsGoody()) continue;
+			Fields f;
+			f.push_back(F("name", "ancient ruins"));
+			f.push_back(F("_at", McpFormat("(%d,%d)", p->getX(), p->getY())));
+			std::string nearest = NearestOfYours(me, p->getX(), p->getY());
+			size_t comma = nearest.rfind(", ");
+			int dist = comma == std::string::npos ? 9999 : atoi(nearest.c_str() + comma + 2);
+			if(comma != std::string::npos) f.push_back(F("_near", McpFormat("%d from your %s", dist, nearest.substr(0, comma).c_str())));
+			if(!p->isVisible(eTeam)) f.push_back(F("_seen", "out of sight now"));
+			rows.push_back(std::make_pair(dist, Item("ruins", McpFormat("ruins:%d:%d", p->getX(), p->getY()), f)));
+		}
+		std::stable_sort(rows.begin(), rows.end(), FirstLess());
+		for(size_t k = 0; k < rows.size(); ++k) items.push_back(rows[k].second);
 	}
 
 	// Every unit of others in sight, grouped by owner: a line for each owner (its code, name and whether you are at
@@ -675,6 +704,7 @@ McpTurnViewData McpGatherTurnView(CvPlayer* me)
 	AddEmpireClocks(me, d.items);
 	AddOthersUnits(me, d.items);
 	AddTheirCities(me, d.items);
+	AddRuins(me, d.items);
 	AddUnits(me, true, d.items, d.withoutOrder);
 	AddCities(me, d.items, d.withoutOrder, d.cities);
 	AddUnits(me, false, d.items, d.withoutOrder);

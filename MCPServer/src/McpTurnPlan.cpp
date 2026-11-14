@@ -8,6 +8,7 @@
 #include "McpBridge.h"
 #include "McpSeat.h"
 #include "McpCityStateFiles.h"
+#include "McpReplyText.h"
 #include "McpMapImage.h"
 #include "McpTurnView.h"
 #include "McpClocksGame.h"
@@ -506,7 +507,7 @@ MCP_TOOL(ToolWaitForMyTurn)
 	if(!err.empty() || !v.is<JObj>()) return v;
 	std::string why;
 	CvPlayer* me = Me(why);
-	if(me && McpIsPlayerTurn(*me)) v.get<JObj>()["your_turn"] = J("Your turn has started. Call turn_view.");
+	if(me && McpIsPlayerTurn(*me)) v.get<JObj>()[MCP_DO_NOW] = J("call turn_view, before any other tool. Your turn has started.");
 	return v;
 }
 

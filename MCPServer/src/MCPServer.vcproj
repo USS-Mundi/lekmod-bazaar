@@ -187,6 +187,22 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpReplyText.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpReplyText.h"
+			>
+		</File>
+		<File
+			RelativePath=".\McpViewGate.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpViewGate.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpLua.cpp"
 			>
 		</File>

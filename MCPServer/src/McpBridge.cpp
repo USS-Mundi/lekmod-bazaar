@@ -18,6 +18,8 @@
 #include "McpDiplomacy.h"
 #include "McpGameReference.h"
 #include "McpLogText.h"
+#include "McpReplyText.h"
+#include "McpViewGate.h"
 #include "McpSeatPlayback.h"
 #include "McpVersion.h"
 #include "CvGame.h"
@@ -195,6 +197,7 @@ struct McpBridge::Impl
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunOnGameThread(const std::string& token, const std::string& tool, const picojson::object& args, std::string& error);
+	std::string ViewGateRefusal(PlayerTypes ePlayer, const std::string& tool);
 	bool SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart);
 	int NudgeSeq(const std::string& token); // the session's nudge count; 0 when it no longer exists
 };
@@ -870,6 +873,7 @@ void McpBridge::Impl::ResetForNewGame()
 	McpResetBriefing();
 	McpCsResetForNewGame();
 	McpTurnPlanReset();
+	McpViewGateReset();
 }
 
 namespace
@@ -886,6 +890,13 @@ bool McpBridge::Retrying() { return s_retrying; }
 // the civilization it plays then: a claim of an opponent civilization is hidden with the
 // rest of that civilization's lines. Other calls are logged before they run, so their
 // line comes before anything the call causes.
+// Game thread: the turn view gate for a major civilization's seat; testing mode runs without it.
+std::string McpBridge::Impl::ViewGateRefusal(PlayerTypes ePlayer, const std::string& tool)
+{
+	if(testingMode || ePlayer == NO_PLAYER || ePlayer >= MAX_MAJOR_CIVS) return "";
+	return McpViewGateRefusal((int)ePlayer, GC.getGame().getGameTurn(), McpIsPlayerTurn(GET_PLAYER(ePlayer)), tool);
+}
+
 bool McpBridge::Impl::RunJob(McpJob* pJob)
 {
 	if(pJob->tool == MCP_JOB_NUDGE)
@@ -916,6 +927,8 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 
 	if(pJob->tool == MCP_JOB_PLAN_TAKE)
 	{
+		std::string why = ViewGateRefusal(McpPlayerOf(McpBridge::Get().Current()), MCP_TOOL_RUN_PLAN);
+		if(!why.empty()) { pJob->error = why; return false; }
 		McpCrashSetContext(MCP_JOB_PLAN_TAKE);
 		try
 		{
@@ -947,6 +960,8 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	const char* szCategory = bLogged ? McpLogCategory(*pTool, pJob->args) : "";
 	McpSession before = McpBridge::Get().Current();
 	PlayerTypes ePlayerBefore = McpPlayerOf(before);
+	std::string viewFirst = ViewGateRefusal(ePlayerBefore, pJob->tool);
+	if(!viewFirst.empty()) { pJob->error = viewFirst; return false; }
 	if(ePlayerBefore >= MAX_MAJOR_CIVS)
 	{
 		std::string why = McpCsToolRefusal(pJob->tool, McpTool::ArgStr(pJob->args, "action"), McpTool::ArgStr(pJob->args, "item"));
@@ -974,6 +989,8 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 		s_retryRequested = false;
 	}
 	McpCrashSetContext("");
+	// A view that fails still counts, so a broken view never locks a seat out of its turn.
+	if(pJob->tool == "turn_view" && ePlayerBefore != NO_PLAYER && McpIsPlayerTurn(GET_PLAYER(ePlayerBefore))) McpViewGateViewed((int)ePlayerBefore, GC.getGame().getGameTurn());
 	s_retrying = false;
 	bool bRetry = false;
 	if(s_retryRequested)
@@ -1294,7 +1311,7 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		}
 		picojson::object text;
 		text["type"] = picojson::value("text");
-		text["text"] = picojson::value(value.is<std::string>() ? value.get<std::string>() : value.serialize());
+		text["text"] = picojson::value(McpReplyText(value));
 		content.push_back(picojson::value(text));
 		content.insert(content.end(), images.begin(), images.end());
 		picojson::object result;
@@ -1438,8 +1455,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	if(pTool->waitsForTurn && NudgeSeq(token) != iNudgeAtStart && result.is<picojson::object>())
 		result.get<picojson::object>()["woken_by_message"] = picojson::value(true);
 	if(bPlanFirst && result.is<picojson::object>())
-		result.get<picojson::object>()["plan_first"] = picojson::value(std::string("You have no plan for your next turn. "
-			"Send it now with plan_turn, while the others play; then call wait_for_my_turn again."));
+		result.get<picojson::object>()[MCP_DO_NOW] = picojson::value(std::string("call plan_turn. You have no plan for your next turn; "
+			"send it while the others play, then call wait_for_my_turn again."));
 	return result;
 }
 
