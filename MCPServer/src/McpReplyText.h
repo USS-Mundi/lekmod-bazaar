@@ -8,3 +8,7 @@
 
 // The text a tool's reply travels as: a plain-text reply as it is, any other as its JSON, led by its do_now line.
 std::string McpReplyText(const picojson::value& v);
+
+// A player wrote to the seat: the wait's reply says so first, ahead of whatever it already asks for, so a message is
+// read whether it woke the wait or came with a round or a turn opening.
+void McpAddMessageNotice(picojson::object& reply);

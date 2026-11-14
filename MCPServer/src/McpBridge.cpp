@@ -118,15 +118,19 @@ struct McpBridge::Impl
 		int diploSeq; // grows when a new request reaches the session's civilization
 		int diploCount;
 		bool chatWaiting; // the human's messages to the session's seat await a status
-		int nudgeSeq; // grows when POST /nudge names the session's civilization
+		int nudgeSeq; // grows when POST /nudge names the session's civilization and the early wake is let through
+		int nudgeTold; // nudgeSeq as of the wait reply that last told the session of a message: a wake that came between two waits still returns the next one
+		int noticeSeq; // grows with every POST /nudge for the civilization, let through or not
+		int noticeTold; // noticeSeq as of that reply: a message that woke nobody is told on the next reply of the wait
+		bool noticesSynced; // the two told counts start from the game's, so a new session is not told of old messages
 		DWORD lastSeenMs; // a time read before taking the lock can be older than this, and now - lastSeenMs then wraps
 		int seatBeforeLoad;
 		bool planDue;     // its seat has a plan for the turn the game is on (round-start planning)
 		bool roundToPlan; // its seat's round has opened and it has yet to be asked for that plan
 		bool autoRun;     // its own wait is running its plan: those orders pass the turn view gate
 		bool planRunning; // run_plan is carrying out its orders: a game message they bring does not stop the next one
-		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), lastSeenMs(0), seatBeforeLoad(-1),
-			planDue(false), roundToPlan(false), autoRun(false), planRunning(false) {}
+		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), nudgeTold(0), noticeSeq(0), noticeTold(0),
+			noticesSynced(false), lastSeenMs(0), seatBeforeLoad(-1), planDue(false), roundToPlan(false), autoRun(false), planRunning(false) {}
 		bool Idle(DWORD now) const { return now - lastSeenMs > MCP_SESSION_IDLE_MS; }
 	};
 
@@ -151,7 +155,8 @@ struct McpBridge::Impl
 	volatile bool gameLoaded;
 	std::map<int, std::vector<std::string> > chat;         // per seat: the human's messages no status has delivered yet
 	std::map<int, std::vector<std::string> > csMessages;   // per seat: its city-states' words no status has delivered yet
-	std::map<int, int> nudges;                             // per player: how many early wakes POST /nudge has asked for
+	std::map<int, int> nudges;                             // per player: how many early wakes POST /nudge has been let through
+	std::map<int, int> notices;                            // per player: how many times POST /nudge has named it, let through or not
 	std::map<int, DWORD> lastNudgeMs;                      // per player: when the last one was let through
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
 	int unreadReplies;
@@ -212,6 +217,8 @@ struct McpBridge::Impl
 	std::string ViewGateRefusal(PlayerTypes ePlayer, const std::string& tool);
 	bool SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart);
 	int NudgeSeq(const std::string& token); // the session's nudge count; 0 when it no longer exists
+	int NudgeTold(const std::string& token); // that count as of the last wait reply that told the session of a message
+	bool TakeMessageNotice(const std::string& token); // a message came for the session's seat since that reply; marks it told
 };
 
 McpBridge& McpBridge::Get()
@@ -679,6 +686,14 @@ void McpBridge::Impl::UpdateSessions()
 		s.chatWaiting = (c != chat.end() && !c->second.empty()) || (m != csMessages.end() && !m->second.empty());
 		std::map<int, int>::const_iterator n = nudges.find((int)ePlayer);
 		s.nudgeSeq = (n == nudges.end()) ? 0 : n->second;
+		std::map<int, int>::const_iterator nt = notices.find((int)ePlayer);
+		s.noticeSeq = (nt == notices.end()) ? 0 : nt->second;
+		if(!s.noticesSynced && ePlayer != NO_PLAYER)
+		{
+			s.nudgeTold = s.nudgeSeq;
+			s.noticeTold = s.noticeSeq;
+			s.noticesSynced = true;
+		}
 		int iRequests = ePlayer != NO_PLAYER ? McpCountDiploRequestsFor(ePlayer) : 0;
 		if(iRequests > s.diploCount) ++s.diploSeq;
 		s.diploCount = iRequests;
@@ -1437,8 +1452,32 @@ namespace
 	}
 }
 
-// Game thread: counts an early wake for each living major civilization the name matches, unless one was let
-// through for it less than MCP_NUDGE_COOLDOWN_MS ago.
+int McpBridge::Impl::NudgeTold(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::const_iterator it = sessions.find(token);
+	int iSeq = (it == sessions.end()) ? 0 : it->second.nudgeTold;
+	LeaveCriticalSection(&lock);
+	return iSeq;
+}
+
+bool McpBridge::Impl::TakeMessageNotice(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::iterator it = sessions.find(token);
+	bool bNew = it != sessions.end() && (it->second.noticeSeq != it->second.noticeTold || it->second.nudgeSeq != it->second.nudgeTold);
+	if(bNew)
+	{
+		it->second.noticeTold = it->second.noticeSeq;
+		it->second.nudgeTold = it->second.nudgeSeq;
+	}
+	LeaveCriticalSection(&lock);
+	return bNew;
+}
+
+// Game thread: for each living major civilization the name matches, notes that a message came for it, and counts an
+// early wake unless one was let through for it less than MCP_NUDGE_COOLDOWN_MS ago. The cooldown paces early wakes, so
+// chat cannot chain them; the message itself is still told on the wait's next reply.
 picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
 {
 	picojson::object::const_iterator it = args.find("civ");
@@ -1457,6 +1496,7 @@ picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
 			continue;
 		++fMatched;
 		EnterCriticalSection(&lock);
+		++notices[i];
 		std::map<int, DWORD>::const_iterator last = lastNudgeMs.find(i);
 		if(last == lastNudgeMs.end() || now - last->second >= MCP_NUDGE_COOLDOWN_MS)
 		{
@@ -1509,7 +1549,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		bool bMyTurn = false, bChatWaiting = false;
 		int iSeqAtStart = 0, iSeat = 0;
 		Flags(token, bMyTurn, iSeqAtStart, bChatWaiting, iSeat);
-		iNudgeAtStart = NudgeSeq(token);
+		// The count the session was last told of, not the count now: a wake that came between two waits returns this one.
+		iNudgeAtStart = NudgeTold(token);
 		// A seat that owes a plan for its next turn is asked for it before it waits.
 		bPlanFirst = McpTakePlanReminder(iSeat, bMyTurn);
 		bool bClientGone = false;
@@ -1548,8 +1589,6 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		bIsError = true;
 		return picojson::value(error);
 	}
-	if(pTool->waitsForTurn && NudgeSeq(token) != iNudgeAtStart && result.is<picojson::object>())
-		result.get<picojson::object>()["woken_by_message"] = picojson::value(true);
 	if(bPlanFirst && result.is<picojson::object>())
 		result.get<picojson::object>()[MCP_DO_NOW] = picojson::value(std::string("call plan_turn. You have no plan for your next turn; "
 			"send it while the others play, then call wait_for_my_turn again."));
@@ -1565,6 +1604,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		else why = heldPlan.to_str();
 		o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan is waiting on you: " + why + ".");
 	}
+	// Last, so it leads whatever the reply asks for: a message is told once, whether it woke the wait or not.
+	if(pTool->waitsForTurn && result.is<picojson::object>() && TakeMessageNotice(token)) McpAddMessageNotice(result.get<picojson::object>());
 	return result;
 }
 
