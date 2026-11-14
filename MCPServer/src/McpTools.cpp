@@ -966,6 +966,33 @@ namespace
 {
 	// The turn each seat asked to end, while the game runs its units' queued moves: those can hand the turn back.
 	std::map<int, int> s_endingTurn;
+	// How many times the end_turn now running has ended a handed-back turn again by itself.
+	std::map<int, int> s_endedAgain;
+
+	// Asks the game to end the seat's turn; bIdleUnits lets its idle units skip the turn first. False, with err, when
+	// the game does not take it.
+	bool SendEndTurn(CvPlayer* me, bool bIdleUnits, std::string& err)
+	{
+		if(McpSeatOnScreen() && AiProcessing())
+		{
+			err = "the game is still processing other civilizations; wait a moment and try again";
+			return false;
+		}
+		if(bIdleUnits) me->EndTurnsForReadyUnits();
+		if(McpSeatOnScreen())
+		{
+			if(!GC.getGame().isNetworkMultiPlayer() && GC.GetPostTurnAutosaves())
+				gDLL->AutoSave(false, true);
+			gDLL->sendTurnComplete();
+			return true;
+		}
+		me->setEndTurn(true);
+		if(me->isEndTurn()) return true;
+		if(me->hasReadyUnit()) { err = "a unit still needs orders; see units"; return false; }
+		err = "a unit or city stayed busy for several seconds; call end_turn again";
+		McpBridge::RetryLater();
+		return false;
+	}
 
 	// Run once the game has taken the end of turn, and again on each retry until the queued moves have run.
 	JVal EndTurnOutcome(CvPlayer* me, int iTurn, std::string& err)
@@ -982,6 +1009,14 @@ namespace
 		if(eState == MCP_TURN_HANDED_BACK)
 		{
 			EndTurnBlockingTypes eBlock = EndTurnBlocking(me);
+			bool bBlocked = eBlock != NO_ENDTURN_BLOCKING_TYPE || !PendingCaptureDecision(me).empty();
+			if(McpEndTurnAgain(bBlocked, McpBridge::Get().CountUnread(me->GetID()), s_endedAgain[me->GetID()]))
+			{
+				++s_endedAgain[me->GetID()];
+				if(!SendEndTurn(me, false, err)) return JVal();
+				s_endingTurn[me->GetID()] = iTurn;
+				return EndTurnOutcome(me, iTurn, err);
+			}
 			err = "the game handed the turn back after running your units' queued moves - ";
 			err += eBlock != NO_ENDTURN_BLOCKING_TYPE ? BlockingName(eBlock) : std::string("nothing blocks it now; call end_turn again");
 			const CvUnit* u = me->hasReadyUnit() ? me->GetFirstReadyUnit() : NULL;
@@ -1014,6 +1049,7 @@ MCP_TOOL(ToolEndTurn)
 		if(McpBridge::Retrying()) return EndTurnOutcome(seat, it->second, err);
 		s_endingTurn.erase(it);
 	}
+	if(!McpBridge::Retrying()) s_endedAgain.erase(seat->GetID());
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
 	bool bForce = ArgBool(args, "force", false);
@@ -1026,29 +1062,7 @@ MCP_TOOL(ToolEndTurn)
 		err = "end of turn blocked - " + BlockingName(eBlock);
 		return JVal();
 	}
-	if(McpSeatOnScreen() && AiProcessing())
-	{
-		err = "the game is still processing other civilizations; wait a moment and try again";
-		return JVal();
-	}
-	if(bIdleUnits) me->EndTurnsForReadyUnits();
-	if(McpSeatOnScreen())
-	{
-		if(!g.isNetworkMultiPlayer() && GC.GetPostTurnAutosaves())
-			gDLL->AutoSave(false, true);
-		gDLL->sendTurnComplete();
-	}
-	else
-	{
-		me->setEndTurn(true);
-		if(!me->isEndTurn())
-		{
-			if(me->hasReadyUnit()) { err = "a unit still needs orders; see units"; return JVal(); }
-			err = "a unit or city stayed busy for several seconds; call end_turn again";
-			McpBridge::RetryLater();
-			return JVal();
-		}
-	}
+	if(!SendEndTurn(me, bIdleUnits, err)) return JVal();
 	s_endingTurn[me->GetID()] = g.getGameTurn();
 	return EndTurnOutcome(me, g.getGameTurn(), err);
 }
@@ -1294,7 +1308,7 @@ namespace
 		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
 		{ "turn_view",
-		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan. A civilization also opens it once its round has opened, before its turn, to plan the turn from.",
+		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan; opening it on your turn reads the game messages it shows, so they need no acknowledge_messages. A civilization also opens it once its round has opened, before its turn, to plan the turn from.",
 		  SCHEMA_EMPTY, ToolTurnView, LOG_NONE, false },
 		{ "city_detail",
 		  "One of your cities in full: its buildings, health and defense, its clocks (build, growth, next border tile) with the price to buy its build, its queue, and the tiles it works and could work.",
@@ -1303,7 +1317,7 @@ namespace
 		  "Revise your plan and send your turn's orders. A civilization sends them once its round has opened, from that round's turn_view: every order for the turn, in order, and a complete plan runs by itself when the turn opens. A city-state sends its next turn any time after it ends a turn. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations (each player: what you intend toward them and what you want from them). Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. aim: what this turn moves in your plan.",
 		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"position\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"next_turns\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":\"string\"}}},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
 		{ MCP_TOOL_RUN_PLAN,
-		  "Carry out your planned orders for this turn in one call, after turn_view: unread game messages are acknowledged first, then each order runs in turn as if you had called it, and end_turn runs only if nothing before it failed. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
+		  "Carry out your planned orders for this turn in one call, after turn_view: each order runs in turn as if you had called it. A game message one of them brings (a ruin explored, a city-state met) does not stop the orders after it; it comes back in messages_while_running. end_turn runs only if nothing before it failed and no such message came. Give every unit and city turn_view lists under your_plan_leaves_open an order with add, or the turn will not end. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
 		  "{\"type\":\"object\",\"properties\":{\"drop\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}},\"add\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"set_aside\":{\"type\":\"boolean\"},\"why\":{\"type\":\"object\"}}}", NULL, LOG_NONE, false },
 		{ "briefing",
 		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",

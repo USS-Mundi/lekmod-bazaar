@@ -735,7 +735,6 @@ void McpGatherTurnNews(McpTurnViewData& d)
 		(kind == MCP_DECISION_BLOCKS ? d.blocks : kind == MCP_DECISION_FROM_OTHERS ? d.fromOthers : d.available).push_back(pending[i]);
 	}
 	AddLines(o, "diplomacy_requests", d.fromOthers);
-	AddLines(o, "unread_messages", d.fromOthers);
 	AddLines(o, "warnings", d.state);
 }
 

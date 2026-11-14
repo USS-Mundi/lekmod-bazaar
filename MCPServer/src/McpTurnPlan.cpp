@@ -424,8 +424,9 @@ namespace
 	}
 
 	// What a plan leaves for the seat to decide when its turn opens, as far as the game can tell now: a unit ready
-	// with no order, a city with nothing to build or about to finish with nothing after, research not chosen.
-	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders)
+	// with no order, a city with nothing to build or about to finish with nothing after, research not chosen. With the
+	// turn open (bTurnOpen), only what stops this turn from ending: what finishes next turn is the next plan's.
+	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders, bool bTurnOpen)
 	{
 		const size_t LIMIT = 12;
 		std::vector<std::string> out;
@@ -449,14 +450,14 @@ namespace
 		{
 			if(c->IsPuppet() || cities.count(c->GetID())) continue;
 			if(c->getOrderQueueLength() == 0) out.push_back(std::string(c->getName().c_str()) + " has nothing to build");
-			else if(c->getOrderQueueLength() == 1 && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1)
+			else if(!bTurnOpen && c->getOrderQueueLength() == 1 && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1)
 				out.push_back(std::string(c->getName().c_str()) + " finishes " + c->getProductionName() + " as the turn opens, with nothing queued after it");
 		}
 		if(!bResearch)
 		{
 			TechTypes eTech = me->GetPlayerTechs()->GetCurrentResearch();
 			if(eTech == NO_TECH) out.push_back("research: nothing chosen");
-			else if(TechDueNextTurn(me) != NO_TECH)
+			else if(!bTurnOpen && TechDueNextTurn(me) != NO_TECH)
 				out.push_back(std::string("research: ") + GC.getTechInfo(eTech)->GetDescription() + " finishes as the turn opens; what comes after is not chosen");
 		}
 		if(out.size() > LIMIT)
@@ -551,7 +552,7 @@ MCP_TOOL(ToolPlanTurn)
 	plan.note = ArgStr(args, "note");
 	plan.view = Capture(me);
 	std::vector<std::string> open;
-	if(bMajor) open = LeftOpen(me, plan.orders);
+	if(bMajor) open = LeftOpen(me, plan.orders, McpIsPlayerTurn(*me));
 	bool bReplaced = s_plans.count((int)me->GetID()) > 0;
 	s_plans[(int)me->GetID()] = plan;
 	InterlockedExchange(&s_owesPlan[me->GetID()], 0);
@@ -771,6 +772,8 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		McpTrail("turn view: gather begins", seat, iTurn);
 		McpTurnViewData d = McpGatherTurnView(me);
 		McpGatherTurnNews(d);
+		// The view on the open turn shows the game messages, so opening it reads them.
+		if(bMine) McpBridge::Get().Acknowledge(seat, NULL);
 		McpTrail("turn view: gather done", seat, iTurn);
 		std::set<int> plannedUnits, plannedCities;
 		if(due != s_plans.end()) PlannedIds(due->second.orders, plannedUnits, plannedCities);
@@ -821,9 +824,14 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	o["your_aim"] = J(p.aim);
 	o["your_plan"] = JVal(OrdersJson(p.orders));
 	if(!p.note.empty()) o["your_plan_note"] = J(p.note);
-	o["decide"] = J("It is your turn. run_plan carries out the planned orders: drop lists order numbers to leave out, add lists orders to "
-		"add (they go before a final end_turn), and unread game messages are acknowledged first. set_aside lets you give orders one at a time "
-		"with the other tools.");
+	std::vector<std::string> open = LeftOpen(me, p.orders, true);
+	if(!open.empty()) o["your_plan_leaves_open"] = JVal(Lines(open));
+	o["decide"] = J(std::string("It is your turn. run_plan carries out the planned orders: drop lists order numbers to leave out, add lists orders to "
+		"add (they go before a final end_turn). ")
+		+ (open.empty() ? "" : "The turn will not end while what your_plan_leaves_open lists has no order: add one for each in the same run_plan "
+			"(a unit that should stay put takes unit_action with sleep, fortify or skip). ")
+		+ "A game message one of your orders brings does not stop the rest; run_plan shows it and leaves the turn open for you. set_aside lets you "
+		"give orders one at a time with the other tools.");
 	if(McpPlanJournalOn())
 		o["explain_changes"] = J("Debug journal on: when you drop, add or set aside, give run_plan why = {saw: what made you change it, in a few words; "
 			"kind: one of " + McpWhyKinds() + "; orders: the order numbers it touched}.");
@@ -939,6 +947,17 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 	o["journal_on"] = J(McpPlanJournalOn());
 	o["changed"] = J(bChanged);
 	o["why_missing"] = J(bChanged && wi == args.end());
+	return JVal(o);
+}
+
+picojson::value McpTakeMessagesThatCame(std::string& err)
+{
+	CvPlayer* me = Me(err);
+	if(!me) return JVal();
+	std::vector<std::string> texts;
+	McpBridge::Get().Acknowledge(me->GetID(), NULL, &texts);
+	JObj o;
+	o["messages"] = JVal(Lines(texts));
 	return JVal(o);
 }
 

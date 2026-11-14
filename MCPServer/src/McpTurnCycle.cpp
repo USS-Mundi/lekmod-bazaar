@@ -619,6 +619,18 @@ McpEndTurnState McpEndTurnOutcome(bool bTurnOver, bool bMyTurn)
 	return bMyTurn ? MCP_TURN_HANDED_BACK : MCP_TURN_ENDING;
 }
 
+bool McpEndTurnAgain(bool bBlocked, int iUnread, int iTimesAgain)
+{
+	return !bBlocked && iUnread == 0 && iTimesAgain == 0;
+}
+
+std::string McpPlanEndHeld(bool bOrderFailed, int iMessagesCame)
+{
+	if(bOrderFailed) return "not run: an order before it failed, so the turn is still yours";
+	if(iMessagesCame > 0) return "not run: " + Num(iMessagesCame) + " game message(s) came while your orders ran (messages_while_running), so the turn is still yours";
+	return "";
+}
+
 int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn)
 {
 	if(bMyTurn || lastEndedTurn < 0 || lastEndedTurn > gameTurn) return gameTurn;

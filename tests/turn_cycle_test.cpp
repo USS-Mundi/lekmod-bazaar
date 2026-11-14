@@ -669,6 +669,25 @@ namespace
 		// A turn that passed counts as ended even if the next one has already come round.
 		CHECK(McpEndTurnOutcome(true, true) == MCP_TURN_ENDED);
 	}
+
+	void TestAHandedBackTurnIsEndedAgainOnceWhenNothingAsksForTheSeat()
+	{
+		CHECK(McpEndTurnAgain(false, 0, 0));
+		// A unit that needs orders, a choice to make or a message to read is the seat's to see.
+		CHECK(!McpEndTurnAgain(true, 0, 0));
+		CHECK(!McpEndTurnAgain(false, 1, 0));
+		// Once: a turn that comes back a second time goes to the seat.
+		CHECK(!McpEndTurnAgain(false, 0, 1));
+	}
+
+	void TestAPlansEndOfTurnWaitsOnAFailedOrderOrANewMessage()
+	{
+		CHECK(McpPlanEndHeld(false, 0).empty());
+		CHECK(McpPlanEndHeld(true, 0) == "not run: an order before it failed, so the turn is still yours");
+		CHECK(McpPlanEndHeld(false, 2) == "not run: 2 game message(s) came while your orders ran (messages_while_running), so the turn is still yours");
+		// The failed order is the first thing to deal with.
+		CHECK(McpPlanEndHeld(true, 2) == McpPlanEndHeld(true, 0));
+	}
 }
 
 namespace
@@ -783,6 +802,8 @@ int main()
 	TestTiesGoToTheTighterPicture();
 	TestNoCitiesNoPictures();
 	TestEndTurnWaitsUntilTheGameHasRunTheQueuedMoves();
+	TestAHandedBackTurnIsEndedAgainOnceWhenNothingAsksForTheSeat();
+	TestAPlansEndOfTurnWaitsOnAFailedOrderOrANewMessage();
 	TestUnlabeledFieldsAndNewAndGoneFields();
 	TestAFallingCityGetsAClock();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }

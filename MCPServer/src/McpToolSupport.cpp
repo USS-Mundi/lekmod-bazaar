@@ -138,7 +138,8 @@ namespace McpTool
 			err = "it is not your turn right now (the turn is ending or other civilizations are moving); call wait_for_my_turn";
 			return NULL;
 		}
-		int iUnread = McpBridge::Get().CountUnread(me->GetID());
+		// A running plan's orders are not stopped by a message one of them brought: run_plan shows it before the turn ends.
+		int iUnread = McpBridge::RunningPlan() ? 0 : McpBridge::Get().CountUnread(me->GetID());
 		if(iUnread > 0)
 		{
 			err = McpFormat("%d unread game message(s) are waiting: read them in briefing.game_messages, then call acknowledge_messages", iUnread);

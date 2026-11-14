@@ -83,6 +83,9 @@ public:
 	static void RetryLater();
 	// During a job: whether this run is one of those later runs.
 	static bool Retrying();
+	// During a job: whether the session's run_plan is carrying out its orders. A game message one of those orders
+	// brings does not stop the next one; run_plan shows it before the turn ends.
+	static bool RunningPlan();
 
 	// Game thread, during a job: the session whose tool is running. Outside a job the
 	// token is "". Identity is empty until the model calls set_identity; every new MCP
@@ -162,8 +165,8 @@ public:
 	// Game thread. Popups shown to one player.
 	std::vector<McpPopup> GetPopupsSince(int player, int iTurn);
 	int CountUnread(int player);
-	// ids NULL = all. Returns how many were newly marked read.
-	int Acknowledge(int player, const std::vector<int>* ids);
+	// ids NULL = all. Returns how many were newly marked read, with their text in pTexts when given.
+	int Acknowledge(int player, const std::vector<int>* ids, std::vector<std::string>* pTexts = NULL);
 
 private:
 	McpBridge();

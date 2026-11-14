@@ -198,6 +198,14 @@ void McpAddFallClocks(const std::vector<McpViewItem>& before, std::vector<McpVie
 enum McpEndTurnState { MCP_TURN_ENDING, MCP_TURN_ENDED, MCP_TURN_HANDED_BACK };
 McpEndTurnState McpEndTurnOutcome(bool bTurnOver, bool bMyTurn);
 
+// The game handed the turn back after the queued moves: end_turn ends it again by itself, once, when nothing asks for
+// the seat (no unit to order, no choice to make, no game message to read).
+bool McpEndTurnAgain(bool bBlocked, int iUnread, int iTimesAgain);
+
+// Why a running plan's end_turn is not run, or "": an order before it failed, or game messages came while the orders
+// ran. The orders themselves are not stopped by such a message; the seat reads it before the turn ends.
+std::string McpPlanEndHeld(bool bOrderFailed, int iMessagesCame);
+
 // One picture of a seat's land: the candidate center it is drawn around, the cities within reach of it, and the
 // distance to the farthest of them.
 struct McpPicture

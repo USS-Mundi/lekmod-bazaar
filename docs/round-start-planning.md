@@ -1,6 +1,6 @@
 # Round-start planning: a seat plays its turn before its turn
 
-Status: plan, not built. Written 2026-11-14 from game `civ5-game-72bf92c1` (4 Opus 5.5 seats, 220 seat-turns).
+Status: built, in trial (the switch is off). Written 2026-11-14 from game `civ5-game-72bf92c1` (4 Opus 5.5 seats, 220 seat-turns).
 
 ## Goal
 
@@ -130,6 +130,38 @@ Measured over one game of 40 turns or more, same models and efforts:
 - No turn ran by itself with a waking change present (journal check, and a native test).
 - Every held turn has its reason in the journal; the reasons are reviewed once to tune rule 4.
 - Units lost and damage taken per turn are no higher than in `civ5-game-72bf92c1`.
+
+## After the first trial game
+
+Game `civ5-game-af72491e`, turns 0 to 21, 5 Opus 5.5 seats, switch off (the model decides every turn), beside
+`civ5-game-72bf92c1` over the same turns (3 to 4 seats).
+
+| Per seat-turn | Before | Trial |
+|---|---|---|
+| Seconds on the clock | 14 | 9 |
+| Model calls (inside the turn) | 6.2 (4.6) | 7.7 (3.8) |
+| Cached tokens read | 1.23M | 1.56M |
+| Plans run as written | 3% | 67% |
+| Plans with no orders | 42 of 80 | 0 of 108 |
+
+- `run_plan` ended the turn in 37 of 89 runs. What stopped the rest: a game message one of the plan's own moves brought
+  (a ruin, a city-state met) refusing the next order or the end (about 21), a unit with no order (17, mostly just
+  built), the game handing the turn back after queued moves (9), bad path steps (5).
+- Rule 4 would have run 82 of 89 turns, and in 23 of those the model changed the plan, nearly always for what its own
+  turn opening produced (a unit built, a tech or policy finished). Rule 4 does not see those, so the switch stays off.
+
+Changes made for it:
+
+| File | Change |
+|---|---|
+| `McpTurnCycle` | `McpPlanEndHeld(orderFailed, messagesCame)`, `McpEndTurnAgain(blocked, unread, timesAgain)`, with tests. |
+| `McpBridge.cpp` `RunPlan`; `McpToolSupport.cpp` `MeActing` | While a plan's orders run, a game message one of them brings does not refuse the next order. `run_plan` returns the messages in `messages_while_running`, marked read, and leaves the turn open for the seat instead of ending it. |
+| `McpTurnPlan.cpp` turn view | The view on the open turn marks the game messages it shows as read. With a plan due it lists `your_plan_leaves_open`: units ready with no order, cities with nothing to build, no research. |
+| `McpTools.cpp` `end_turn` | A turn the game hands back after queued moves, with nothing blocking and nothing unread, is ended again once by the same call. |
+
+Aim: the view and `run_plan` end the turn, about 2 calls inside it. `round_report.py` prints how often `run_plan` ended
+the turn and how often a message came during a run; if seats only ever end the turn after such a message, the end can
+run too.
 
 ## Not in this upgrade
 

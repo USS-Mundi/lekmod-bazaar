@@ -13,6 +13,7 @@ class CvPlayer;
 #define MCP_TOOL_RUN_PLAN "run_plan"
 #define MCP_JOB_PLAN_TAKE "plan-take"
 #define MCP_JOB_PLAN_AUTO "plan-auto"
+#define MCP_JOB_PLAN_MESSAGES "plan-messages"
 
 // At the start of the seat's turn, once a turn: the turn view (everything it can see, what changed since it last ended a
 // turn marked in place, its game plan beside each part) and its land pictures; when a plan is due, the plan's orders.
@@ -22,6 +23,9 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o);
 // bAuto is the seat's own wait asking as its turn opens (docs/round-start-planning.md): the plan as written, ending the
 // turn, or {held: why} with the plan kept when the turn is the seat's to decide, or {idle: true} with nothing to run.
 picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool bAuto);
+// run_plan, as a game-thread job once its orders have run: {messages: [...]}, the game messages those orders brought,
+// marked read.
+picojson::value McpTakeMessagesThatCame(std::string& err);
 // A major seat's round has opened, its turn has not, it has no plan for it and has not been asked for one this round.
 bool McpRoundAwaitsPlan(CvPlayer* me);
 // A major seat has a plan for the turn the game is on.
