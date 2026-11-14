@@ -9,6 +9,7 @@
 #include "McpSeat.h"
 #include "McpCityStateFiles.h"
 #include "McpReplyText.h"
+#include "McpDiplomacy.h"
 #include "McpMapImage.h"
 #include "McpTurnView.h"
 #include "McpClocksGame.h"
@@ -38,9 +39,11 @@ namespace
 		std::string aim;       // what in the game plan the turn serves, or the course held and until when
 		std::string note;
 		McpView view;          // what the seat could see when it planned
+		int viewTurn;          // the game turn of the turn view it was planned from
 		bool changesShown;
 		std::vector<std::string> changes; // what changed, as shown at the turn's start
-		SeatPlan() : plannedTurn(0), changesShown(false) {}
+		std::string held;      // why the turn was held for the seat when it opened, once it has been
+		SeatPlan() : plannedTurn(0), viewTurn(-1), changesShown(false) {}
 	};
 
 	std::map<int, SeatPlan> s_plans;
@@ -51,6 +54,15 @@ namespace
 	std::map<int, std::vector<McpViewItem> > s_viewAtEnd; // what each seat could see when it last ended a turn
 	std::map<int, std::map<std::string, std::string> > s_screensAtEnd; // the screens left to tools, as they were then
 	std::map<int, std::string> s_viewText;  // the turn view each seat was last shown, sent again on a later wait that turn
+	// Round-start planning, for a major civilization's seat: it plans its turn from the view it opens once the round is
+	// open, before its turn.
+	std::map<int, int> s_viewOnTurn;   // the game turn each seat was last shown its view with its turn open
+	std::map<int, int> s_roundAsked;   // the game turn each seat was last asked to plan its round
+	std::map<int, int> s_roundViewTurn; // the game turn of each seat's last view before its turn
+	std::map<int, std::vector<McpViewItem> > s_viewAtRound; // what it could see then
+	std::map<int, std::map<std::string, std::string> > s_screensAtRound;
+
+	bool Major(const CvPlayer* me) { return (int)me->GetID() < MAX_MAJOR_CIVS; }
 
 	// Waiting, planning and the seat's own housekeeping are not orders.
 	bool Plannable(const std::string& tool)
@@ -198,6 +210,18 @@ namespace
 	bool Due(const SeatPlan& p)
 	{
 		return GC.getGame().getGameTurn() > p.plannedTurn;
+	}
+
+	bool HasDuePlan(int seat)
+	{
+		std::map<int, SeatPlan>::const_iterator it = s_plans.find(seat);
+		return it != s_plans.end() && Due(it->second);
+	}
+
+	// A major seat whose round is open and whose turn has not opened yet.
+	bool BeforeItsTurn(CvPlayer* me)
+	{
+		return Major(me) && me->isAlive() && me->isHuman() && !McpIsPlayerTurn(*me) && McpRoundOpen(GC.getGame().getGameTurn(), LastEnded((int)me->GetID()));
 	}
 
 	void ShowChanges(CvPlayer* me, SeatPlan& p)
@@ -387,25 +411,59 @@ namespace
 				if(!u) { out.push_back(head + "no unit of yours has that unit_id"); continue; }
 				if(moved.count(id)) continue;
 				moved.insert(id);
-				int dx = -1, dy = -1;
-				JObj::const_iterator pit = a.find("path");
-				if(pit != a.end() && pit->second.is<JArr>() && !pit->second.get<JArr>().empty())
-				{
-					const JVal& last = pit->second.get<JArr>().back();
-					if(last.is<JArr>() && last.get<JArr>().size() == 2 && last.get<JArr>()[0].is<double>() && last.get<JArr>()[1].is<double>())
-					{
-						dx = (int)last.get<JArr>()[0].get<double>();
-						dy = (int)last.get<JArr>()[1].get<double>();
-					}
-				}
-				if(dx < 0) { out.push_back(head + "move_unit takes path: the tiles in order, [[x,y],...], ending at the destination"); continue; }
-				CvPlot* dest = GC.getMap().plot(dx, dy);
-				if(!dest) { out.push_back(head + "that tile is not on the map"); continue; }
-				std::string why = MoveRefusal(u, dest);
+				std::vector<CvPlot*> steps;
+				std::string why;
+				if(!ReadPath(a, u, steps, why)) { out.push_back(head + why); continue; }
+				why = MoveRefusal(u, steps.back());
 				if(!why.empty()) out.push_back(head + "as things stand: " + why);
 			}
 			else if(tool == "unit_action")
 				moved.insert(ArgInt(a, "unit_id", -1));
+		}
+		return out;
+	}
+
+	// What a plan leaves for the seat to decide when its turn opens, as far as the game can tell now: a unit ready
+	// with no order, a city with nothing to build or about to finish with nothing after, research not chosen.
+	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders)
+	{
+		const size_t LIMIT = 12;
+		std::vector<std::string> out;
+		std::set<int> units, cities;
+		bool bResearch = false;
+		for(size_t i = 0; i < orders.size(); ++i) if(orders[i].tool == "set_research") bResearch = true;
+		for(size_t i = 0; i < orders.size(); ++i)
+		{
+			JVal v;
+			picojson::parse(v, orders[i].args);
+			if(!v.is<JObj>()) continue;
+			int unit = ArgInt(v.get<JObj>(), "unit_id", -1), city = ArgInt(v.get<JObj>(), "city_id", -1);
+			if(unit >= 0) units.insert(unit);
+			if(city >= 0 && (orders[i].tool == "set_production" || orders[i].tool == "buy")) cities.insert(city);
+		}
+		int iLoop;
+		for(CvUnit* u = me->firstUnit(&iLoop); u; u = me->nextUnit(&iLoop))
+			if(u->ReadyToMove() && !u->isDelayedDeath() && !units.count(u->GetID()))
+				out.push_back(McpFormat("%s %d at (%d,%d) has no order", u->getName().GetCString(), u->GetID(), u->getX(), u->getY()));
+		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
+		{
+			if(c->IsPuppet() || cities.count(c->GetID())) continue;
+			if(c->getOrderQueueLength() == 0) out.push_back(std::string(c->getName().c_str()) + " has nothing to build");
+			else if(c->getOrderQueueLength() == 1 && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1)
+				out.push_back(std::string(c->getName().c_str()) + " finishes " + c->getProductionName() + " as the turn opens, with nothing queued after it");
+		}
+		if(!bResearch)
+		{
+			TechTypes eTech = me->GetPlayerTechs()->GetCurrentResearch();
+			if(eTech == NO_TECH) out.push_back("research: nothing chosen");
+			else if(TechDueNextTurn(me) != NO_TECH)
+				out.push_back(std::string("research: ") + GC.getTechInfo(eTech)->GetDescription() + " finishes as the turn opens; what comes after is not chosen");
+		}
+		if(out.size() > LIMIT)
+		{
+			size_t more = out.size() - LIMIT;
+			out.resize(LIMIT);
+			out.push_back(McpFormat("...and %d more", (int)more));
 		}
 		return out;
 	}
@@ -426,8 +484,25 @@ MCP_TOOL(ToolPlanTurn)
 	JObj::const_iterator it = args.find("orders");
 	if(it == args.end() || !it->second.is<JArr>())
 	{
-		err = "orders is required: the orders you will give next turn, in order, each {tool, args, serves}; [] for none yet";
+		err = "orders is required: the turn's orders, in order, each {tool, args, serves}; [] for none yet";
 		return JVal();
+	}
+	// A major seat plans a turn from this round's turn view: once the round is open, or with its turn open.
+	bool bMajor = Major(me);
+	if(bMajor)
+	{
+		int seat = (int)me->GetID();
+		if(!McpIsPlayerTurn(*me) && !BeforeItsTurn(me))
+		{
+			err = "DO NOW: call wait_for_my_turn. Your next turn is planned when the next round opens, once everyone else has moved; the wait returns then.";
+			return JVal();
+		}
+		std::map<int, int>::const_iterator seen = s_viewShown.find(seat);
+		if(seen == s_viewShown.end() || seen->second != GC.getGame().getGameTurn())
+		{
+			err = "DO NOW: call turn_view. A turn is planned from this round's turn view.";
+			return JVal();
+		}
 	}
 	SeatPlan plan;
 	if(!ParseOrders(it->second.get<JArr>(), plan.orders, err)) return JVal();
@@ -470,9 +545,13 @@ MCP_TOOL(ToolPlanTurn)
 		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least direction (how you are optimizing your odds of winning from here)");
 	std::vector<std::string> checks = CheckOrders(me, plan.orders);
 	warnings.insert(warnings.end(), checks.begin(), checks.end());
-	plan.plannedTurn = McpPlanMadeOnTurn(iTurn, McpIsPlayerTurn(*me), LastEnded(me->GetID()));
+	// A major seat's plan is for the turn of the round it is made in; a city-state's is for its next turn.
+	plan.plannedTurn = bMajor ? iTurn - 1 : McpPlanMadeOnTurn(iTurn, McpIsPlayerTurn(*me), LastEnded(me->GetID()));
+	plan.viewTurn = iTurn;
 	plan.note = ArgStr(args, "note");
 	plan.view = Capture(me);
+	std::vector<std::string> open;
+	if(bMajor) open = LeftOpen(me, plan.orders);
 	bool bReplaced = s_plans.count((int)me->GetID()) > 0;
 	s_plans[(int)me->GetID()] = plan;
 	InterlockedExchange(&s_owesPlan[me->GetID()], 0);
@@ -496,8 +575,15 @@ MCP_TOOL(ToolPlanTurn)
 	if(bReplaced) o["replaced"] = J("your earlier plan");
 	if(bPlanChanged) o["game_plan"] = J("saved: each turn view shows each part beside the state it is about");
 	if(!warnings.empty()) o["warnings"] = JVal(Lines(warnings));
-	o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn starts, call turn_view"
-		: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
+	if(!open.empty()) o["left_open"] = JVal(Lines(open));
+	if(!bMajor)
+		o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn starts, call turn_view"
+			: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
+	else if(warnings.empty() && open.empty())
+		o["next"] = J("call wait_for_my_turn: when your turn opens these orders run and the turn ends by itself, unless something that matters has changed; then the turn comes to you");
+	else
+		o["next"] = J("what warnings and left_open show brings the turn to you when it opens instead of running by itself: cover it with another plan_turn, "
+			"or leave it if you mean to decide then. Then call wait_for_my_turn");
 	return JVal(o);
 }
 
@@ -508,6 +594,12 @@ MCP_TOOL(ToolWaitForMyTurn)
 	std::string why;
 	CvPlayer* me = Me(why);
 	if(me && McpIsPlayerTurn(*me)) v.get<JObj>()[MCP_DO_NOW] = J("call turn_view, before any other tool. Your turn has started.");
+	else if(me && McpRoundAwaitsPlan(me))
+	{
+		s_roundAsked[(int)me->GetID()] = GC.getGame().getGameTurn();
+		v.get<JObj>()[MCP_DO_NOW] = J("call turn_view, then send this turn's orders with plan_turn. The round has opened: everyone else has moved, "
+			"and your turn opens once the players before you have played.");
+	}
 	return v;
 }
 
@@ -522,9 +614,13 @@ MCP_TOOL(ToolTurnView)
 {
 	CvPlayer* me = Me(err);
 	if(!me || !RequireIdentity(err)) return JVal();
-	if(!McpIsPlayerTurn(*me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
+	bool bMine = McpIsPlayerTurn(*me);
+	if(!bMine && !BeforeItsTurn(me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
 	JObj o;
 	McpAddPlanToTurnStart(me, o);
+	if(!bMine)
+		o[MCP_DO_NOW] = J(HasDuePlan((int)me->GetID()) ? "call wait_for_my_turn. Your plan for this turn is in; send plan_turn again only to change it."
+			: "send this turn's orders with plan_turn: every order for the turn, in order. A complete plan runs by itself when your turn opens.");
 	return JVal(o);
 }
 
@@ -582,8 +678,9 @@ namespace
 	// and what has no plan or no order.
 	std::string TurnViewText(CvPlayer* me, const McpTurnViewData& d, const McpGamePlan& plan, const std::vector<McpViewItem>* before,
 		const std::map<std::string, std::string>* screensBefore, const std::set<int>& plannedUnits, const std::set<int>& plannedCities,
-		int& added, int& changed, int& gone)
+		int& added, int& changed, int& gone, bool bBeforeTurn, bool bSinceRoundView)
 	{
+		const char* since = bSinceRoundView ? "the view you planned from" : "your last turn";
 		std::vector<McpViewItem> none, items = d.items;
 		std::set<std::string> ticking = d.ticking;
 		if(before)
@@ -594,8 +691,11 @@ namespace
 		std::vector<McpViewSection> view = McpMarkView(before ? *before : none, items, ticking, before != NULL);
 		std::string out = McpFormat("TURN %d · %s (%s)\n", GC.getGame().getGameTurn(), me->getCivilizationShortDescription(), me->getName());
 		int iTurn = GC.getGame().getGameTurn();
+		if(bBeforeTurn)
+			out += "BEFORE YOUR TURN: the round as it stands now that everyone else has moved. This turn's income, production, growth and research "
+				"are applied when your turn opens; your units have their moves already.\n";
 		out += McpTurnFramingTop(McpLastPlanTurn(plan)) + "\n\n";
-		if(before) out += "Marks: + new since your last turn · ~ changed, the old value in (was ...) · - gone\n";
+		if(before) out += std::string("Marks: + new since ") + since + " · ~ changed, the old value in (was ...) · - gone\n";
 		std::string codes;
 		for(int i = 0; i < MAX_PLAYERS; ++i)
 		{
@@ -613,7 +713,7 @@ namespace
 		for(size_t i = 0; i < plan.targets.size(); ++i) out += "  target: " + McpTargetStatus(me, plan.targets[i]) + "\n";
 		std::vector<std::string> news = d.news;
 		for(size_t i = 0; i < d.state.size(); ++i) news.push_back("state: " + d.state[i]);
-		out += "\nSINCE YOUR LAST TURN\n" + JoinLines(news, "nothing reported");
+		out += "\nSINCE " + Upper(since) + "\n" + JoinLines(news, "nothing reported");
 		if(!d.blocks.empty()) out += "\nEND TURN BLOCKED UNTIL\n" + JoinLines(d.blocks, "");
 		if(!d.fromOthers.empty()) out += "\nFROM OTHER PLAYERS\n" + JoinLines(d.fromOthers, "");
 		if(!d.available.empty()) out += "\nAVAILABLE THIS TURN (none of it required)\n" + JoinLines(d.available, "");
@@ -641,7 +741,7 @@ namespace
 		if(!screensBefore) out += "  " + sameScreens + "\n";
 		else
 		{
-			out += "  changed since your last turn: " + (changedScreens.empty() ? std::string("none") : changedScreens) + "\n";
+			out += std::string("  changed since ") + since + ": " + (changedScreens.empty() ? std::string("none") : changedScreens) + "\n";
 			if(!sameScreens.empty()) out += "  unchanged: " + sameScreens + "\n";
 		}
 		(void)plannedUnits; (void)plannedCities;
@@ -657,10 +757,16 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	int seat = (int)me->GetID();
 	std::map<int, SeatPlan>::iterator due = s_plans.find(seat);
 	if(due != s_plans.end() && !Due(due->second)) due = s_plans.end();
-	std::map<int, int>::iterator viewed = s_viewShown.find(seat);
-	if(viewed != s_viewShown.end() && viewed->second == iTurn) o["turn_view"] = J(s_viewText[seat]);
+	// A view before the seat's turn and one with the turn open are two views: the second is gathered again and marked
+	// against the first.
+	bool bMine = McpIsPlayerTurn(*me);
+	std::map<int, int>& shownIn = bMine ? s_viewOnTurn : s_roundViewTurn;
+	std::map<int, int>::iterator viewed = shownIn.find(seat);
+	if(viewed != shownIn.end() && viewed->second == iTurn) o["turn_view"] = J(s_viewText[seat]);
 	else
 	{
+		bool bSinceRoundView = bMine && s_roundViewTurn.count(seat) && s_roundViewTurn[seat] == iTurn;
+		shownIn[seat] = iTurn;
 		s_viewShown[seat] = iTurn;
 		McpTrail("turn view: gather begins", seat, iTurn);
 		McpTurnViewData d = McpGatherTurnView(me);
@@ -668,11 +774,18 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		McpTrail("turn view: gather done", seat, iTurn);
 		std::set<int> plannedUnits, plannedCities;
 		if(due != s_plans.end()) PlannedIds(due->second.orders, plannedUnits, plannedCities);
-		std::map<int, std::vector<McpViewItem> >::const_iterator before = s_viewAtEnd.find(seat);
+		const std::map<int, std::vector<McpViewItem> >& itemsBefore = bSinceRoundView ? s_viewAtRound : s_viewAtEnd;
+		const std::map<int, std::map<std::string, std::string> >& screens = bSinceRoundView ? s_screensAtRound : s_screensAtEnd;
+		std::map<int, std::vector<McpViewItem> >::const_iterator before = itemsBefore.find(seat);
 		int added = 0, changed = 0, gone = 0;
-		std::map<int, std::map<std::string, std::string> >::const_iterator screensBefore = s_screensAtEnd.find(seat);
-		std::string text = TurnViewText(me, d, game, before == s_viewAtEnd.end() ? NULL : &before->second,
-			screensBefore == s_screensAtEnd.end() ? NULL : &screensBefore->second, plannedUnits, plannedCities, added, changed, gone);
+		std::map<int, std::map<std::string, std::string> >::const_iterator screensBefore = screens.find(seat);
+		std::string text = TurnViewText(me, d, game, before == itemsBefore.end() ? NULL : &before->second,
+			screensBefore == screens.end() ? NULL : &screensBefore->second, plannedUnits, plannedCities, added, changed, gone, !bMine, bSinceRoundView);
+		if(!bMine)
+		{
+			s_viewAtRound[seat] = d.items;
+			s_screensAtRound[seat] = d.screens;
+		}
 		s_viewText[seat] = text;
 		o["turn_view"] = J(text);
 		if(McpPlanJournalOn())
@@ -696,9 +809,14 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		s_landShown[seat] = iTurn;
 		McpAddLandToTurnStart(me->GetID(), o);
 	}
-	if(due == s_plans.end()) return;
+	if(due == s_plans.end() || !bMine) return;
 	SeatPlan& p = due->second;
 	ShowChanges(me, p);
+	if(!p.held.empty())
+	{
+		o["your_plan_was_held"] = J(p.held);
+		o["since_you_planned"] = JVal(Lines(p.changes));
+	}
 	o["your_aim"] = J(p.aim);
 	o["your_plan"] = JVal(OrdersJson(p.orders));
 	if(!p.note.empty()) o["your_plan_note"] = J(p.note);
@@ -710,35 +828,79 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 			"kind: one of " + McpWhyKinds() + "; orders: the order numbers it touched}.");
 }
 
-picojson::value McpTakePlan(const picojson::object& args, std::string& err)
+picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool bAuto)
 {
 	CvPlayer* me = Me(err);
 	if(!me || !RequireIdentity(err)) return JVal();
-	if(!McpIsPlayerTurn(*me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
-	std::map<int, int>::const_iterator seen = s_viewShown.find((int)me->GetID());
-	if(seen == s_viewShown.end() || seen->second != GC.getGame().getGameTurn())
-	{
-		err = "call turn_view first: your planned orders run against this turn as it stands";
-		return JVal();
-	}
 	std::map<int, SeatPlan>::iterator it = s_plans.find((int)me->GetID());
-	if(it == s_plans.end() || !Due(it->second))
+	bool bDue = it != s_plans.end() && Due(it->second);
+	if(bAuto)
 	{
-		err = "you have no plan for this turn: send one with plan_turn after you end a turn, or play this turn with the other tools";
-		return JVal();
+		// The seat's own wait asks, each time its turn looks open: nothing to run is no error.
+		if(!McpIsPlayerTurn(*me) || !bDue || !Major(me))
+		{
+			JObj idle;
+			idle["idle"] = J(true);
+			return JVal(idle);
+		}
+		SeatPlan& planned = it->second;
+		int iTurn = GC.getGame().getGameTurn();
+		std::string hold = McpAutoRunHold(McpLogsFlag("MCPServer-auto-run.off"), planned.viewTurn == iTurn,
+			McpWakingChanges(planned.view, Capture(me), MCP_CHANGES_SHOWN), McpCountDiploRequestsFor(me->GetID()));
+		if(!hold.empty())
+		{
+			if(planned.held.empty() && McpPlanJournalOn())
+			{
+				JObj journal;
+				journal["event"] = J("held");
+				journal["game"] = J(McpGameId());
+				journal["turn"] = J(iTurn);
+				journal["civ"] = J(me->getCivilizationShortDescription());
+				journal["why"] = J(hold);
+				McpPlanJournalAppend(JVal(journal).serialize());
+			}
+			planned.held = hold;
+			JObj held;
+			held["held"] = J(hold);
+			return JVal(held);
+		}
+	}
+	else
+	{
+		if(!McpIsPlayerTurn(*me)) { err = "it is not your turn right now; call wait_for_my_turn"; return JVal(); }
+		std::map<int, int>::const_iterator seen = s_viewShown.find((int)me->GetID());
+		if(seen == s_viewShown.end() || seen->second != GC.getGame().getGameTurn())
+		{
+			err = "call turn_view first: your planned orders run against this turn as it stands";
+			return JVal();
+		}
+		if(!bDue)
+		{
+			err = Major(me) ? "you have no plan for this turn: play it with the other tools"
+				: "you have no plan for this turn: send one with plan_turn after you end a turn, or play this turn with the other tools";
+			return JVal();
+		}
 	}
 	SeatPlan p = it->second;
 	if(!p.changesShown) ShowChanges(me, p);
-	bool bSetAside = ArgBool(args, "set_aside", false);
-	std::vector<int> drop = Ints(args, "drop");
+	bool bSetAside = !bAuto && ArgBool(args, "set_aside", false);
+	std::vector<int> drop = bAuto ? std::vector<int>() : Ints(args, "drop");
 	std::vector<McpPlannedOrder> add;
 	JObj::const_iterator ai = args.find("add");
-	if(ai != args.end() && ai->second.is<JArr>() && !ParseOrders(ai->second.get<JArr>(), add, err)) { err = "add: " + err; return JVal(); }
+	if(!bAuto && ai != args.end() && ai->second.is<JArr>() && !ParseOrders(ai->second.get<JArr>(), add, err)) { err = "add: " + err; return JVal(); }
 	std::vector<McpPlannedOrder> run;
 	if(!bSetAside)
 	{
 		run = McpOrdersToRun(p.orders, drop, add, err);
 		if(!err.empty()) return JVal();
+	}
+	// A plan that runs by itself always tries to end the turn: the game refuses when something is left to decide.
+	if(bAuto && (run.empty() || run.back().tool != "end_turn"))
+	{
+		McpPlannedOrder end;
+		end.tool = "end_turn";
+		end.args = "{}";
+		run.push_back(end);
 	}
 	s_plans.erase(it);
 
@@ -750,6 +912,7 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err)
 	journal["planned_on_turn"] = J(p.plannedTurn);
 	journal["plan"] = JVal(OrdersJson(p.orders));
 	journal["since_you_planned"] = JVal(Lines(p.changes));
+	if(bAuto) journal["auto"] = J(true);
 	if(bSetAside) journal["set_aside"] = J(true);
 	if(!drop.empty())
 	{
@@ -774,7 +937,7 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err)
 
 void McpNoteTurnEnded(CvPlayer* me)
 {
-	McpOwePlan(me->GetID());
+	if(!Major(me)) McpOwePlan(me->GetID());
 	s_lastEnded[(int)me->GetID()] = GC.getGame().getGameTurn();
 	McpTrail("turn view: end-of-turn snapshot begins", me->GetID(), GC.getGame().getGameTurn());
 	McpTurnViewData atEnd = McpGatherTurnView(me);
@@ -811,7 +974,21 @@ void McpTurnPlanReset()
 	s_viewAtEnd.clear();
 	s_screensAtEnd.clear();
 	s_viewText.clear();
+	s_viewOnTurn.clear();
+	s_roundAsked.clear();
+	s_roundViewTurn.clear();
+	s_viewAtRound.clear();
+	s_screensAtRound.clear();
 }
+
+bool McpRoundAwaitsPlan(CvPlayer* me)
+{
+	if(!BeforeItsTurn(me) || HasDuePlan((int)me->GetID())) return false;
+	std::map<int, int>::const_iterator asked = s_roundAsked.find((int)me->GetID());
+	return asked == s_roundAsked.end() || asked->second != GC.getGame().getGameTurn();
+}
+
+bool McpPlanIsDue(CvPlayer* me) { return Major(me) && HasDuePlan((int)me->GetID()); }
 
 void McpOwePlan(int seat)
 {

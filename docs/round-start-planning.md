@@ -55,10 +55,10 @@ waiting for the next round. The model is called on the seat's own turn only when
    same planning session.
 4. **Run or hold**, decided once, when the seat's turn is open and a plan made this round exists:
    - Hold if a waking change is seen since the plan's view: war or peace, a unit or city lost, damage taken, an enemy
-     unit new or moved in sight, a diplomacy request, a message from a player.
+     unit new or moved in sight, another civilization's unit new or moved within 5 tiles, the treasury emptied,
+     happiness crossing zero, a diplomacy request, a message from a player.
    - Otherwise run the orders, then `end_turn`. Hold if an order fails or the game does not end the turn.
-   - Not waking: another civilization's units moving while at peace, and gold or happiness drift. If one blocks an
-     order, the order fails and that holds the turn.
+   - Not waking: only the drift the seat's own turn brings (income, happiness that stays on its side of zero).
 5. **Held turn.** `wait_for_my_turn` returns "DO NOW: call turn_view", with why it was held and what already ran.
    From there the turn is played as today (`run_plan` with `drop` and `add`, or single orders).
 6. **No plan in time.** A turn that opens before the seat has planned is played as today. A plan sent after the turn
@@ -70,8 +70,10 @@ waiting for the next round. The model is called on the seat's own turn only when
 Only the human and earlier seats act between the round opening and a seat's turn, so the last seat sees the most.
 Three things bound it:
 
-- Rule 4 wakes on threats and failed orders, not on peaceful movement. In this game that would have been 0 of the 18
-  in-between changes.
+- Rule 4 is strict: whatever another player did that the seat can see holds the turn, so a seat never acts on a view
+  the human or an earlier seat has changed. In this game that is 18 change lines over about 14 of 196 seat-turns.
+- A held seat is not worse off than one whose plan ran: it decides on the fresh state, as every seat does today. The
+  difference between early and late seats is how often their turn is the slower kind, not what they know.
 - A held turn costs 2 to 3 calls (view, `run_plan`, wait), fewer than today's 4.8, because the orders are already
   written and only the difference is decided.
 - At war with a neighbour every turn may hold. That is today's flow and today's cost, not worse.
@@ -135,5 +137,4 @@ Measured over one game of 40 turns or more, same models and efforts:
 
 ## Open decisions
 
-1. Rule 4's waking list as written, or stricter (any change the seat can see)?
-2. Does a plan made on this round's view satisfy "nothing before the turn view" when the plugin runs it?
+1. Does a plan made on this round's view satisfy "nothing before the turn view" when the plugin runs it?

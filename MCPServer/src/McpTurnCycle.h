@@ -52,9 +52,9 @@ struct McpView
 // limit lines, the rest are counted in one last line.
 std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& now, size_t limit);
 
-// The changes among those that hold a planned turn for the seat to decide: wars, losses, damage, and an enemy unit new
-// or moved anywhere in sight. Another civilization's units at peace and drifting gold or happiness do not; if one of
-// those stops an order, the order fails and that holds the turn.
+// The changes among those that hold a planned turn for the seat to decide: every one but the drift its own turn
+// brings (gold that did not run out, happiness that stayed on its side of zero). So whatever another player did that
+// the seat can see, a peaceful unit passing included, brings the turn to the seat.
 std::vector<std::string> McpWakingChanges(const McpView& planned, const McpView& now, size_t limit);
 
 // A seat's round is open, its turn there to be planned from the state it will open with, once the game turn has

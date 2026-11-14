@@ -60,7 +60,8 @@ namespace
 
 namespace
 {
-	// The changes between two views; bWakingOnly leaves out what no other player's threat explains.
+	// The changes between two views; bWakingOnly leaves out the drift a seat's own turn brings: gold that did not run
+	// out and happiness that stayed on its side of zero.
 	std::vector<std::string> Changes(const McpView& planned, const McpView& now, size_t limit, bool bWakingOnly)
 	{
 	std::vector<std::string> out;
@@ -92,7 +93,7 @@ namespace
 	for(size_t i = 0; i < now.theirs.size(); ++i)
 	{
 		const McpSeenUnit& u = now.theirs[i];
-		if(!u.enemy && (bWakingOnly || u.cityState || u.nearDist < 0 || u.nearDist > NEAR)) continue;
+		if(!u.enemy && (u.cityState || u.nearDist < 0 || u.nearDist > NEAR)) continue;
 		const McpSeenUnit* before = FindUnit(planned.theirs, u.id);
 		Sighting s;
 		s.dist = u.nearDist;
@@ -106,9 +107,10 @@ namespace
 	for(size_t i = 0; i < seen.size(); ++i) out.push_back(seen[i].line);
 
 	int goldMoved = now.gold - planned.gold, happyMoved = now.happiness - planned.happiness;
-	if(!bWakingOnly && ((now.gold == 0 && planned.gold > 0) || goldMoved >= GOLD_SHOWN || -goldMoved >= GOLD_SHOWN))
+	bool bEmptied = now.gold == 0 && planned.gold > 0, bCrossed = (now.happiness < 0) != (planned.happiness < 0);
+	if(bEmptied || (!bWakingOnly && (goldMoved >= GOLD_SHOWN || -goldMoved >= GOLD_SHOWN)))
 		out.push_back("gold " + Num(now.gold) + " (was " + Num(planned.gold) + ")");
-	if(!bWakingOnly && ((now.happiness < 0) != (planned.happiness < 0) || happyMoved >= HAPPINESS_SHOWN || -happyMoved >= HAPPINESS_SHOWN))
+	if(bCrossed || (!bWakingOnly && (happyMoved >= HAPPINESS_SHOWN || -happyMoved >= HAPPINESS_SHOWN)))
 		out.push_back("happiness " + Num(now.happiness) + " (was " + Num(planned.happiness) + ")");
 
 	if(out.size() > limit)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "picojson.h"
 
 class CvPlayer;
@@ -120,6 +121,8 @@ namespace McpTool
 	std::string BuildRefusal(CvCity* c, BuildingTypes eBuilding, bool bPurchase = false);
 	std::string RestRefusal(CvUnit* u, CvPlot* p, const std::string& action);
 	std::string MoveRefusal(CvUnit* u, CvPlot* dest);
+	// move_unit's path as the player gives it: tiles in order, each next to the one before, the first next to the unit.
+	bool ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err);
 	std::string UpgradeRefusal(CvUnit* u);
 	// Matches a civilization's short name, player name, or numeric id as text.
 	PlayerTypes FindPlayer(const std::string& key);

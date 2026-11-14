@@ -562,13 +562,25 @@ namespace
 		CHECK(McpRoundOpen(13, -1));
 	}
 
-	void TestPeacefulNeighboursAndDriftDoNotWake()
+	void TestOnlyTheTurnsOwnDriftDoesNotWake()
 	{
 		McpView now = View();
-		now.theirs[0].x = 39; now.theirs[0].nearDist = 1;
-		now.gold = 70; now.happiness = -2;
-		CHECK(McpViewChanges(View(), now, 25).size() == 3);
+		now.gold = 70; now.happiness = 4;
+		CHECK(McpViewChanges(View(), now, 25).size() == 2);
 		CHECK(McpWakingChanges(View(), now, 25).empty());
+	}
+
+	void TestWhatAnotherPlayerDidInSightWakes()
+	{
+		// A neighbour at peace walks up, the treasury runs out, happiness falls below zero.
+		McpView now = View();
+		now.theirs[0].x = 39; now.theirs[0].nearDist = 1;
+		now.gold = 0; now.happiness = -2;
+		std::vector<std::string> c = McpWakingChanges(View(), now, 25);
+		CHECK(Has(c, "Georgia Warrior moved (38,23) to (39,23), 1 tile from your Worker"));
+		CHECK(Has(c, "gold 0 (was 130)"));
+		CHECK(Has(c, "happiness -2 (was 1)"));
+		CHECK(c.size() == 3);
 	}
 
 	void TestThreatsWake()
@@ -762,7 +774,8 @@ int main()
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
 	TestARoundOpensOnceTheGameTurnPassesTheSeatsLastEnd();
-	TestPeacefulNeighboursAndDriftDoNotWake();
+	TestOnlyTheTurnsOwnDriftDoesNotWake();
+	TestWhatAnotherPlayerDidInSightWakes();
 	TestThreatsWake();
 	TestAPlannedTurnRunsUnlessSomethingHoldsIt();
 	TestOnePictureWhenTheCitiesFit();

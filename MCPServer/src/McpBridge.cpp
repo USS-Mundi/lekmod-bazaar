@@ -120,7 +120,11 @@ struct McpBridge::Impl
 		int nudgeSeq; // grows when POST /nudge names the session's civilization
 		DWORD lastSeenMs; // a time read before taking the lock can be older than this, and now - lastSeenMs then wraps
 		int seatBeforeLoad;
-		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), lastSeenMs(0), seatBeforeLoad(-1) {}
+		bool planDue;     // its seat has a plan for the turn the game is on (round-start planning)
+		bool roundToPlan; // its seat's round has opened and it has yet to be asked for that plan
+		bool autoRun;     // its own wait is running its plan: those orders pass the turn view gate
+		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), lastSeenMs(0), seatBeforeLoad(-1),
+			planDue(false), roundToPlan(false), autoRun(false) {}
 		bool Idle(DWORD now) const { return now - lastSeenMs > MCP_SESSION_IDLE_MS; }
 	};
 
@@ -195,7 +199,10 @@ struct McpBridge::Impl
 	picojson::value HandleRpc(const picojson::value& request, const std::string& token, bool& bIsNotification);
 	picojson::value CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError);
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
-	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError);
+	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError, bool bAuto = false);
+	bool PlanToRun(const std::string& token);
+	void SetAutoRun(const std::string& token, bool bOn, bool bTurnEnded);
+	bool AutoRunning();
 	picojson::value RunOnGameThread(const std::string& token, const std::string& tool, const picojson::object& args, std::string& error);
 	std::string ViewGateRefusal(PlayerTypes ePlayer, const std::string& tool);
 	bool SessionWakes(const std::string& token, int iDiploSeqAtStart, int iNudgeSeqAtStart);
@@ -659,6 +666,8 @@ void McpBridge::Impl::UpdateSessions()
 		if(s.info.seat >= 0 && !s.Idle(now) && !McpOnScreenTeam((PlayerTypes)s.info.seat)) ++iHidden;
 		PlayerTypes ePlayer = McpPlayerOf(s.info);
 		s.myTurn = ePlayer != NO_PLAYER && McpIsPlayerTurn(GET_PLAYER(ePlayer));
+		s.planDue = ePlayer != NO_PLAYER && McpPlanIsDue(&GET_PLAYER(ePlayer));
+		s.roundToPlan = ePlayer != NO_PLAYER && McpRoundAwaitsPlan(&GET_PLAYER(ePlayer));
 		std::map<int, std::vector<std::string> >::const_iterator c = chat.find((int)ePlayer);
 		std::map<int, std::vector<std::string> >::const_iterator m = csMessages.find((int)ePlayer);
 		s.chatWaiting = (c != chat.end() && !c->second.empty()) || (m != csMessages.end() && !m->second.empty());
@@ -925,14 +934,16 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 		return false;
 	}
 
-	if(pJob->tool == MCP_JOB_PLAN_TAKE)
+	if(pJob->tool == MCP_JOB_PLAN_TAKE || pJob->tool == MCP_JOB_PLAN_AUTO)
 	{
-		std::string why = ViewGateRefusal(McpPlayerOf(McpBridge::Get().Current()), MCP_TOOL_RUN_PLAN);
+		// A plan that runs by itself was made from this round's turn view, and nothing that matters has changed since.
+		bool bAuto = pJob->tool == MCP_JOB_PLAN_AUTO;
+		std::string why = bAuto ? std::string() : ViewGateRefusal(McpPlayerOf(McpBridge::Get().Current()), MCP_TOOL_RUN_PLAN);
 		if(!why.empty()) { pJob->error = why; return false; }
-		McpCrashSetContext(MCP_JOB_PLAN_TAKE);
+		McpCrashSetContext(pJob->tool.c_str());
 		try
 		{
-			pJob->result = McpTakePlan(pJob->args, pJob->error);
+			pJob->result = McpTakePlan(pJob->args, pJob->error, bAuto);
 		}
 		catch(...)
 		{
@@ -960,7 +971,7 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	const char* szCategory = bLogged ? McpLogCategory(*pTool, pJob->args) : "";
 	McpSession before = McpBridge::Get().Current();
 	PlayerTypes ePlayerBefore = McpPlayerOf(before);
-	std::string viewFirst = ViewGateRefusal(ePlayerBefore, pJob->tool);
+	std::string viewFirst = AutoRunning() ? std::string() : ViewGateRefusal(ePlayerBefore, pJob->tool);
 	if(!viewFirst.empty()) { pJob->error = viewFirst; return false; }
 	if(ePlayerBefore >= MAX_MAJOR_CIVS)
 	{
@@ -1207,8 +1218,9 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		    "your provider (Claude, ChatGPT, Gemini...), model (Opus, Fable, GPT...) and version (5.5...); actions are refused until you do, "
 		    "and you must do it again after every reconnect. Then call wait_for_my_turn until it is your turn, "
 		    "use the query tools, act, write your reasoning with log, and finish with end_turn and a short summary of what you did. "
-		    "Once your turn is over, send the next one with plan_turn while the others play: when it comes, wait_for_my_turn shows the "
-		    "plan with the briefing and what changed since you made it, and run_plan carries out what you keep in one call. "
+		    "A civilization plans its turn before the turn: when wait_for_my_turn says the round has opened, open turn_view and send the "
+		    "whole turn with plan_turn while the players before you play. When your turn opens the plan runs and ends the turn by itself, "
+		    "unless something that matters changed; then the turn comes to you, turn_view shows what changed, and run_plan carries out what you keep in one call. "
 		    "Your memory of Civilization V's rules can be wrong, and mods change them. The other tools already show what "
 		    "you can build or research now; when a longer plan depends on a rule you are not sure of, such as what a far "
 		    "tech needs or what a unit upgrades into, check it with lookup instead of guessing. "
@@ -1330,8 +1342,48 @@ bool McpBridge::Impl::SessionWakes(const std::string& token, int iDiploSeqAtStar
 	bool bMyTurn = false, bChatWaiting = false;
 	int iDiploSeq = 0, iSeat = MCP_SEAT_SCREEN;
 	if(!Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat)) return true;
-	return bMyTurn || iDiploSeq != iDiploSeqAtStart || bChatWaiting || iSeat == MCP_SEAT_LOST || iSeat == MCP_SEAT_UNDECIDED
-		|| NudgeSeq(token) != iNudgeSeqAtStart;
+	if(bMyTurn || iDiploSeq != iDiploSeqAtStart || bChatWaiting || iSeat == MCP_SEAT_LOST || iSeat == MCP_SEAT_UNDECIDED
+		|| NudgeSeq(token) != iNudgeSeqAtStart) return true;
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::const_iterator it = sessions.find(token);
+	bool bRoundToPlan = it != sessions.end() && it->second.roundToPlan;
+	LeaveCriticalSection(&lock);
+	return bRoundToPlan;
+}
+
+// The session's turn is open and its seat has a plan for it: its wait runs the plan.
+bool McpBridge::Impl::PlanToRun(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::const_iterator it = sessions.find(token);
+	bool b = it != sessions.end() && it->second.myTurn && it->second.planDue;
+	LeaveCriticalSection(&lock);
+	return b;
+}
+
+// Around a plan the session's wait runs. After it, the flags the next tick would correct are cleared here, so the
+// wait does not act on them first: the plan is used up, and with bTurnEnded the turn is over.
+void McpBridge::Impl::SetAutoRun(const std::string& token, bool bOn, bool bTurnEnded)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::iterator it = sessions.find(token);
+	if(it != sessions.end())
+	{
+		it->second.autoRun = bOn;
+		if(!bOn) it->second.planDue = false;
+		if(!bOn && bTurnEnded) it->second.myTurn = false;
+	}
+	LeaveCriticalSection(&lock);
+}
+
+// Game thread, inside a job: the job's session is running its plan from its wait.
+bool McpBridge::Impl::AutoRunning()
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::const_iterator it = sessions.find(currentToken);
+	bool b = it != sessions.end() && it->second.autoRun;
+	LeaveCriticalSection(&lock);
+	return b;
 }
 
 int McpBridge::Impl::NudgeSeq(const std::string& token)
@@ -1414,7 +1466,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	}
 
 	int iNudgeAtStart = 0;
-	bool bPlanFirst = false;
+	bool bPlanFirst = false, bHeld = false;
+	picojson::value ranByItself, heldPlan;
 	if(pTool->waitsForTurn)
 	{
 		double timeout = MCP_WAIT_DEFAULT_SECONDS;
@@ -1431,8 +1484,22 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		// A seat that owes a plan for its next turn is asked for it before it waits.
 		bPlanFirst = McpTakePlanReminder(iSeat, bMyTurn);
 		bool bClientGone = false;
-		while(!bPlanFirst && !shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
+		while(!bPlanFirst && !shuttingDown && GetTickCount() - start < (DWORD)(timeout * 1000.0))
 		{
+			// Round-start planning: the seat's turn has opened with its plan in. The plan runs here, as the seat's own
+			// run_plan would; when it ends the turn the wait goes on to the next round, otherwise the turn is the seat's.
+			if(GameRunning() && PlanToRun(token))
+			{
+				bool bErr = false;
+				picojson::value r = RunPlan(token, picojson::object(), bErr, true);
+				bool bIdle = !bErr && r.is<picojson::object>() && r.get<picojson::object>().count("idle");
+				bool bEnded = !bErr && r.is<picojson::object>() && r.get<picojson::object>().count("turn_ended")
+					&& r.get<picojson::object>()["turn_ended"].is<bool>() && r.get<picojson::object>()["turn_ended"].get<bool>();
+				if(bEnded) ranByItself = r;
+				else if(!bIdle) { heldPlan = r; bHeld = true; break; }
+				if(bEnded || bIdle) { Sleep(250); KeepAlive(token); continue; }
+			}
+			if(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) break;
 			Sleep(250);
 			// A client that went away stops being kept alive, so its seat frees as any idle session's does.
 			if(McpHttpClientGone()) { bClientGone = true; break; }
@@ -1457,6 +1524,18 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 	if(bPlanFirst && result.is<picojson::object>())
 		result.get<picojson::object>()[MCP_DO_NOW] = picojson::value(std::string("call plan_turn. You have no plan for your next turn; "
 			"send it while the others play, then call wait_for_my_turn again."));
+	if(result.is<picojson::object>() && ranByItself.is<picojson::object>())
+		result.get<picojson::object>()["your_last_turn_ran_by_itself"] = ranByItself.get<picojson::object>()["ran"];
+	if(bHeld && result.is<picojson::object>())
+	{
+		// Held before anything ran ({held: why}, the plan kept), or stopped part-way (run_plan's own answer, the plan used up).
+		picojson::object& o = result.get<picojson::object>();
+		std::string why = "an order failed or the game did not end the turn (see your_plan_ran)";
+		if(heldPlan.is<picojson::object>() && heldPlan.get<picojson::object>().count("held")) why = heldPlan.get<picojson::object>()["held"].to_str();
+		else if(heldPlan.is<picojson::object>()) o["your_plan_ran"] = heldPlan.get<picojson::object>()["ran"];
+		else why = heldPlan.to_str();
+		o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan did not finish it: " + why + ".");
+	}
 	return result;
 }
 
@@ -1522,16 +1601,18 @@ namespace
 
 // run_plan: the plan is taken on the game thread, then each order goes through CallTool, exactly as the model's own call
 // would, with its checks, its line in the in-game log and its retries. end_turn runs only if nothing before it failed.
-picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojson::object& args, bool& bIsError)
+picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojson::object& args, bool& bIsError, bool bAuto)
 {
 	std::string error;
-	picojson::value taken = RunOnGameThread(token, MCP_JOB_PLAN_TAKE, args, error);
+	picojson::value taken = RunOnGameThread(token, bAuto ? MCP_JOB_PLAN_AUTO : MCP_JOB_PLAN_TAKE, args, error);
 	if(!error.empty() || !taken.is<picojson::object>())
 	{
 		bIsError = true;
 		return picojson::value(error.empty() ? std::string("the plan could not be read") : error);
 	}
 	picojson::object& t = taken.get<picojson::object>();
+	if(t.count("held") || t.count("idle")) return taken;
+	if(bAuto) SetAutoRun(token, true, false);
 	picojson::array results;
 	picojson::object planning;
 	bool bFailed = false, bEnded = false;
@@ -1584,11 +1665,12 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 		journal["turn_ended"] = picojson::value(bEnded);
 		McpPlanJournalAppend(picojson::value(journal).serialize());
 	}
+	if(bAuto) SetAutoRun(token, false, bEnded);
 	picojson::object out;
 	out["ran"] = picojson::value(results);
 	out["turn_ended"] = picojson::value(bEnded);
 	for(picojson::object::const_iterator pi = planning.begin(); pi != planning.end(); ++pi) out[pi->first] = pi->second;
-	out["next"] = picojson::value(std::string(bEnded ? "plan your next turn with plan_turn, then call wait_for_my_turn"
+	out["next"] = picojson::value(std::string(bEnded ? "call wait_for_my_turn"
 		: bFailed ? "some orders failed (see ran): deal with them, then end_turn"
 		: "the plan did not end the turn: finish it, then end_turn"));
 	if(bJournal && t["why_missing"].is<bool>() && t["why_missing"].get<bool>())

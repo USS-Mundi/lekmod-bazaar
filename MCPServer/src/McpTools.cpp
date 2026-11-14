@@ -622,47 +622,44 @@ MCP_TOOL(ToolResearchOptions)
 
 // The route a move takes, as the player gives it: tiles in order, each next to the one before, the first next to the
 // unit. A destination alone is not taken: the route is the player's to choose.
-namespace
+bool McpTool::ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err)
 {
-	bool ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err)
+	JObj::const_iterator it = args.find("path");
+	if(it == args.end() || !it->second.is<JArr>() || it->second.get<JArr>().empty())
 	{
-		JObj::const_iterator it = args.find("path");
-		if(it == args.end() || !it->second.is<JArr>() || it->second.get<JArr>().empty())
+		err = "path must list the tiles to step through, in order, each next to the one before and the first next to the unit, ending at the destination: [[x,y],[x,y],...]";
+		return false;
+	}
+	const JArr& list = it->second.get<JArr>();
+	CvMap& map = GC.getMap();
+	int px = u->getX(), py = u->getY();
+	for(size_t i = 0; i < list.size(); ++i)
+	{
+		int x = -1, y = -1;
+		if(list[i].is<JArr>() && list[i].get<JArr>().size() == 2 && list[i].get<JArr>()[0].is<double>() && list[i].get<JArr>()[1].is<double>())
 		{
-			err = "path must list the tiles to step through, in order, each next to the one before and the first next to the unit, ending at the destination: [[x,y],[x,y],...]";
+			x = (int)list[i].get<JArr>()[0].get<double>();
+			y = (int)list[i].get<JArr>()[1].get<double>();
+		}
+		else if(list[i].is<JObj>())
+		{
+			x = ArgInt(list[i].get<JObj>(), "x", -1);
+			y = ArgInt(list[i].get<JObj>(), "y", -1);
+		}
+		std::string at = McpFormat("path step %d", (int)i + 1);
+		if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = at + " is not a tile on the map; give [x,y]"; return false; }
+		if(plotDistance(px, py, x, y) != 1)
+		{
+			err = at + McpFormat(" (%d,%d) is not next to (%d,%d); each step must be one of the six tiles around the one before", x, y, px, py);
 			return false;
 		}
-		const JArr& list = it->second.get<JArr>();
-		CvMap& map = GC.getMap();
-		int px = u->getX(), py = u->getY();
-		for(size_t i = 0; i < list.size(); ++i)
-		{
-			int x = -1, y = -1;
-			if(list[i].is<JArr>() && list[i].get<JArr>().size() == 2 && list[i].get<JArr>()[0].is<double>() && list[i].get<JArr>()[1].is<double>())
-			{
-				x = (int)list[i].get<JArr>()[0].get<double>();
-				y = (int)list[i].get<JArr>()[1].get<double>();
-			}
-			else if(list[i].is<JObj>())
-			{
-				x = ArgInt(list[i].get<JObj>(), "x", -1);
-				y = ArgInt(list[i].get<JObj>(), "y", -1);
-			}
-			std::string at = McpFormat("path step %d", (int)i + 1);
-			if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = at + " is not a tile on the map; give [x,y]"; return false; }
-			if(plotDistance(px, py, x, y) != 1)
-			{
-				err = at + McpFormat(" (%d,%d) is not next to (%d,%d); each step must be one of the six tiles around the one before", x, y, px, py);
-				return false;
-			}
-			CvPlot* p = map.plot(x, y);
-			if(!p->isRevealed(u->getTeam())) { err = at + McpFormat(" (%d,%d) is unexplored", x, y); return false; }
-			if(p->isMountain()) { err = at + McpFormat(" (%d,%d) is a mountain: impassable", x, y); return false; }
-			steps.push_back(p);
-			px = x; py = y;
-		}
-		return true;
+		CvPlot* p = map.plot(x, y);
+		if(!p->isRevealed(u->getTeam())) { err = at + McpFormat(" (%d,%d) is unexplored", x, y); return false; }
+		if(p->isMountain()) { err = at + McpFormat(" (%d,%d) is a mountain: impassable", x, y); return false; }
+		steps.push_back(p);
+		px = x; py = y;
 	}
+	return true;
 }
 
 MCP_TOOL(ToolMoveUnit)
@@ -996,9 +993,12 @@ namespace
 		JObj o;
 		o["ok"] = J(true);
 		o["ended_turn"] = J(iTurn);
-		o["next"] = J("plan your next turn with plan_turn while the others play, then call wait_for_my_turn; the turn comes back to you early if a unit finishes a queued move with moves to spare");
+		// A major seat plans when the next round opens, from the view it opens then; a city-state plans now.
+		bool bMajor = (int)me->GetID() < MAX_MAJOR_CIVS;
+		o["next"] = J(bMajor ? "call wait_for_my_turn: it returns when the next round opens, and you plan your turn then; the turn comes back to you early if a unit finishes a queued move with moves to spare"
+			: "plan your next turn with plan_turn while the others play, then call wait_for_my_turn; the turn comes back to you early if a unit finishes a queued move with moves to spare");
 		McpNoteTurnEnded(me);
-		McpAddPlanningView(me, o);
+		if(!bMajor) McpAddPlanningView(me, o);
 		return JVal(o);
 	}
 }
@@ -1156,10 +1156,11 @@ MCP_TOOL(ToolTakeSeat)
 	o["ok"] = J(true);
 	o["playing"] = J(CivName(e));
 	// Sitting down between turns, the seat has no plan for its next one yet: its first wait asks for it.
-	bool bTurnNow = McpIsPlayerTurn(GET_PLAYER(e));
-	if(!bTurnNow) McpOwePlan(e);
+	bool bTurnNow = McpIsPlayerTurn(GET_PLAYER(e)), bCityState = GET_PLAYER(e).isMinorCiv();
+	if(!bTurnNow && bCityState) McpOwePlan(e);
 	const char* plan = bTurnNow ? "it is your turn: call wait_for_my_turn for the briefing and play it; "
-		: "you have no plan yet: send your next turn with plan_turn now, then call wait_for_my_turn; ";
+		: bCityState ? "you have no plan yet: send your next turn with plan_turn now, then call wait_for_my_turn; "
+		: "call wait_for_my_turn: it tells you when to plan your turn; ";
 	if(GET_PLAYER(e).isMinorCiv())
 	{
 		o["city_state"] = McpCsSeatView(e);
@@ -1290,16 +1291,16 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view.",
+		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
 		{ "turn_view",
-		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan.",
+		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan. A civilization also opens it once its round has opened, before its turn, to plan the turn from.",
 		  SCHEMA_EMPTY, ToolTurnView, LOG_NONE, false },
 		{ "city_detail",
 		  "One of your cities in full: its buildings, health and defense, its clocks (build, growth, next border tile) with the price to buy its build, its queue, and the tiles it works and could work.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"}},\"required\":[\"city_id\"]}", ToolCityDetail, LOG_NONE, false },
 		{ MCP_TOOL_PLAN_TURN,
-		  "Revise your plan and send your next turn, any time after you end a turn, while the others play. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations (each player: what you intend toward them and what you want from them). Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. aim: what this turn moves in your plan.",
+		  "Revise your plan and send your turn's orders. A civilization sends them once its round has opened, from that round's turn_view: every order for the turn, in order, and a complete plan runs by itself when the turn opens. A city-state sends its next turn any time after it ends a turn. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations (each player: what you intend toward them and what you want from them). Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. aim: what this turn moves in your plan.",
 		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"position\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"next_turns\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":\"string\"}}},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
 		{ MCP_TOOL_RUN_PLAN,
 		  "Carry out your planned orders for this turn in one call, after turn_view: unread game messages are acknowledged first, then each order runs in turn as if you had called it, and end_turn runs only if nothing before it failed. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
