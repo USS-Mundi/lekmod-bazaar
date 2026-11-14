@@ -52,6 +52,19 @@ struct McpView
 // limit lines, the rest are counted in one last line.
 std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& now, size_t limit);
 
+// The changes among those that hold a planned turn for the seat to decide: wars, losses, damage, and an enemy unit new
+// or moved anywhere in sight. Another civilization's units at peace and drifting gold or happiness do not; if one of
+// those stops an order, the order fails and that holds the turn.
+std::vector<std::string> McpWakingChanges(const McpView& planned, const McpView& now, size_t limit);
+
+// A seat's round is open, its turn there to be planned from the state it will open with, once the game turn has
+// passed the turn the seat last ended (-1 if none since the game loaded): a new game turn starts only after the
+// city-states and barbarians have moved.
+bool McpRoundOpen(int gameTurn, int lastEndedTurn);
+
+// Why a planned turn is held for the seat instead of run when the turn opens, or "" to run it.
+std::string McpAutoRunHold(bool bSwitchedOff, bool bPlannedOnThisRoundsView, const std::vector<std::string>& waking, int diploRequests);
+
 // One order of a plan: a tool and its arguments as JSON text.
 struct McpPlannedOrder
 {

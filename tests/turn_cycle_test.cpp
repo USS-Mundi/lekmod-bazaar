@@ -552,6 +552,58 @@ namespace
 		CHECK(McpPlanMadeOnTurn(13, false, -1) == 13);
 	}
 
+	void TestARoundOpensOnceTheGameTurnPassesTheSeatsLastEnd()
+	{
+		// Ended turn 12 and the others still play turn 12: nothing to plan from yet.
+		CHECK(!McpRoundOpen(12, 12));
+		// The barbarians have moved and the game is on turn 13.
+		CHECK(McpRoundOpen(13, 12));
+		// No turn ended since the game loaded.
+		CHECK(McpRoundOpen(13, -1));
+	}
+
+	void TestPeacefulNeighboursAndDriftDoNotWake()
+	{
+		McpView now = View();
+		now.theirs[0].x = 39; now.theirs[0].nearDist = 1;
+		now.gold = 70; now.happiness = -2;
+		CHECK(McpViewChanges(View(), now, 25).size() == 3);
+		CHECK(McpWakingChanges(View(), now, 25).empty());
+	}
+
+	void TestThreatsWake()
+	{
+		McpView before = View(), now = View();
+		before.atWarWith.push_back("Rome");
+		now.atWarWith.push_back("Turkey");
+		now.mine.erase(now.mine.begin());
+		now.mine[0].hp = 70;
+		now.cities[0].hp = 150;
+		now.theirs.push_back(Unit(60, "Barbarians", "Brute", 50, 10, 100, true, 18, "Edinburgh"));
+		std::vector<std::string> c = McpWakingChanges(before, now, 25);
+		CHECK(Has(c, "now at war with Turkey"));
+		CHECK(Has(c, "now at peace with Rome"));
+		CHECK(Has(c, "lost: your Worker (unit 10), last at (33,30)"));
+		CHECK(Has(c, "your Archer at (34,30) took 30 damage (now 70)"));
+		CHECK(Has(c, "Edinburgh took 50 damage (now 150 of 200)"));
+		CHECK(Has(c, "new in sight: enemy Barbarians Brute at (50,10), 18 tiles from Edinburgh"));
+		CHECK(c.size() == 6);
+	}
+
+	void TestAPlannedTurnRunsUnlessSomethingHoldsIt()
+	{
+		std::vector<std::string> none, seen;
+		seen.push_back("your Archer at (34,30) took 30 damage (now 70)");
+		seen.push_back("now at war with Turkey");
+		CHECK(McpAutoRunHold(false, true, none, 0).empty());
+		CHECK(McpAutoRunHold(true, true, none, 0) == "plans are set to wait for you");
+		CHECK(McpAutoRunHold(false, false, none, 0) == "the plan was not made from this round's turn view");
+		CHECK(McpAutoRunHold(false, true, none, 1) == "another leader is waiting for your answer");
+		CHECK(McpAutoRunHold(false, true, seen, 0) == "since you planned: your Archer at (34,30) took 30 damage (now 70), and 1 more");
+		seen.resize(1);
+		CHECK(McpAutoRunHold(false, true, seen, 0) == "since you planned: your Archer at (34,30) took 30 damage (now 70)");
+	}
+
 	void TestOnePictureWhenTheCitiesFit()
 	{
 		// Two candidate centers, three cities: the second center has every city within reach 4.
@@ -709,6 +761,10 @@ int main()
 	TestAClockIsMarkedOnlyWhenItsLandingMoves();
 	TestTurnsToAfford();
 	TestPlanCountsFromTheTurnTheSeatEnded();
+	TestARoundOpensOnceTheGameTurnPassesTheSeatsLastEnd();
+	TestPeacefulNeighboursAndDriftDoNotWake();
+	TestThreatsWake();
+	TestAPlannedTurnRunsUnlessSomethingHoldsIt();
 	TestOnePictureWhenTheCitiesFit();
 	TestSpreadCitiesTakeMorePicturesUpToTheLimit();
 	TestTiesGoToTheTighterPicture();

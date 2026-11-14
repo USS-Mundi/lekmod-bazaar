@@ -58,8 +58,11 @@ namespace
 	}
 }
 
-std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& now, size_t limit)
+namespace
 {
+	// The changes between two views; bWakingOnly leaves out what no other player's threat explains.
+	std::vector<std::string> Changes(const McpView& planned, const McpView& now, size_t limit, bool bWakingOnly)
+	{
 	std::vector<std::string> out;
 	for(size_t i = 0; i < now.atWarWith.size(); ++i)
 		if(!Contains(planned.atWarWith, now.atWarWith[i])) out.push_back("now at war with " + now.atWarWith[i]);
@@ -89,7 +92,7 @@ std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& n
 	for(size_t i = 0; i < now.theirs.size(); ++i)
 	{
 		const McpSeenUnit& u = now.theirs[i];
-		if(!u.enemy && (u.cityState || u.nearDist < 0 || u.nearDist > NEAR)) continue;
+		if(!u.enemy && (bWakingOnly || u.cityState || u.nearDist < 0 || u.nearDist > NEAR)) continue;
 		const McpSeenUnit* before = FindUnit(planned.theirs, u.id);
 		Sighting s;
 		s.dist = u.nearDist;
@@ -103,9 +106,9 @@ std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& n
 	for(size_t i = 0; i < seen.size(); ++i) out.push_back(seen[i].line);
 
 	int goldMoved = now.gold - planned.gold, happyMoved = now.happiness - planned.happiness;
-	if((now.gold == 0 && planned.gold > 0) || goldMoved >= GOLD_SHOWN || -goldMoved >= GOLD_SHOWN)
+	if(!bWakingOnly && ((now.gold == 0 && planned.gold > 0) || goldMoved >= GOLD_SHOWN || -goldMoved >= GOLD_SHOWN))
 		out.push_back("gold " + Num(now.gold) + " (was " + Num(planned.gold) + ")");
-	if((now.happiness < 0) != (planned.happiness < 0) || happyMoved >= HAPPINESS_SHOWN || -happyMoved >= HAPPINESS_SHOWN)
+	if(!bWakingOnly && ((now.happiness < 0) != (planned.happiness < 0) || happyMoved >= HAPPINESS_SHOWN || -happyMoved >= HAPPINESS_SHOWN))
 		out.push_back("happiness " + Num(now.happiness) + " (was " + Num(planned.happiness) + ")");
 
 	if(out.size() > limit)
@@ -115,6 +118,22 @@ std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& n
 		out.push_back("...and " + Num((int)more) + " more");
 	}
 	return out;
+	}
+}
+
+std::vector<std::string> McpViewChanges(const McpView& planned, const McpView& now, size_t limit) { return Changes(planned, now, limit, false); }
+
+std::vector<std::string> McpWakingChanges(const McpView& planned, const McpView& now, size_t limit) { return Changes(planned, now, limit, true); }
+
+bool McpRoundOpen(int gameTurn, int lastEndedTurn) { return lastEndedTurn != gameTurn; }
+
+std::string McpAutoRunHold(bool bSwitchedOff, bool bPlannedOnThisRoundsView, const std::vector<std::string>& waking, int diploRequests)
+{
+	if(bSwitchedOff) return "plans are set to wait for you";
+	if(!bPlannedOnThisRoundsView) return "the plan was not made from this round's turn view";
+	if(diploRequests > 0) return "another leader is waiting for your answer";
+	if(waking.empty()) return "";
+	return "since you planned: " + waking[0] + (waking.size() > 1 ? ", and " + Num((int)waking.size() - 1) + " more" : std::string());
 }
 
 std::vector<McpPlannedOrder> McpOrdersToRun(const std::vector<McpPlannedOrder>& plan, const std::vector<int>& drop,
