@@ -800,6 +800,7 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 			journal["new"] = J(added);
 			journal["changed"] = J(changed);
 			journal["gone"] = J(gone);
+			journal["phase"] = J(!bMine ? "round" : bSinceRoundView ? "turn, against the round's view" : "turn");
 			McpPlanJournalAppend(JVal(journal).serialize());
 		}
 	}
@@ -845,8 +846,12 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 		}
 		SeatPlan& planned = it->second;
 		int iTurn = GC.getGame().getGameTurn();
-		std::string hold = McpAutoRunHold(McpLogsFlag("MCPServer-auto-run.off"), planned.viewTurn == iTurn,
-			McpWakingChanges(planned.view, Capture(me), MCP_CHANGES_SHOWN), McpCountDiploRequestsFor(me->GetID()));
+		// With the switch off every turn is the seat's to decide, and the journal keeps what the rule would have done.
+		bool bOff = McpLogsFlag("MCPServer-auto-run.off"), bThisRound = planned.viewTurn == iTurn;
+		std::vector<std::string> waking = McpWakingChanges(planned.view, Capture(me), MCP_CHANGES_SHOWN);
+		int iRequests = McpCountDiploRequestsFor(me->GetID());
+		std::string rule = McpAutoRunHold(false, bThisRound, waking, iRequests);
+		std::string hold = bOff ? McpAutoRunHold(true, bThisRound, waking, iRequests) : rule;
 		if(!hold.empty())
 		{
 			if(planned.held.empty() && McpPlanJournalOn())
@@ -857,6 +862,8 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 				journal["turn"] = J(iTurn);
 				journal["civ"] = J(me->getCivilizationShortDescription());
 				journal["why"] = J(hold);
+				journal["rule_would_run"] = J(rule.empty());
+				if(!rule.empty()) journal["rule_would_hold"] = J(rule);
 				McpPlanJournalAppend(JVal(journal).serialize());
 			}
 			planned.held = hold;

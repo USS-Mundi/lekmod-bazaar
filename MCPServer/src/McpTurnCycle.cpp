@@ -131,7 +131,7 @@ bool McpRoundOpen(int gameTurn, int lastEndedTurn) { return lastEndedTurn != gam
 
 std::string McpAutoRunHold(bool bSwitchedOff, bool bPlannedOnThisRoundsView, const std::vector<std::string>& waking, int diploRequests)
 {
-	if(bSwitchedOff) return "plans are set to wait for you";
+	if(bSwitchedOff) return "you check it against what changed, then run_plan";
 	if(!bPlannedOnThisRoundsView) return "the plan was not made from this round's turn view";
 	if(diploRequests > 0) return "another leader is waiting for your answer";
 	if(waking.empty()) return "";

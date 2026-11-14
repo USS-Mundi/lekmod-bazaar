@@ -608,7 +608,7 @@ namespace
 		seen.push_back("your Archer at (34,30) took 30 damage (now 70)");
 		seen.push_back("now at war with Turkey");
 		CHECK(McpAutoRunHold(false, true, none, 0).empty());
-		CHECK(McpAutoRunHold(true, true, none, 0) == "plans are set to wait for you");
+		CHECK(McpAutoRunHold(true, true, none, 0) == "you check it against what changed, then run_plan");
 		CHECK(McpAutoRunHold(false, false, none, 0) == "the plan was not made from this round's turn view");
 		CHECK(McpAutoRunHold(false, true, none, 1) == "another leader is waiting for your answer");
 		CHECK(McpAutoRunHold(false, true, seen, 0) == "since you planned: your Archer at (34,30) took 30 damage (now 70), and 1 more");

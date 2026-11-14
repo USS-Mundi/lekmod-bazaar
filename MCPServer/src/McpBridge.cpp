@@ -1534,7 +1534,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		if(heldPlan.is<picojson::object>() && heldPlan.get<picojson::object>().count("held")) why = heldPlan.get<picojson::object>()["held"].to_str();
 		else if(heldPlan.is<picojson::object>()) o["your_plan_ran"] = heldPlan.get<picojson::object>()["ran"];
 		else why = heldPlan.to_str();
-		o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan did not finish it: " + why + ".");
+		o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan is waiting on you: " + why + ".");
 	}
 	return result;
 }

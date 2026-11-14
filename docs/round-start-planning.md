@@ -63,7 +63,10 @@ waiting for the next round. The model is called on the seat's own turn only when
    From there the turn is played as today (`run_plan` with `drop` and `add`, or single orders).
 6. **No plan in time.** A turn that opens before the seat has planned is played as today. A plan sent after the turn
    opened runs when the seat next enters the wait.
-7. **Off switch.** `Logs/MCPServer-auto-run.off` holds every turn (planning still happens at round start).
+7. **Off switch.** `Logs/MCPServer-auto-run.off` holds every turn (planning still happens at round start). It is
+   on for the first game: the model decides every turn, and the journal records what rule 4 would have done
+   (`held` events: `rule_would_run`) beside what the view showed against the round's view (`turn_view` events) and
+   what the model did (`run_plan` entries). Plans run by themselves only after that count shows nothing lost.
 
 ## Churn from players who move in between
 
