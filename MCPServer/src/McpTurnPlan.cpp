@@ -2,6 +2,7 @@
 #include "McpTurnPlan.h"
 #include "McpTurnCycle.h"
 #include "McpPlanJournal.h"
+#include "McpChronicleGame.h"
 #include "McpToolSupport.h"
 #include "McpToolHandlers.h"
 #include "McpTools.h"
@@ -355,6 +356,76 @@ namespace
 		return (eTech != NO_TECH && me->GetPlayerTechs()->GetResearchTurnsLeft(eTech, true) <= 1) ? eTech : NO_TECH;
 	}
 
+	// Orders that can never run as written, whatever happens before the turn opens: a unit or city of the seat's that
+	// does not exist, a unit's first move with a path that cannot be walked (McpPathFaultRefuses), or an order for a
+	// new unit (from_city) from a city that finishes none as the turn opens and buys none earlier in the plan. A move
+	// after another order for the same unit is not judged: that order may move it. An order for a new unit is given the
+	// unit type it expects (_unit_type), so the turn finds that unit.
+	std::vector<std::string> OrdersThatCannotRun(CvPlayer* me, std::vector<McpPlannedOrder>& orders)
+	{
+		std::vector<std::string> out;
+		std::set<int> named;
+		std::map<int, int> bought; // city id -> unit type a buy earlier in the plan makes there
+		for(size_t i = 0; i < orders.size(); ++i)
+		{
+			JVal v;
+			picojson::parse(v, orders[i].args);
+			if(!v.is<JObj>()) continue;
+			JObj& a = v.get<JObj>();
+			const std::string& tool = orders[i].tool;
+			std::string head = McpFormat("order %d (%s): ", (int)i + 1, tool.c_str());
+			int id = ArgInt(a, "unit_id", -1);
+			if((tool == "buy" || tool == "set_production" || tool == "city_queue") && !me->getCity(ArgInt(a, "city_id", -1)))
+				out.push_back(head + "no city of yours has that city_id");
+			if(tool == "buy" && me->getCity(ArgInt(a, "city_id", -1)))
+			{
+				CityItem item = FindCityItem(me, ArgStr(a, "item"));
+				if(item.eUnit != NO_UNIT) bought[ArgInt(a, "city_id", -1)] = (int)item.eUnit;
+			}
+			if(id < 0 && a.count("from_city"))
+			{
+				CvCity* c = me->getCity(ArgInt(a, "from_city", -1));
+				if(!c) { out.push_back(head + "no city of yours has that from_city id"); continue; }
+				const OrderData* od = c->getOrderQueueLength() > 0 ? c->getOrderFromQueue(0) : NULL;
+				int type = -1;
+				if(od && od->eOrderType == ORDER_TRAIN && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1) type = od->iData1;
+				else if(bought.count(c->GetID())) type = bought[c->GetID()];
+				if(type < 0)
+				{
+					out.push_back(head + c->getName().c_str() + " finishes no unit as the turn opens"
+						+ (od ? std::string(" (it builds ") + c->getProductionName() + McpFormat(", %dt)", c->getProductionTurnsLeft()) : std::string(""))
+						+ ", and no buy before this order makes one there");
+					continue;
+				}
+				a["_unit_type"] = J(type);
+				orders[i].args = v.serialize();
+				if(tool == "move_unit")
+				{
+					std::vector<CvPlot*> steps;
+					std::string why;
+					int fault = MCP_PATH_OK;
+					if(!ReadPathFrom(a, c->getX(), c->getY(), me->getTeam(), steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault))
+						out.push_back(head + why + " (the new unit starts in " + c->getName().c_str() + ")");
+				}
+				continue;
+			}
+			if(tool == "move_unit")
+			{
+				CvUnit* u = me->getUnit(id);
+				if(!u) out.push_back(head + "no unit of yours has that unit_id");
+				else if(!named.count(id))
+				{
+					std::vector<CvPlot*> steps;
+					std::string why;
+					int fault = MCP_PATH_OK;
+					if(!ReadPath(a, u, steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault)) out.push_back(head + why);
+				}
+			}
+			if(id >= 0) named.insert(id);
+		}
+		return out;
+	}
+
 	// Orders that would not work when the turn opens, as far as the game can tell now: purchases against the gold the
 	// turn will open with (and what earlier purchases in the plan spent), builds the city cannot take unless the tech
 	// finishing first unlocks them, and moves with no way there. Warnings only; the plan is kept either way.
@@ -373,7 +444,7 @@ namespace
 			const JObj& a = v.get<JObj>();
 			const std::string& tool = orders[i].tool;
 			std::string head = McpFormat("order %d (%s): ", (int)i + 1, tool.c_str());
-			if(tool == "buy" || tool == "set_production")
+			if(tool == "buy" || tool == "set_production" || (tool == "city_queue" && a.count("item")))
 			{
 				CvCity* c = me->getCity(ArgInt(a, "city_id", -1));
 				if(!c) { out.push_back(head + "no city of yours has that city_id"); continue; }
@@ -404,7 +475,7 @@ namespace
 				}
 				have -= cost;
 			}
-			else if(tool == "move_unit")
+			else if(tool == "move_unit" && !(a.count("from_city") && !a.count("unit_id")))
 			{
 				int id = ArgInt(a, "unit_id", -1);
 				CvUnit* u = me->getUnit(id);
@@ -423,43 +494,72 @@ namespace
 		return out;
 	}
 
-	// What a plan leaves for the seat to decide when its turn opens, as far as the game can tell now: a unit ready
-	// with no order, a city with nothing to build or about to finish with nothing after, research not chosen. With the
-	// turn open (bTurnOpen), only what stops this turn from ending: what finishes next turn is the next plan's.
-	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders, bool bTurnOpen)
+	// What the plan's orders answer (McpPlanCovers): units by unit_id, new units by from_city, cities given production
+	// by set_production or city_queue, research by set_research.
+	McpPlanCovers Covers(const std::vector<McpPlannedOrder>& orders)
 	{
-		const size_t LIMIT = 12;
-		std::vector<std::string> out;
-		std::set<int> units, cities;
-		bool bResearch = false;
-		for(size_t i = 0; i < orders.size(); ++i) if(orders[i].tool == "set_research") bResearch = true;
+		McpPlanCovers c;
 		for(size_t i = 0; i < orders.size(); ++i)
 		{
+			const std::string& tool = orders[i].tool;
+			if(tool == "set_research") c.research = true;
 			JVal v;
 			picojson::parse(v, orders[i].args);
 			if(!v.is<JObj>()) continue;
-			int unit = ArgInt(v.get<JObj>(), "unit_id", -1), city = ArgInt(v.get<JObj>(), "city_id", -1);
-			if(unit >= 0) units.insert(unit);
-			if(city >= 0 && (orders[i].tool == "set_production" || orders[i].tool == "buy")) cities.insert(city);
+			const JObj& a = v.get<JObj>();
+			int unit = ArgInt(a, "unit_id", -1), city = ArgInt(a, "city_id", -1), from = ArgInt(a, "from_city", -1);
+			if(unit >= 0) c.units.insert(unit);
+			if(from >= 0) c.newUnits.insert(from);
+			if(city >= 0 && (tool == "set_production" || tool == "city_queue")) c.cities.insert(city);
 		}
+		return c;
+	}
+
+	// What the seat's turn opening brings, as the game can tell now (McpOpening).
+	McpOpening Opening(CvPlayer* me)
+	{
+		McpOpening o;
 		int iLoop;
 		for(CvUnit* u = me->firstUnit(&iLoop); u; u = me->nextUnit(&iLoop))
-			if(u->ReadyToMove() && !u->isDelayedDeath() && !units.count(u->GetID()))
-				out.push_back(McpFormat("%s %d at (%d,%d) has no order", u->getName().GetCString(), u->GetID(), u->getX(), u->getY()));
+			if(u->ReadyToMove() && !u->isDelayedDeath())
+				o.idle.push_back(std::make_pair(u->GetID(), McpFormat("%s %d at (%d,%d) has no order", u->getName().GetCString(), u->GetID(), u->getX(), u->getY())));
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
 		{
-			if(c->IsPuppet() || cities.count(c->GetID())) continue;
-			if(c->getOrderQueueLength() == 0) out.push_back(std::string(c->getName().c_str()) + " has nothing to build");
-			else if(!bTurnOpen && c->getOrderQueueLength() == 1 && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1)
-				out.push_back(std::string(c->getName().c_str()) + " finishes " + c->getProductionName() + " as the turn opens, with nothing queued after it");
+			if(c->IsPuppet()) continue;
+			McpOpeningCity city;
+			city.id = c->GetID();
+			city.name = c->getName().c_str();
+			city.nothing = c->getOrderQueueLength() == 0;
+			if(!city.nothing)
+			{
+				const OrderData* head = c->getOrderFromQueue(0);
+				city.process = c->isProductionProcess();
+				city.finishes = !city.process && c->getProductionTurnsLeft() <= 1;
+				city.unit = head && head->eOrderType == ORDER_TRAIN;
+				city.queuedAfter = c->getOrderQueueLength() > 1;
+				city.item = c->getProductionName();
+			}
+			o.cities.push_back(city);
 		}
-		if(!bResearch)
+		TechTypes eTech = me->GetPlayerTechs()->GetCurrentResearch();
+		o.researchNone = eTech == NO_TECH;
+		if(!o.researchNone)
 		{
-			TechTypes eTech = me->GetPlayerTechs()->GetCurrentResearch();
-			if(eTech == NO_TECH) out.push_back("research: nothing chosen");
-			else if(!bTurnOpen && TechDueNextTurn(me) != NO_TECH)
-				out.push_back(std::string("research: ") + GC.getTechInfo(eTech)->GetDescription() + " finishes as the turn opens; what comes after is not chosen");
+			o.research = GC.getTechInfo(eTech)->GetDescription();
+			o.researchFinishes = TechDueNextTurn(me) != NO_TECH;
+			int queued = 0;
+			for(const CLLNode<TechTypes>* n = me->headResearchQueueNode(); n; n = me->nextResearchQueueNode(n)) ++queued;
+			o.researchAfter = queued > 1;
 		}
+		return o;
+	}
+
+	// What a plan leaves for the seat to decide when its turn opens (McpOpeningOwed), at most 12 lines. With the turn
+	// open (bTurnOpen), only what stops this turn from ending.
+	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders, bool bTurnOpen)
+	{
+		const size_t LIMIT = 12;
+		std::vector<std::string> out = McpOpeningOwed(Opening(me), Covers(orders), bTurnOpen);
 		if(out.size() > LIMIT)
 		{
 			size_t more = out.size() - LIMIT;
@@ -513,24 +613,55 @@ MCP_TOOL(ToolPlanTurn)
 		err = "aim is required: what in your game plan this turn moves, or the course you are holding, until when, and what would end it";
 		return JVal();
 	}
+	// Before anything is kept: orders that can never run, and what the turn opening brings that the plan leaves
+	// unanswered (a civilization planning before its turn); the chronicle's own refusals join the same list below.
+	std::vector<std::string> refusals = OrdersThatCannotRun(me, plan.orders);
+	if(bMajor && !McpIsPlayerTurn(*me))
+	{
+		std::vector<std::string> owed = LeftOpen(me, plan.orders, false);
+		for(size_t i = 0; i < owed.size(); ++i) refusals.push_back("your turn opening: " + owed[i]);
+	}
 	int iTurn = GC.getGame().getGameTurn();
 	std::vector<std::string> warnings;
 	McpGamePlan& game = GamePlan(me);
 	bool bPlanChanged = false;
 	JObj::const_iterator pi = args.find("plan");
+	if(pi != args.end() && !pi->second.is<JObj>())
+	{
+		err = "plan must be an object of headings: position, direction, next_turns, cities, military, civilians, research, policy, relations";
+		return JVal();
+	}
+	// A seat with a chronicle owes it its entries, threads and chapters before the turn's orders are taken. Checked on a
+	// copy: it is kept once nothing else in this call can refuse.
+	bool bChronicle = bMajor && McpChronicleOn(me) && !McpWhoYouAre(me).empty();
+	McpChroniclePlan chronicle;
+	if(bChronicle && !McpChroniclePlanTurn(me, args, game.sections["direction"], chronicle))
+		for(size_t i = 0; i < chronicle.refusals.size(); ++i) refusals.push_back("your chronicle: " + chronicle.refusals[i]);
+	if(!refusals.empty())
+	{
+		err = "nothing was saved; the plan needs these first:";
+		for(size_t i = 0; i < refusals.size(); ++i) err += McpFormat("\n%d. ", (int)i + 1) + refusals[i];
+		return JVal();
+	}
+	std::map<std::string, std::string> changes;
 	if(pi != args.end())
 	{
-		if(!pi->second.is<JObj>()) { err = "plan must be an object of headings: position, direction, next_turns, cities, military, civilians, research, policy, relations"; return JVal(); }
-		std::map<std::string, std::string> changes;
 		const JObj& given = pi->second.get<JObj>();
 		for(JObj::const_iterator k = given.begin(); k != given.end(); ++k)
 		{
+			if(bChronicle && k->first == "relations" && k->second.is<JObj>()) continue;
 			if(!k->second.is<std::string>()) { err = "plan." + k->first + " must be text"; return JVal(); }
 			changes[k->first] = k->second.get<std::string>();
 		}
+	}
+	if(chronicle.relationsGiven) changes["relations"] = chronicle.relationsText;
+	if(chronicle.chapterClosed) changes["direction"] = chronicle.direction;
+	if(!changes.empty())
+	{
 		int before = game.turn;
 		size_t logBefore = game.log.size();
-		if(!McpGamePlanApply(game, changes, ArgStr(args, "why"), iTurn, err, warnings)) return JVal();
+		std::string why = ArgStr(args, "why");
+		if(!McpGamePlanApply(game, changes, why.empty() ? chronicle.why : why, iTurn, err, warnings)) return JVal();
 		bPlanChanged = game.log.size() != logBefore || game.turn != before;
 		if(bPlanChanged) SaveGamePlan(me, game);
 	}
@@ -542,6 +673,7 @@ MCP_TOOL(ToolPlanTurn)
 		game.targets = targets;
 		SaveGamePlan(me, game);
 	}
+	if(bChronicle) McpChronicleCommit(me);
 	if(pi == args.end() && game.turn < 0)
 		warnings.push_back("you have no game plan yet: give plan_turn a plan with at least direction (how you are optimizing your odds of winning from here)");
 	std::vector<std::string> checks = CheckOrders(me, plan.orders);
@@ -575,10 +707,14 @@ MCP_TOOL(ToolPlanTurn)
 	o["orders"] = J((int)plan.orders.size());
 	if(bReplaced) o["replaced"] = J("your earlier plan");
 	if(bPlanChanged) o["game_plan"] = J("saved: each turn view shows each part beside the state it is about");
+	if(chronicle.chapterClosed) o["chapter"] = J("closed and kept; a new chapter opens this turn, and its direction is your plan's direction now");
+	if(!chronicle.say.empty()) o["said"] = J(McpFormat("%d of the chapter's lines sent", (int)chronicle.say.size()));
 	if(!warnings.empty()) o["warnings"] = JVal(Lines(warnings));
+	std::vector<std::string> damaged = McpDamagedInLand(me);
+	if(!damaged.empty()) o["damaged_in_your_land"] = JVal(Lines(damaged));
 	if(!open.empty()) o["left_open"] = JVal(Lines(open));
 	if(!bMajor)
-		o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn starts, call turn_view"
+		o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn opens it brings the turn view"
 			: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
 	else if(warnings.empty() && open.empty())
 		o["next"] = J("call wait_for_my_turn: when your turn opens these orders run and the turn ends by itself, unless something that matters has changed; then the turn comes to you");
@@ -709,6 +845,8 @@ namespace
 		out += "Units: [hp strength moves], ranged [hp strength r<ranged>/<range> moves], L level\n";
 		out += "Clocks: turns at the current rate · need: more per turn to finish one turn sooner · slack: how much less per turn "
 			"still finishes on the same turn · tiles: f food, p production, g gold, s science, c culture, fa faith.\n";
+		std::string chronicle = McpChronicleViewBlock(me);
+		if(!chronicle.empty()) out += "\n" + chronicle + "\n";
 		out += "\nYOUR PLAN\n" + McpGamePlanBlock(plan, iTurn);
 		if(plan.targets.empty()) out += "  targets: none\n";
 		for(size_t i = 0; i < plan.targets.size(); ++i) out += "  target: " + McpTargetStatus(me, plan.targets[i]) + "\n";
@@ -718,6 +856,7 @@ namespace
 		if(!d.blocks.empty()) out += "\nEND TURN BLOCKED UNTIL\n" + JoinLines(d.blocks, "");
 		if(!d.fromOthers.empty()) out += "\nFROM OTHER PLAYERS\n" + JoinLines(d.fromOthers, "");
 		if(!d.available.empty()) out += "\nAVAILABLE THIS TURN (none of it required)\n" + JoinLines(d.available, "");
+		if(!d.damaged.empty()) out += "\nDAMAGED IN YOUR LAND (each gives nothing until a worker repairs it)\n" + JoinLines(d.damaged, "");
 		added = changed = gone = 0;
 		for(size_t i = 0; i < view.size(); ++i)
 		{
@@ -947,6 +1086,16 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 	o["journal_on"] = J(McpPlanJournalOn());
 	o["changed"] = J(bChanged);
 	o["why_missing"] = J(bChanged && wi == args.end());
+	// What this round's orders and lines served, against the seat's entries and open threads.
+	std::vector<std::string> serves, said;
+	for(size_t i = 0; i < run.size(); ++i)
+	{
+		serves.push_back(run[i].serves);
+		JVal a;
+		if(run[i].tool == "say" && picojson::parse(a, run[i].args).empty() && a.is<JObj>()) said.push_back(ArgStr(a.get<JObj>(), "to"));
+	}
+	std::vector<std::string> unserved = bSetAside ? std::vector<std::string>() : McpChronicleMirrorFor(me, serves, said);
+	if(!unserved.empty()) o["nothing_served"] = JVal(Lines(unserved));
 	return JVal(o);
 }
 
@@ -991,6 +1140,7 @@ void McpNoteTurnEnded(CvPlayer* me)
 
 void McpTurnPlanReset()
 {
+	McpChronicleReset();
 	s_plans.clear();
 	s_gamePlans.clear();
 	for(int i = 0; i < MAX_PLAYERS; ++i) InterlockedExchange(&s_owesPlan[i], 0);

@@ -1541,6 +1541,8 @@ namespace
 		StringSet branchSkip;
 		branchSkip.insert("FreePolicy");
 		branchSkip.insert("FreeFinishingPolicy");
+		// a raw flag that reads as "locked until a religion": the game closes the branch only under the No Religion option
+		branchSkip.insert("LockedWithoutReligion");
 		for(size_t b = 0; b < branches.size(); ++b)
 		{
 			const McpRefRow& br = branches[b];

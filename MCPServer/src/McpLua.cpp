@@ -8,6 +8,8 @@
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvMinorCivAI.h"
+#include "McpCityStates.h"
+#include "McpCityStateRules.h"
 #include "CvGlobals.h"
 
 namespace
@@ -127,7 +129,7 @@ namespace
 		for(int m = MAX_MAJOR_CIVS; eHuman != NO_PLAYER && m < MAX_CIV_PLAYERS; ++m)
 		{
 			CvPlayer& minor = GET_PLAYER((PlayerTypes)m);
-			if(minor.isAlive() && minor.isMinorCiv() && minor.GetMinorCivAI()->GetAlly() == eHuman) seats.push_back((PlayerTypes)m);
+			if(McpCsHumanMaySpeak(minor.isAlive(), minor.isMinorCiv(), (int)minor.GetMinorCivAI()->GetAlly(), (int)eHuman)) seats.push_back((PlayerTypes)m);
 		}
 		lua_createtable(L, (int)seats.size(), 0);
 		for(size_t i = 0; i < seats.size(); ++i)
@@ -140,6 +142,61 @@ namespace
 			lua_pushlstring(L, name.data(), name.size());
 			lua_setfield(L, -2, "Name");
 			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
+	//table GetLLMCityStates(); every living city-state the on-screen player has met, as { Player, Name, Speakable }
+	// entries. Speakable: the human may write to it now (its ally), the same rule as the log window's chat.
+	int lGetLLMCityStates(lua_State* L)
+	{
+		PlayerTypes eHuman = GC.getGame().getActivePlayer();
+		lua_createtable(L, 0, 0);
+		if(eHuman == NO_PLAYER) return 1;
+		CvTeam& team = GET_TEAM(GET_PLAYER(eHuman).getTeam());
+		int n = 0;
+		for(int m = MAX_MAJOR_CIVS; m < MAX_CIV_PLAYERS; ++m)
+		{
+			CvPlayer& minor = GET_PLAYER((PlayerTypes)m);
+			if(!minor.isAlive() || !minor.isMinorCiv() || !team.isHasMet(minor.getTeam())) continue;
+			std::string name = McpTool::CivName((PlayerTypes)m);
+			lua_createtable(L, 0, 3);
+			lua_pushinteger(L, m);
+			lua_setfield(L, -2, "Player");
+			lua_pushlstring(L, name.data(), name.size());
+			lua_setfield(L, -2, "Name");
+			lua_pushboolean(L, McpCsHumanMaySpeak(true, true, (int)minor.GetMinorCivAI()->GetAlly(), (int)eHuman));
+			lua_setfield(L, -2, "Speakable");
+			lua_rawseti(L, -2, ++n);
+		}
+		return 1;
+	}
+
+	//table LLMCityStateTalk(int player); the on-screen player's conversation with a city-state, oldest first, as
+	// { Turn, Mine, Text } entries. Kept for the whole game, whoever is its ally now.
+	int lLLMCityStateTalk(lua_State* L)
+	{
+		const int iMinor = lua_tointeger(L, 1);
+		PlayerTypes eHuman = GC.getGame().getActivePlayer();
+		lua_createtable(L, 0, 0);
+		if(eHuman == NO_PLAYER || iMinor < MAX_MAJOR_CIVS || iMinor >= MAX_CIV_PLAYERS) return 1;
+		std::string name = McpTool::CivName((PlayerTypes)iMinor);
+		std::vector<std::string> talk = McpCsConversation((PlayerTypes)iMinor, eHuman);
+		int n = 0;
+		for(size_t i = 0; i < talk.size(); ++i)
+		{
+			int turn = 0;
+			bool byCs = false;
+			std::string text;
+			if(!McpCsReadTalkLine(talk[i], name, turn, byCs, text)) continue;
+			lua_createtable(L, 0, 3);
+			lua_pushinteger(L, turn);
+			lua_setfield(L, -2, "Turn");
+			lua_pushboolean(L, !byCs);
+			lua_setfield(L, -2, "Mine");
+			lua_pushlstring(L, text.data(), text.size());
+			lua_setfield(L, -2, "Text");
+			lua_rawseti(L, -2, ++n);
 		}
 		return 1;
 	}
@@ -175,8 +232,72 @@ namespace
 	}
 }
 
+namespace
+{
+	// The Lua state the Game table was last registered in, and that table, kept so the plugin can call a method
+	// another plugin added to it.
+	lua_State* s_gameState = NULL;
+	int s_gameRef = LUA_NOREF;
+}
+
+namespace
+{
+	// The call itself, on plain buffers: a Lua state that has gone away under the plugin must cost a second leader,
+	// not the game, so a fault here is caught (structured exceptions, which need a function with nothing to unwind).
+	bool CallSecondLeader(lua_State* L, int gameRef, int player, char* civ, char* leader, size_t cap)
+	{
+		bool ok = false;
+		__try
+		{
+			int top = lua_gettop(L);
+			lua_rawgeti(L, LUA_REGISTRYINDEX, gameRef);
+			if(lua_istable(L, -1))
+			{
+				lua_getfield(L, -1, "SecondLeader");
+				if(lua_isfunction(L, -1))
+				{
+					lua_pushinteger(L, player);
+					if(lua_pcall(L, 1, 1, 0) == 0 && lua_istable(L, -1))
+					{
+						lua_getfield(L, -1, "Civ");
+						const char* c = lua_tostring(L, -1);
+						lua_getfield(L, -2, "Leader");
+						const char* l = lua_tostring(L, -1);
+						if(c && l && *c && *l && strlen(c) < cap && strlen(l) < cap)
+						{
+							strcpy(civ, c);
+							strcpy(leader, l);
+							ok = true;
+						}
+					}
+				}
+			}
+			lua_settop(L, top);
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			ok = false;
+		}
+		return ok;
+	}
+}
+
+bool McpLuaSecondLeader(int player, std::string& civType, std::string& leaderType)
+{
+	if(!s_gameState || s_gameRef == LUA_NOREF) return false;
+	char civ[128], leader[128];
+	if(!CallSecondLeader(s_gameState, s_gameRef, player, civ, leader, sizeof(civ)))
+		return false;
+	civType = civ;
+	leaderType = leader;
+	return true;
+}
+
 void McpAddGameMethods(const CivHostInfo* host, lua_State* L)
 {
+	s_gameState = L;
+	lua_pushvalue(L, -1);
+	s_gameRef = luaL_ref(L, LUA_REGISTRYINDEX);
 	AddMethod(host, L, "GetLLMLog", &lGetLLMLog);
 	AddMethod(host, L, "GetLLMIdentity", &lGetLLMIdentity);
 	AddMethod(host, L, "LLMNotePopup", &lLLMNotePopup);
@@ -184,6 +305,8 @@ void McpAddGameMethods(const CivHostInfo* host, lua_State* L)
 	AddMethod(host, L, "LLMSetActiveMods", &lLLMSetActiveMods);
 	AddMethod(host, L, "LLMDialogsToClose", &lLLMDialogsToClose);
 	AddMethod(host, L, "GetLLMTeammates", &lGetLLMTeammates);
+	AddMethod(host, L, "GetLLMCityStates", &lGetLLMCityStates);
+	AddMethod(host, L, "LLMCityStateTalk", &lLLMCityStateTalk);
 	AddMethod(host, L, "LLMChat", &lLLMChat);
 	AddMethod(host, L, "LLMChatUnread", &lLLMChatUnread);
 	AddMethod(host, L, "LLMChatSeen", &lLLMChatSeen);

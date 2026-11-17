@@ -453,6 +453,43 @@ bool McpCsMayEnter(PlayerTypes eMinor, TeamTypes eTeam)
 	return tier && tier->enterAllyLand;
 }
 
+namespace
+{
+	// The team of a city-state team's ally, -1 for none or for a team that is not a living city-state's.
+	int AllyTeamOf(TeamTypes eTeam)
+	{
+		if(eTeam < 0 || eTeam >= MAX_CIV_TEAMS || !GET_TEAM(eTeam).isMinorCiv()) return -1;
+		PlayerTypes eMinor = GET_TEAM(eTeam).getLeaderID();
+		if(eMinor == NO_PLAYER || !GET_PLAYER(eMinor).isAlive()) return -1;
+		PlayerTypes eAlly = GET_PLAYER(eMinor).GetMinorCivAI()->GetAlly();
+		return eAlly == NO_PLAYER ? -1 : (int)GET_PLAYER(eAlly).getTeam();
+	}
+}
+
+bool McpCsTeamsSameSide(TeamTypes eA, TeamTypes eB)
+{
+	if(eA == eB) return false;
+	int a = AllyTeamOf(eA);   // the cheap way out: most callers are not a city-state with an ally
+	return a >= 0 && McpCsSameSide(true, true, a, AllyTeamOf(eB));
+}
+
+void McpCsPeaceWithSameSide(PlayerTypes eMinor)
+{
+	if(eMinor < MAX_MAJOR_CIVS || eMinor >= MAX_CIV_PLAYERS || !GET_PLAYER(eMinor).isAlive()) return;
+	TeamTypes eTeam = GET_PLAYER(eMinor).getTeam();
+	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
+	{
+		CvPlayer& other = GET_PLAYER((PlayerTypes)i);
+		if(i == (int)eMinor || !other.isAlive() || !other.isMinorCiv()) continue;
+		if(!McpCsTeamsSameSide(eTeam, other.getTeam()) || !GET_TEAM(eTeam).isAtWar(other.getTeam())) continue;
+#ifdef MCP_LEKMOD
+		GET_TEAM(eTeam).makePeace(other.getTeam(), true, false);
+#else
+		GET_TEAM(eTeam).makePeace(other.getTeam(), true, false, eMinor);
+#endif
+	}
+}
+
 bool McpCsTeamMayEnter(TeamTypes eMinorTeam, TeamTypes eLandTeam)
 {
 	return McpCsMayEnter(GET_TEAM(eMinorTeam).getLeaderID(), eLandTeam);

@@ -39,8 +39,10 @@ struct McpMapHex
 	std::vector<McpMapUnit> units;   // up to three; two are drawn, the rest counted in the +N; in a city, under its box
 	int extraUnits;
 	bool worked;                        // a citizen of the viewer's city works it: a W on the ground line
+	bool pillaged;                      // its improvement or road is pillaged: the ground line turns red: PIL and pillagedWhat
+	std::string pillagedWhat;            // what was pillaged: the improvement's short name, or road
 
-	McpMapHex() : x(0), y(0), fill(0), fogged(false), unexplored(false), riverE(false), riverSE(false), riverSW(false), hasRoad(false), owned(false), borderColor(0), city(false), cityColor(0), cityHp(100), cityAtWar(false), extraUnits(0), worked(false)
+	McpMapHex() : x(0), y(0), fill(0), fogged(false), unexplored(false), riverE(false), riverSE(false), riverSW(false), hasRoad(false), owned(false), borderColor(0), city(false), cityColor(0), cityHp(100), cityAtWar(false), extraUnits(0), worked(false), pillaged(false)
 	{
 		for(int i = 0; i < 6; ++i) road[i] = border[i] = false;
 	}

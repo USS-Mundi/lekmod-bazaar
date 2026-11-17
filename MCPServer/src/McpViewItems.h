@@ -26,6 +26,10 @@ void McpUniqueKeys(std::vector<McpViewItem>& items);
 // nothing else does), its position and its yields ("deer forest hill (25,22) 2f 1p"; f food, p production, g gold,
 // s science, c culture, fa faith; a yield of 0 is left out), and "locked" when a citizen is locked on it.
 std::string McpTileShort(const picojson::object& tile);
+// One pillaged tile in the seat's land, for the turn view: the improvement (with its resource) and/or the road, where,
+// the city it belongs to, and how it is mended. improvement and resource are "" for none.
+std::string McpDamagedLine(const std::string& improvement, const std::string& resource, bool road, int x, int y,
+	const std::string& city, bool beingRepaired);
 // A city's citizens screen as fields: works and free, each a list of short tiles, then its other fields (focus,
 // specialists, unemployed...), without the city's name and the how text.
 void McpCitizensFields(const picojson::object& citizens, std::vector<std::pair<std::string, std::string> >& out);
@@ -38,3 +42,9 @@ std::set<std::string> McpTickingFields(const std::vector<McpViewItem>& items);
 // A unit's own line without what does not apply to it: can found city here, embarked and needs orders when "no", and
 // max hp when it is the usual 100.
 void McpTrimUnitFields(std::vector<std::pair<std::string, std::string> >& fields);
+// The turn view's policy branches from the policy screen's list: "opened" with what is left in each, "can open" for
+// every branch the seat's next policy may open, whether or not the culture is in hand this turn, and "later" for the
+// rest with the era that opens each. A group with nothing in it is left out.
+void McpBranchFields(const picojson::array& branches, std::vector<std::pair<std::string, std::string> >& out);
+// A branch's help without the game's opening line about whom the branch suits: the text from "Adopting" on.
+std::string McpBranchHelpFacts(const std::string& help);

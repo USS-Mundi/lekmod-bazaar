@@ -3,6 +3,7 @@
 // From objbase.h, which does not compile under the precompiled header's trimmed Windows headers.
 extern "C" __declspec(dllimport) HRESULT __stdcall CoCreateGuid(GUID* pguid);
 #include "McpSeat.h"
+#include "McpSeatRules.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
 #include "McpDiplomacy.h"
@@ -102,7 +103,7 @@ std::string McpSeatWaitingText(PlayerTypes e, const std::string& label)
 	}
 	if(McpSeatLabelMatches(e, label)) return std::string(GET_PLAYER(e).getCivilizationShortDescription()) + " (yours: take it back with take_seat)";
 	if(McpOnScreenTeam(e)) return std::string(GET_PLAYER(e).getCivilizationShortDescription()) + by;
-	return "an opponent civilization" + by + ": only the model that played it, or take_seat civ=opponent, can take it";
+	return "an opponent civilization" + by + ": only the model that played it can take it back";
 }
 
 PlayerTypes McpPlayerOf(const McpSession& s)
@@ -137,7 +138,7 @@ static void DealHumanStartingUnits(CvPlayer& p)
 	McpBridge::Get().LogLineFor(p.GetID(), MCP_LOG_TURN, "Starts with a human player's units; the computer's extra starting units are gone");
 }
 
-bool McpClaimSeat(PlayerTypes ePlayer, std::string& err, bool bAssignedOpponent)
+bool McpClaimSeat(PlayerTypes ePlayer, std::string& err)
 {
 	CvGame& game = GC.getGame();
 	if(game.isNetworkMultiPlayer() || game.isHotSeat() || game.isPbem()) { err = "seats can only be claimed in a single-player game"; return false; }
@@ -169,10 +170,10 @@ bool McpClaimSeat(PlayerTypes ePlayer, std::string& err, bool bAssignedOpponent)
 	if(McpIsSeat(ePlayer))
 	{
 		// A seat another model left: the model's own comes back to it; one on the on-screen
-		// team the human may hand to any model; an opponent's stays secret.
+		// team the human may hand to any model; an opponent's waits for its own model only.
 		McpSession other;
 		if(bridge.SessionForSeat(ePlayer, other)) { err = NOT_AVAILABLE; return false; }
-		if(!McpSeatLabelMatches(ePlayer, label) && !McpOnScreenTeam(ePlayer) && !bAssignedOpponent) { err = NOT_AVAILABLE; return false; }
+		if(!McpMayTakeLeftSeat(McpSeatLabelMatches(ePlayer, label), McpOnScreenTeam(ePlayer))) { err = NOT_AVAILABLE; return false; }
 		Bind(ePlayer, label, "is back on");
 		return true;
 	}
@@ -209,19 +210,6 @@ bool McpReleaseSeat(std::string& err)
 	McpDropDiploRequestsFor(e);
 	bridge.SetCurrentSeat(MCP_SEAT_LOST);
 	return true;
-}
-
-PlayerTypes McpWaitingOpponentSeat()
-{
-	std::vector<PlayerTypes> waiting = McpUnboundSeats();
-	PlayerTypes eFound = NO_PLAYER;
-	for(size_t i = 0; i < waiting.size(); ++i)
-	{
-		if(waiting[i] >= MAX_MAJOR_CIVS || McpOnScreenTeam(waiting[i])) continue; // a city-state is nobody's opponent seat
-		if(eFound != NO_PLAYER) return NO_PLAYER;
-		eFound = waiting[i];
-	}
-	return eFound;
 }
 
 // The team of the human eliminated while the screen watches on; not kept across a reload.

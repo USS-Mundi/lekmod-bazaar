@@ -34,6 +34,7 @@ struct McpTurnViewData
 	std::vector<std::string> fromOthers; // what other players are waiting on: requests, deals, messages
 	std::vector<std::string> available;  // what can be done this turn and nothing requires: promotions, upgrades, bombards
 	std::vector<std::string> state;      // the briefing's warnings: gold falling, unhappiness, starvation, damage
+	std::vector<std::string> damaged;    // pillaged improvements and roads in the seat's land, until a worker mends them
 	std::vector<McpWithoutOrder> withoutOrder; // units waiting for orders and cities with nothing to build
 	std::vector<std::string> cities;     // the seat's city names
 	std::map<std::string, std::string> screens; // each screen left to its tool, by tool name, reduced to its words
@@ -41,6 +42,8 @@ struct McpTurnViewData
 
 // The items, the fields that tick and what has no order. Reads only; safe at a turn's end and its start.
 McpTurnViewData McpGatherTurnView(CvPlayer* me);
+// The pillaged improvements and roads in the seat's land, one line each (McpDamagedLine).
+std::vector<std::string> McpDamagedInLand(CvPlayer* me);
 // Adds what happened and what the game waits on, from the briefing. Once, at the turn's start: the briefing tracks what
 // it has already reported.
 void McpGatherTurnNews(McpTurnViewData& d);

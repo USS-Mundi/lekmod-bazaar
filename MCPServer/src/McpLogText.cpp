@@ -67,6 +67,13 @@ namespace
 	std::string UnitText(const JObj& args)
 	{
 		CvUnit* u = ArgUnit(args);
+		if(!u && !HasArg(args, "unit_id") && HasArg(args, "from_city"))
+		{
+			std::string ignored;
+			CvPlayer* me = Me(ignored);
+			CvCity* c = me ? me->getCity(ArgInt(args, "from_city", -1)) : NULL;
+			return "the unit " + (c ? std::string(c->getName().c_str()) : McpFormat("city #%d", ArgInt(args, "from_city", -1))) + " finished";
+		}
 		if(!u) return McpFormat("unit #%d", ArgInt(args, "unit_id", -1));
 		return McpFormat("%s at (%d, %d)", UnitTypeName(u->getUnitType()), u->getX(), u->getY());
 	}
@@ -214,6 +221,12 @@ std::string McpDescribeCall(const McpToolDef& tool, const JObj& args)
 	if(name == "promote_unit") return UnitText(args) + ": promote to " + TypeName(ArgStr(args, "promotion"));
 	if(name == "upgrade_unit") return UnitText(args) + ": upgrade";
 	if(name == "set_production") return CityText(args, "city_id") + ": produce " + TypeName(ArgStr(args, "item")) + (ArgBool(args, "append", false) ? " (added to the queue)" : "");
+	if(name == "city_queue")
+	{
+		if(HasArg(args, "remove")) return CityText(args, "city_id") + McpFormat(": take item %d out of the queue", ArgInt(args, "remove", 0));
+		if(HasArg(args, "move")) return CityText(args, "city_id") + McpFormat(": move queue item %d to %d", ArgInt(args, "move", 0), ArgInt(args, "to", 0));
+		return CityText(args, "city_id") + ": queue " + TypeName(ArgStr(args, "item")) + (HasArg(args, "at") ? McpFormat(" at %d", ArgInt(args, "at", 0)) : "");
+	}
 	if(name == "buy") return CityText(args, "city_id") + ": buy " + TypeName(ArgStr(args, "item")) + (ArgBool(args, "with_faith", false) ? " with faith" : "");
 	if(name == "set_research")
 		return std::string(ArgBool(args, "add_to_queue", false) ? "Queue research " : "Research ") + TypeName(ArgStr(args, "tech")) +

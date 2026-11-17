@@ -100,6 +100,9 @@ namespace
 		CHECK(McpCsToolRefusal("set_production", "", "UNIT_COMPOSITE_BOWMAN").empty());
 		CHECK(!McpCsToolRefusal("set_production", "", "PROCESS_WEALTH").empty());
 		CHECK(!McpCsToolRefusal("set_production", "", "PROCESS_RESEARCH").empty());
+		// The queue tool puts items in too, under the same rule.
+		CHECK(McpCsToolRefusal("city_queue", "", "UNIT_COMPOSITE_BOWMAN").empty());
+		CHECK(!McpCsToolRefusal("city_queue", "", "PROCESS_WEALTH").empty());
 		CHECK(!McpCsToolRefusal("economic_overview", "", "").empty());
 	}
 	void TestNextSteps()
@@ -125,6 +128,28 @@ namespace
 		CHECK(!McpCsIsDismissal("please dismiss your guard"));
 		CHECK(!McpCsIsDismissal("dismissed"));
 		CHECK(!McpCsIsDismissal(""));
+	}
+	void TestHumanMaySpeak()
+	{
+		CHECK(McpCsHumanMaySpeak(true, true, 0, 0));
+		CHECK(!McpCsHumanMaySpeak(true, true, 3, 0));
+		CHECK(!McpCsHumanMaySpeak(true, true, -1, 0));
+		CHECK(!McpCsHumanMaySpeak(false, true, 0, 0));
+		CHECK(!McpCsHumanMaySpeak(true, false, 0, 0));
+		CHECK(!McpCsHumanMaySpeak(true, true, -1, -1));
+	}
+	void TestTalkLine()
+	{
+		int turn = 0;
+		bool byCs = false;
+		std::string text;
+		CHECK(McpCsReadTalkLine("turn 81, Goths: Send your archers north: now.", "Valletta", turn, byCs, text));
+		CHECK(turn == 81 && !byCs && text == "Send your archers north: now.");
+		CHECK(McpCsReadTalkLine("turn 82, Panama City: They march at dawn.", "Panama City", turn, byCs, text));
+		CHECK(turn == 82 && byCs && text == "They march at dawn.");
+		CHECK(!McpCsReadTalkLine("deed turn 3: gold", "Valletta", turn, byCs, text));
+		CHECK(!McpCsReadTalkLine("turn x, Goths: hi", "Valletta", turn, byCs, text));
+		CHECK(!McpCsReadTalkLine("turn 5, Goths hi", "Valletta", turn, byCs, text));
 	}
 	void TestSightLedger()
 	{
@@ -155,6 +180,32 @@ namespace
 	}
 }
 
+static void TestGold()
+{
+	// a gift is what actually left the giver: a gift the city-state refused moves nothing
+	CHECK(McpCsGoldMoved(1500, 500) == 1000);
+	CHECK(McpCsGoldMoved(1500, 1500) == 0);
+	CHECK(McpCsGoldMoved(500, 900) == 0);
+	CHECK(McpCsGiftDeed(1000, 41) == "gave them 1000 gold (treasury 41 to 1041)");
+	// tribute comes out of the treasury, down to zero at most; the taker's sum is the game's
+	CHECK(McpCsTributePaid(300, 240) == 240);
+	CHECK(McpCsTributePaid(100, 240) == 100);
+	CHECK(McpCsTributePaid(-5, 240) == 0);
+	CHECK(McpCsTributeDeed(240, 240, 300) == "took 240 gold from them by threat (treasury 300 to 60)");
+	CHECK(McpCsTributeDeed(240, 100, 100) == "took 240 gold from them by threat (treasury 100 to 0)");
+}
+
+static void TestSameSide()
+{
+	// two city-states are one side while each has an ally and the allies are on one team
+	CHECK(McpCsSameSide(true, true, 2, 2));
+	CHECK(!McpCsSameSide(true, true, 2, 3));
+	CHECK(!McpCsSameSide(true, true, -1, -1));
+	CHECK(!McpCsSameSide(true, true, 2, -1));
+	CHECK(!McpCsSameSide(true, false, 2, 2));
+	CHECK(!McpCsSameSide(false, true, 2, 2));
+}
+
 int main()
 {
 	TestTierLookup();
@@ -165,7 +216,11 @@ int main()
 	TestRefusals();
 	TestNextSteps();
 	TestDismissal();
+	TestHumanMaySpeak();
+	TestTalkLine();
 	TestSightLedger();
+	TestGold();
+	TestSameSide();
 	if(s_failures) { std::printf("%d check(s) failed\n", s_failures); return 1; }
 	std::printf("all city-state rule checks pass\n");
 	return 0;

@@ -434,8 +434,33 @@ namespace McpTool
 		return szDescription && _stricmp(szDescription, key.c_str()) == 0;
 	}
 
+	// The unit a city finished this turn, for an order planned with from_city before it existed: one of the seat's units
+	// made this game turn within two tiles of the city, of the type the plan expected (_unit_type, when known), the one
+	// in the city first, then the nearest, then the lowest id.
+	CvUnit* NewUnitFromCity(CvPlayer* me, const JObj& args, std::string& err)
+	{
+		CvCity* c = me->getCity(ArgInt(args, "from_city", -1));
+		if(!c) { err = "no city of yours has that from_city id"; return NULL; }
+		int iType = ArgInt(args, "_unit_type", -1);
+		int iTurn = GC.getGame().getGameTurn();
+		CvUnit* best = NULL;
+		int bestDist = 99;
+		int iLoop;
+		for(CvUnit* u = me->firstUnit(&iLoop); u; u = me->nextUnit(&iLoop))
+		{
+			if(u->isDelayedDeath() || u->getGameTurnCreated() != iTurn) continue;
+			if(iType >= 0 && (int)u->getUnitType() != iType) continue;
+			int d = plotDistance(u->getX(), u->getY(), c->getX(), c->getY());
+			if(d > 2) continue;
+			if(!best || d < bestDist || (d == bestDist && u->GetID() < best->GetID())) { best = u; bestDist = d; }
+		}
+		if(!best) err = std::string(c->getName().c_str()) + " " + MCP_NO_NEW_UNIT;
+		return best;
+	}
+
 	CvUnit* RequireUnit(CvPlayer* me, const JObj& args, std::string& err)
 	{
+		if(args.count("from_city") && !args.count("unit_id")) return NewUnitFromCity(me, args, err);
 		int iUnit = 0;
 		if(!RequireInt(args, "unit_id", iUnit, err)) return NULL;
 		CvUnit* u = me->getUnit(iUnit);
@@ -446,7 +471,7 @@ namespace McpTool
 	bool RequireMoves(CvUnit* u, std::string& err)
 	{
 		if(u->canMove()) return true;
-		err = "this unit has no moves left this turn; try again next turn";
+		err = MCP_NO_MOVES_LEFT;
 		return false;
 	}
 

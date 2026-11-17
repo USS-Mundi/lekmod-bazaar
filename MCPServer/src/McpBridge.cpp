@@ -859,7 +859,7 @@ void McpBridge::Impl::DrainCityStateChat(PlayerTypes eMinor, const std::string& 
 		else Append((int)eHuman, "", MCP_LOG_CHAT, McpTool::CivName(eMinor) + " is not switched on.");
 		return;
 	}
-	if(eHuman == NO_PLAYER || !minor.isAlive() || !minor.isMinorCiv() || minor.GetMinorCivAI()->GetAlly() != eHuman || !McpCsSwitchOn(eMinor, eHuman, err))
+	if(!McpCsHumanMaySpeak(minor.isAlive(), minor.isMinorCiv(), (int)minor.GetMinorCivAI()->GetAlly(), (int)eHuman) || !McpCsSwitchOn(eMinor, eHuman, err))
 	{
 		Append((int)eHuman, "", MCP_LOG_CHAT, "Not sent, you are not their ally now: " + text);
 		return;
@@ -1486,11 +1486,13 @@ picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
 	o["civ"] = picojson::value(want);
 	double fMatched = 0, fNudged = 0;
 	DWORD now = GetTickCount();
-	for(int i = 0; i < MAX_MAJOR_CIVS && !want.empty(); ++i)
+	// City-states too: one an agent plays is written to in group chats, by its city's name (every city-state shares
+	// one civilization type, so the type names none of them).
+	for(int i = 0; i < MAX_CIV_PLAYERS && !want.empty(); ++i)
 	{
 		CvPlayer& kPlayer = GET_PLAYER((PlayerTypes)i);
 		if(!kPlayer.isAlive()) continue;
-		const CvCivilizationInfo* pInfo = GC.getCivilizationInfo(kPlayer.getCivilizationType());
+		const CvCivilizationInfo* pInfo = kPlayer.isMinorCiv() ? NULL : GC.getCivilizationInfo(kPlayer.getCivilizationType());
 		if(want != CivKey(kPlayer.getCivilizationShortDescription()) && want != CivKey(kPlayer.getCivilizationAdjective())
 			&& !(pInfo && want == CivKey(pInfo->GetType())))
 			continue;
@@ -1602,7 +1604,18 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		if(heldPlan.is<picojson::object>() && heldPlan.get<picojson::object>().count("held")) why = heldPlan.get<picojson::object>()["held"].to_str();
 		else if(heldPlan.is<picojson::object>()) o["your_plan_ran"] = heldPlan.get<picojson::object>()["ran"];
 		else why = heldPlan.to_str();
-		o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan is waiting on you: " + why + ".");
+		// The turn view comes with the reply, as turn_view gives it (and counts as opening it): one call fewer on the turn.
+		std::string viewError;
+		picojson::value view = RunOnGameThread(token, "turn_view", picojson::object(), viewError);
+		if(viewError.empty() && view.is<picojson::object>())
+		{
+			const picojson::object& v = view.get<picojson::object>();
+			for(picojson::object::const_iterator k = v.begin(); k != v.end(); ++k)
+				if(!o.count(k->first)) o[k->first] = k->second;
+			o[MCP_DO_NOW] = picojson::value("read the turn view in this reply (turn_view): your turn is open and your plan is waiting on you: " + why
+				+ ". It is the view turn_view gives; do not call turn_view again.");
+		}
+		else o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan is waiting on you: " + why + ".");
 	}
 	// Last, so it leads whatever the reply asks for: a message is told once, whether it woke the wait or not.
 	if(pTool->waitsForTurn && result.is<picojson::object>() && TakeMessageNotice(token)) McpAddMessageNotice(result.get<picojson::object>());
@@ -1731,6 +1744,13 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 			}
 			bool bErr = false;
 			picojson::value r = CallTool(token, tool, a, bErr);
+			// An order for what is already so (the unit rests, the building stands, no moves left to act) is done.
+			std::string said = r.is<std::string>() ? r.get<std::string>() : std::string();
+			if(bErr && McpOrderAlreadyDone(tool, said))
+			{
+				results.push_back(Outcome(tool, picojson::value("already so: " + said), false));
+				continue;
+			}
 			results.push_back(Outcome(tool, r, bErr));
 			if(bErr) bFailed = true;
 			else if(tool == MCP_TOOL_END_TURN)
@@ -1763,6 +1783,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 	out["ran"] = picojson::value(results);
 	out["turn_ended"] = picojson::value(bEnded);
 	if(!came.empty()) out["messages_while_running"] = picojson::value(came);
+	if(t["nothing_served"].is<picojson::array>()) out["nothing_served_this_round"] = t["nothing_served"];
 	for(picojson::object::const_iterator pi = planning.begin(); pi != planning.end(); ++pi) out[pi->first] = pi->second;
 	out["next"] = picojson::value(std::string(bEnded ? "call wait_for_my_turn"
 		: bFailed ? "some orders failed (see ran): deal with them, then end_turn"

@@ -229,8 +229,8 @@ namespace
 	struct HexCounts
 	{
 		int unexplored, fogged;
-		bool anyWorked;
-		HexCounts() : unexplored(0), fogged(0), anyWorked(false) {}
+		bool anyWorked, anyPillaged;
+		HexCounts() : unexplored(0), fogged(0), anyWorked(false), anyPillaged(false) {}
 	};
 
 	// One tile as a picture shows it, at grid position (x, y). The strategic picture leaves resources and improvements
@@ -296,6 +296,16 @@ namespace
 			for(size_t k = 0; k < name.size(); ++k) name[k] = (char)tolower((unsigned char)name[k]);
 			h.bottomLeft = Cut(name, 5);
 		}
+
+		// Pillaged ground is shown in both pictures: it gives nothing until a worker repairs it.
+		if(!city && eImp != NO_IMPROVEMENT && p->IsImprovementPillaged())
+		{
+			std::string name = ImprovementName(eImp);
+			for(size_t k = 0; k < name.size(); ++k) name[k] = (char)tolower((unsigned char)name[k]);
+			h.pillaged = true; h.pillagedWhat = Cut(name, 6);
+		}
+		else if(!city && eRoute != NO_ROUTE && p->IsRoutePillaged()) { h.pillaged = true; h.pillagedWhat = "road"; }
+		if(h.pillaged) counts.anyPillaged = true;
 
 		if(city)
 		{
@@ -387,6 +397,7 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 		}
 	std::string footer = McpFormat("center %d,%d  radius %d  FOG (hatched) = out of sight now  ? = unexplored  under each unit: its owner's code (legend)", cx, cy, radius);
 	if(counts.anyWorked) footer += "  W on the ground line = worked by your city";
+	if(counts.anyPillaged) footer += "  red PIL = pillaged, gives nothing until a worker repairs it";
 	std::string err;
 	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners, style), footer, x0, y1, 2 * radius + 3, 2 * radius + 1, map.isWrapX() ? map.getGridWidth() : 0, err);
 	if(png.empty()) { summary = err; return ""; }
@@ -441,7 +452,8 @@ std::string McpRenderStrategicPng(PlayerTypes eMe, std::string& summary)
 	key.push_back("ring: white = yours · green = teammate · thick red = at war with you · grey = not at war · under each unit: its owner's code (legend) · bar = its health · units in a city are drawn under its name");
 	if(!codes.byCode.empty()) key.push_back(codes.Key());
 	key.push_back("ground: F forest · J jungle · M marsh · fp flood plains · h hills · MTN mountain · NW natural wonder · brown line = road · blue edge = river"
-		" · FOG (hatched) = out of sight now, units there not shown · ? = unexplored" + std::string(counts.anyWorked ? " · W = worked by your city" : ""));
+		" · FOG (hatched) = out of sight now, units there not shown · ? = unexplored" + std::string(counts.anyWorked ? " · W = worked by your city" : "")
+		+ std::string(counts.anyPillaged ? " · red PIL = pillaged, gives nothing until a worker repairs it" : ""));
 	std::string footer = McpFormat("TURN %d · %s · x%d-x%d, y%d-y%d", GC.getGame().getGameTurn(), CivName(eMe).c_str(), minX, maxX, minY, maxY);
 	std::string err;
 	std::string png = McpDrawHexMapPng(hexes, LegendOf(eMe, owners, style), footer, minX, maxY, maxX - minX + 1, maxY - minY + 1, map.isWrapX() ? map.getGridWidth() : 0, err, key);

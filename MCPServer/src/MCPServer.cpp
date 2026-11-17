@@ -21,10 +21,13 @@ namespace CivHooks
 #include "CvDllContext.h"
 #include "McpBridge.h"
 #include "McpCityStates.h"
+#include "McpCityStateRules.h"
+#include "CvTreasury.h"
 #include "McpCityStateFiles.h"
 #include "McpCrashLog.h"
 #include "McpToolSupport.h"
 #include "McpDiplomacy.h"
+#include "McpChronicleGame.h"
 #include "McpLua.h"
 #include "McpMapDraw.h"
 #include "McpSeat.h"
@@ -151,11 +154,27 @@ static void AfterSetAlly(CvMinorCivAI* self, PlayerTypes eNewAlly)
 	if(eNewAlly != NO_PLAYER && eNewAlly != s_allyBefore) McpCsNoteDeed(eMinor, eNewAlly, "became their ally");
 	McpTrail("city-state ally changed", eMinor, eNewAlly);
 	McpCsAfterSetAlly(eMinor, eNewAlly);
+	McpCsPeaceWithSameSide(eMinor);
 }
 
-static void AfterGoldGift(CvMinorCivAI* self, PlayerTypes eMajor, int iGold)
+// Gold a city-state is given goes into its treasury, and tribute comes out of it: the game moves neither. What moved is
+// read from the major's treasury, so a gift the city-state refused is neither banked nor recorded.
+static int s_majorGoldBefore = 0;
+static bool BeforeMinorGold(CvMinorCivAI*, PlayerTypes eMajor, int)
 {
-	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("gave them %d gold", iGold));
+	s_majorGoldBefore = (eMajor >= 0 && eMajor < MAX_MAJOR_CIVS) ? GET_PLAYER(eMajor).GetTreasury()->GetGold() : 0;
+	return false;
+}
+
+static void AfterGoldGift(CvMinorCivAI* self, PlayerTypes eMajor, int)
+{
+	if(eMajor < 0 || eMajor >= MAX_MAJOR_CIVS) return;
+	int iMoved = McpCsGoldMoved(s_majorGoldBefore, GET_PLAYER(eMajor).GetTreasury()->GetGold());
+	if(iMoved <= 0) return;
+	CvTreasury* pTreasury = self->GetPlayer()->GetTreasury();
+	int iBefore = pTreasury->GetGold();
+	pTreasury->ChangeGold(iMoved);
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpCsGiftDeed(iMoved, iBefore));
 }
 
 // The gift can destroy the unit (a gifted great person is killed at once), so its type is read before.
@@ -177,9 +196,20 @@ static void AfterImprovementGift(CvMinorCivAI* self, PlayerTypes eMajor, int iX,
 	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("built an improvement for them at (%d,%d)", iX, iY));
 }
 
-static void AfterBullyGold(CvMinorCivAI* self, PlayerTypes eMajor, int iGold)
+static void AfterBullyGold(CvMinorCivAI* self, PlayerTypes eMajor, int)
 {
-	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpFormat("took %d gold from them by threat", iGold));
+	if(eMajor < 0 || eMajor >= MAX_MAJOR_CIVS) return;
+	int iTaken = GET_PLAYER(eMajor).GetTreasury()->GetGold() - s_majorGoldBefore;
+	if(iTaken <= 0)
+	{
+		McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, "demanded gold from them by threat and got none");
+		return;
+	}
+	CvTreasury* pTreasury = self->GetPlayer()->GetTreasury();
+	int iBefore = pTreasury->GetGold();
+	int iPaid = McpCsTributePaid(iBefore, iTaken);
+	pTreasury->ChangeGold(-iPaid);
+	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, McpCsTributeDeed(iTaken, iPaid, iBefore));
 }
 
 static void AfterBullyUnit(CvMinorCivAI* self, PlayerTypes eMajor, UnitTypes eUnit)
@@ -292,6 +322,7 @@ static bool ReplaceCanEnterTerritory(CivHooks::CvUnit_canEnterTerritory::Origina
 {
 	PathHookCall call;
 	if(McpCsAnySwitchedOn() && McpCsIsSwitchedOn(self->getOwner()) && McpCsMayEnter(self->getOwner(), eTeam)) return true;
+	if(McpCsTeamsSameSide(self->getTeam(), eTeam)) return true;
 	return original(self, eTeam, bIgnoreRightOfPassage, bIsCity, bIsDeclareWarMove);
 }
 
@@ -299,6 +330,7 @@ static bool ReplaceAllowsOpenBorders(CivHooks::CvTeam_IsAllowsOpenBordersToTeam:
 {
 	PathHookCall call;
 	if(McpCsAnySwitchedOn() && McpCsTeamSwitchedOn(eTeam) && McpCsTeamMayEnter(eTeam, self->GetID())) return true;
+	if(McpCsTeamsSameSide(eTeam, self->GetID())) return true;
 	return original(self, eTeam);
 }
 
@@ -345,6 +377,10 @@ static void PopupRaised(int player, int popupType, int data1, int data2, int dat
 static void NotificationAdded(int player, int notificationType, const char* message, const char* summary, int x, int y, int data1, int data2, int lookupIndex)
 {
 	McpNoteSeatNotification((PlayerTypes)player, message, summary);
+	// The game tells the one declared on (the declarer in data1) and everyone who has met both (the team declared on in data2).
+	if(notificationType == NOTIFICATION_WAR_ACTIVE_PLAYER && player >= 0 && player < MAX_CIV_PLAYERS)
+		McpChronicleNoteWar(data1, (int)GET_PLAYER((PlayerTypes)player).getTeam());
+	else if(notificationType == NOTIFICATION_WAR) McpChronicleNoteWar(data1, data2);
 }
 
 static void DealResolved(int fromPlayer, int toPlayer, int actingPlayer, bool accepted, bool finalized)
@@ -376,10 +412,12 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	{
 		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_SetAlly>(host, &AfterSetAlly), "after CvMinorCivAI::SetAlly");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &BeforeMinorGold), "before CvMinorCivAI::DoGoldGiftFromMajor");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoGoldGiftFromMajor>(host, &AfterGoldGift), "after CvMinorCivAI::DoGoldGiftFromMajor");
 		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &BeforeUnitGift), "before CvMinorCivAI::DoUnitGiftFromMajor");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoUnitGiftFromMajor>(host, &AfterUnitGift), "after CvMinorCivAI::DoUnitGiftFromMajor");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTileImprovementGiftFromMajor>(host, &AfterImprovementGift), "after CvMinorCivAI::DoTileImprovementGiftFromMajor");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &BeforeMinorGold), "before CvMinorCivAI::DoMajorBullyGold");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");

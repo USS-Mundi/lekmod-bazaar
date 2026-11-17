@@ -52,6 +52,10 @@ std::string McpCsMoveRefusal(const CvUnit* u, const CvPlot* dest);
 // Its units may enter its ally's land (from the step that allows it). Called from hot paths: cheap for non-minors.
 bool McpCsMayEnter(PlayerTypes eMinor, TeamTypes eTeam);
 bool McpCsTeamMayEnter(TeamTypes eMinorTeam, TeamTypes eLandTeam);
+// City-states allied to one team are one side while both alliances last (McpCsSameSide): each may cross the other's
+// land, switched on or not. McpCsPeaceWithSameSide ends a war one of them has with another of its side.
+bool McpCsTeamsSameSide(TeamTypes eA, TeamTypes eB);
+void McpCsPeaceWithSameSide(PlayerTypes eMinor);
 // What a unit of a switched-on city-state sees stays uncovered on its ally's map (from the step that allows it).
 void McpCsRevealAround(const CvUnit* u);
 

@@ -1,5 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpToolSupport.h"
+#include "McpTurnCycle.h"
+#include "McpViewItems.h"
 #include "McpToolHandlers.h"
 #include "McpBridge.h"
 #include "CvGame.h"
@@ -53,12 +55,17 @@ MCP_TOOL(ToolPolicyOptions)
 		if(pPolicies->IsPolicyBranchBlocked(e)) b["blocked_by_another_branch"] = J(true);
 		if(pPolicies->IsPolicyBranchFinished(e)) b["finished"] = J(true);
 		if(info->GetEraPrereq() != NO_ERA) b["requires_era"] = J(EraName((EraTypes)info->GetEraPrereq()));
-		if(!pPolicies->IsPolicyBranchUnlocked(e) && !pPolicies->CanUnlockPolicyBranch(e))
+		// The seat's next policy may open it: the game's own rule (CanUnlockPolicyBranch) without the culture in hand.
+		bool bOpens = !pPolicies->IsPolicyBranchUnlocked(e) && !info->IsPurchaseByLevel() && !pPolicies->IsPolicyBranchBlocked(e)
+			&& !(info->IsLockedWithoutReligion() && GC.getGame().isOption(GAMEOPTION_NO_RELIGION))
+			&& (info->GetEraPrereq() == NO_ERA || GET_TEAM(me->getTeam()).GetCurrentEra() >= (EraTypes)info->GetEraPrereq());
+		if(bOpens) b["opens_with_a_policy"] = J(true);
+		if(!pPolicies->IsPolicyBranchUnlocked(e) && !bOpens)
 		{
 			branches.push_back(JVal(b));
 			continue;
 		}
-		b["help"] = J(Localized(info->GetHelp()));
+		b["help"] = J(McpBranchHelpFacts(Localized(info->GetHelp())));
 
 		JArr policies;
 		for(int k = 0; k < GC.getNumPolicyInfos(); ++k)
@@ -114,7 +121,7 @@ MCP_TOOL(ToolAdoptPolicy)
 	{
 		PolicyTypes ePolicy = FindPolicyType(key);
 		if(ePolicy == NO_POLICY) { err = "unknown policy '" + key + "'; use a POLICY_ or POLICY_BRANCH_ type from policy_options"; return JVal(); }
-		if(pPolicies->HasPolicy(ePolicy)) { err = "you already have that policy"; return JVal(); }
+		if(pPolicies->HasPolicy(ePolicy)) { err = MCP_HAVE_POLICY; return JVal(); }
 		if(!me->canAdoptPolicy(ePolicy)) { err = "cannot adopt that policy now (branch not open, prerequisite policy missing, or not enough culture)"; return JVal(); }
 		me->doAdoptPolicy(ePolicy);
 		o["ok"] = J(true);

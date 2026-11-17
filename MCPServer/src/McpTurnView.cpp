@@ -18,6 +18,7 @@
 using namespace McpTool;
 
 #include "McpViewItems.h"
+#include "McpDiplomacy.h"
 #include "McpClocksGame.h"
 
 namespace
@@ -446,6 +447,18 @@ namespace
 			if(c->isCapital()) f.push_back(F("_capital", "capital"));
 			f.push_back(F("pop", McpFormat("%d", c->getPopulation())));
 			f.push_back(F("builds", build));
+			std::string then;
+			for(int i = 1; i < c->getOrderQueueLength(); ++i)
+			{
+				const OrderData* od = c->getOrderFromQueue(i);
+				if(!od) continue;
+				int turns = -1;
+				if(od->eOrderType == ORDER_TRAIN) turns = c->getProductionTurnsLeft((UnitTypes)od->iData1, i);
+				else if(od->eOrderType == ORDER_CONSTRUCT) turns = c->getProductionTurnsLeft((BuildingTypes)od->iData1, i);
+				else if(od->eOrderType == ORDER_CREATE) turns = c->getProductionTurnsLeft((ProjectTypes)od->iData1, i);
+				then += (then.empty() ? "" : ", ") + OrderName(od) + (turns >= 0 && turns < 100000 ? McpFormat(" %dt", turns) : std::string());
+			}
+			if(!then.empty()) f.push_back(F("then", then));
 			f.push_back(F("grows", grows));
 			f.push_back(F("border", border));
 			std::string yields = Yields(o);
@@ -483,36 +496,9 @@ namespace
 		JVal result = Call(ToolPolicyOptions);
 		const JArr* list = ListIn(result, "branches");
 		if(!list) return;
-		std::string opened, canOpen, locked;
-		for(size_t i = 0; i < list->size(); ++i)
-		{
-			if(!(*list)[i].is<JObj>()) continue;
-			const JObj& b = (*list)[i].get<JObj>();
-			std::string name = ArgStr(b, "name");
-			if(ArgBool(b, "unlocked", false))
-			{
-				int owned = 0, total = 0;
-				std::string left;
-				JObj::const_iterator pl = b.find("policies");
-				if(pl != b.end() && pl->second.is<JArr>())
-					for(size_t k = 0; k < pl->second.get<JArr>().size(); ++k)
-					{
-						const JVal& pv = pl->second.get<JArr>()[k];
-						if(!pv.is<JObj>()) continue;
-						++total;
-						if(ArgBool(pv.get<JObj>(), "owned", false)) ++owned;
-						else left += (left.empty() ? "" : ", ") + ArgStr(pv.get<JObj>(), "name");
-					}
-				opened += (opened.empty() ? "" : " · ") + McpFormat("%s %d/%d", name.c_str(), owned, total) + (left.empty() ? "" : " (left: " + left + ")");
-			}
-			else if(ArgBool(b, "can_unlock_now", false)) canOpen += (canOpen.empty() ? "" : ", ") + name;
-			else locked += (locked.empty() ? "" : ", ") + name;
-		}
 		Fields f;
 		f.push_back(F("name", "branches"));
-		if(!opened.empty()) f.push_back(F("opened", opened));
-		if(!canOpen.empty()) f.push_back(F("can open", canOpen));
-		if(!locked.empty()) f.push_back(F("locked", locked));
+		McpBranchFields(*list, f);
 		if(result.is<JObj>() && ArgBool(result.get<JObj>(), "can_adopt_now", false)) f.push_back(F("_adopt", "A POLICY CAN BE ADOPTED NOW"));
 		items.push_back(Item("policies", "policies", f));
 	}
@@ -624,6 +610,13 @@ namespace
 				dealText += (dealText.empty() ? "" : " | ") + DealText(d, myName);
 			}
 			if(!dealText.empty()) f.push_back(F("deals", dealText));
+			PlayerTypes eOther = FindPlayer(civ);
+			if(!bWar && eOther != NO_PLAYER && eOther != me->GetID() && eOther < MAX_MAJOR_CIVS)
+			{
+				CvPlayer& other = GET_PLAYER(eOther);
+				f.push_back(F("trade", McpTradeLine(McpTradeViewWith(me, eOther))));
+				f.push_back(F("gold", McpGoldText(other.GetTreasury()->GetGold(), other.calculateGoldRate())));
+			}
 			items.push_back(Item("players", "player:" + civ, f));
 		}
 		int unmet = 0;
@@ -697,9 +690,39 @@ namespace
 	}
 }
 
+// Nothing else in a seat's turn tells it a tile of its own needs a worker: a pillaged tile gives nothing until mended.
+std::vector<std::string> McpDamagedInLand(CvPlayer* me)
+{
+	std::vector<std::string> out;
+	CvMap& map = GC.getMap();
+	for(int i = 0; i < map.numPlots(); ++i)
+	{
+		CvPlot* p = map.plotByIndexUnchecked(i);
+		if(!p || p->getOwner() != me->GetID()) continue;
+		bool bImprovement = p->getImprovementType() != NO_IMPROVEMENT && p->IsImprovementPillaged();
+		bool bRoad = p->getRouteType() != NO_ROUTE && p->IsRoutePillaged();
+		if(!bImprovement && !bRoad) continue;
+		bool bRepairing = false;
+		for(int u = 0; u < p->getNumUnits(); ++u)
+		{
+			CvUnit* unit = p->getUnitByIndex(u);
+			if(!unit || unit->getOwner() != me->GetID() || unit->getBuildType() == NO_BUILD) continue;
+			CvBuildInfo* build = GC.getBuildInfo(unit->getBuildType());
+			if(build && build->isRepair()) bRepairing = true;
+		}
+		ResourceTypes eResource = p->getResourceType(me->getTeam());
+		CvCity* city = p->getWorkingCity();
+		out.push_back(McpDamagedLine(bImprovement ? ImprovementName(p->getImprovementType()) : "",
+			(bImprovement && eResource != NO_RESOURCE) ? ResourceName(eResource) : "", bRoad, p->getX(), p->getY(),
+			(city && city->getOwner() == me->GetID()) ? std::string(city->getName().c_str()) : std::string(), bRepairing));
+	}
+	return out;
+}
+
 McpTurnViewData McpGatherTurnView(CvPlayer* me)
 {
 	McpTurnViewData d;
+	d.damaged = McpDamagedInLand(me);
 	AddTopBar(d.items);
 	AddEmpireClocks(me, d.items);
 	AddOthersUnits(me, d.items);

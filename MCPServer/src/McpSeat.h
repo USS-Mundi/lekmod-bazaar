@@ -39,12 +39,9 @@ bool McpSeatOnScreen();
 // takes back a seat no live session plays (the model's own, or one on the on-screen team
 // that the human assigns it); or gives the session's seat back to the game's AI.
 // err names the reason on failure without revealing which civilizations other models play.
-// bAssignedOpponent: the seat was picked for the model by take_seat civ=opponent, which may
-// hand over a waiting opponent seat another model left without the model naming it.
-bool McpClaimSeat(PlayerTypes ePlayer, std::string& err, bool bAssignedOpponent = false);
+// An opponent seat another model left goes back to that model only (McpMayTakeLeftSeat).
+bool McpClaimSeat(PlayerTypes ePlayer, std::string& err);
 bool McpReleaseSeat(std::string& err);
-// The one opponent seat waiting for a player, if there is exactly one; NO_PLAYER otherwise.
-PlayerTypes McpWaitingOpponentSeat();
 
 // Game thread. A UUID naming this game across reloads and connections, so a model can keep
 // memories per game. Kept in the saved game name, which only multiplayer lobbies show;

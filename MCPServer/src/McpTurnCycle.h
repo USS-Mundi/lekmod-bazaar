@@ -206,6 +206,76 @@ bool McpEndTurnAgain(bool bBlocked, int iUnread, int iTimesAgain);
 // ran. The orders themselves are not stopped by such a message; the seat reads it before the turn ends.
 std::string McpPlanEndHeld(bool bOrderFailed, int iMessagesCame);
 
+// What the game says when an order asks for what is already so. The refusals are written with these, and run_plan
+// counts such an order as done: the unit already rests, the city or team already has the building, the tech is known,
+// the policy taken, or a unit to move or act has no moves left this turn (nothing more it can do, whatever is decided).
+// An attack with no moves left is not done: another unit may make it.
+extern const char* const MCP_ALREADY_RESTING;
+extern const char* const MCP_CITY_HAS_IT;
+extern const char* const MCP_TEAM_HAS_IT;
+extern const char* const MCP_KNOWN_TECH;
+extern const char* const MCP_HAVE_POLICY;
+extern const char* const MCP_NO_MOVES_LEFT;
+// An order for the unit a city finishes as the turn opens (from_city) when the city finished none: nothing to order.
+extern const char* const MCP_NO_NEW_UNIT;
+bool McpOrderAlreadyDone(const std::string& tool, const std::string& err);
+
+// A build order for a unit: on its tile if it can build there (its queued move is replaced, as the order says), else on
+// arrival when its queued move ends on a tile where it can (a worker that fell short), else refused.
+enum McpBuildStep { MCP_BUILD_HERE, MCP_BUILD_ON_ARRIVAL, MCP_BUILD_REFUSED };
+McpBuildStep McpChooseBuildStep(bool bCanHere, bool bQueuedMoveEndsElsewhere, bool bCanThere);
+
+// What is wrong with a path as given. plan_turn refuses a plan with a path that can never be walked as written (none
+// given, off the map, a step not next to the one before, a mountain); an unexplored step is only warned of, since an
+// earlier order may reveal it.
+enum McpPathFault { MCP_PATH_OK, MCP_PATH_MISSING, MCP_PATH_OFF_MAP, MCP_PATH_NOT_ADJACENT, MCP_PATH_UNEXPLORED, MCP_PATH_MOUNTAIN };
+bool McpPathFaultRefuses(McpPathFault eFault);
+
+// Moving a city's queue item from index iFrom to iTo (0-based) as the game does it, by swapping neighbours: each entry
+// i swaps items i and i+1. Empty when nothing moves.
+std::vector<int> McpQueueMoveSwaps(int iFrom, int iTo);
+// What is wrong with a queue position for a queue of n items, or "". Positions count from 1, as the turn view numbers
+// the queue (1 is what the city builds now); bInsert also allows n + 1, after the last item.
+std::string McpQueuePositionFault(int iPos, int n, bool bInsert);
+
+// What a plan answers before it is saved, for what the seat's turn opening brings: a unit ready with no order, a city
+// with nothing to build, a city finishing a unit (its orders, given with from_city), a city or the research finishing
+// with nothing queued after it, research not chosen. A social policy coming due is left to the turn. With the turn
+// open (bTurnOpen) the opening has happened, and only what stops the turn from ending is owed.
+struct McpOpeningCity
+{
+	int id;
+	std::string name;
+	bool nothing;      // nothing in its queue
+	bool finishes;     // its current item is done as the turn opens
+	bool unit;         // that item is a unit
+	bool process;      // it converts production (wealth, research) and never finishes
+	bool queuedAfter;  // something is queued after the current item
+	std::string item;
+	McpOpeningCity() : id(-1), nothing(false), finishes(false), unit(false), process(false), queuedAfter(false) {}
+};
+struct McpOpening
+{
+	std::vector<std::pair<int, std::string> > idle; // unit id, "Warrior 7 at (3,4) has no order"
+	std::vector<McpOpeningCity> cities;
+	bool researchNone;
+	bool researchFinishes;
+	bool researchAfter;
+	std::string research;
+	McpOpening() : researchNone(false), researchFinishes(false), researchAfter(false) {}
+};
+// What the plan's orders answer: units ordered (unit_id), cities given production (set_production or city_queue), cities
+// whose new unit is ordered (from_city), research set.
+struct McpPlanCovers
+{
+	std::set<int> units;
+	std::set<int> cities;
+	std::set<int> newUnits;
+	bool research;
+	McpPlanCovers() : research(false) {}
+};
+std::vector<std::string> McpOpeningOwed(const McpOpening& o, const McpPlanCovers& c, bool bTurnOpen);
+
 // One picture of a seat's land: the candidate center it is drawn around, the cities within reach of it, and the
 // distance to the farthest of them.
 struct McpPicture

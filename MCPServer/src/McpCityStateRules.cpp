@@ -104,6 +104,56 @@ bool McpCsIsDismissal(const std::string& text)
 	return word == "dismiss" || word == "/dismiss";
 }
 
+bool McpCsHumanMaySpeak(bool bAlive, bool bMinor, int ally, int human)
+{
+	return bAlive && bMinor && human >= 0 && ally == human;
+}
+
+int McpCsGoldMoved(int giverBefore, int giverAfter)
+{
+	return giverBefore > giverAfter ? giverBefore - giverAfter : 0;
+}
+
+int McpCsTributePaid(int treasury, int tribute)
+{
+	if(treasury <= 0 || tribute <= 0) return 0;
+	return treasury < tribute ? treasury : tribute;
+}
+
+std::string McpCsGiftDeed(int gold, int treasuryBefore)
+{
+	std::ostringstream o;
+	o << "gave them " << gold << " gold (treasury " << treasuryBefore << " to " << (treasuryBefore + gold) << ")";
+	return o.str();
+}
+
+std::string McpCsTributeDeed(int tribute, int paid, int treasuryBefore)
+{
+	std::ostringstream o;
+	o << "took " << tribute << " gold from them by threat (treasury " << treasuryBefore << " to " << (treasuryBefore - paid) << ")";
+	return o.str();
+}
+
+bool McpCsSameSide(bool aMinor, bool bMinor, int allyTeamA, int allyTeamB)
+{
+	return aMinor && bMinor && allyTeamA >= 0 && allyTeamA == allyTeamB;
+}
+
+bool McpCsReadTalkLine(const std::string& line, const std::string& cityState, int& turn, bool& byCityState, std::string& text)
+{
+	if(line.compare(0, 5, "turn ") != 0) return false;
+	size_t i = 5, digits = 0;
+	int n = 0;
+	while(i < line.size() && line[i] >= '0' && line[i] <= '9') { n = n * 10 + (line[i] - '0'); ++i; ++digits; }
+	if(digits == 0 || line.compare(i, 2, ", ") != 0) return false;
+	size_t colon = line.find(": ", i + 2);
+	if(colon == std::string::npos) return false;
+	turn = n;
+	byCityState = line.substr(i + 2, colon - i - 2) == cityState;
+	text = line.substr(colon + 2);
+	return true;
+}
+
 namespace
 {
 	const char* SIGHT_TAG = "mcp-sight 1|";
@@ -207,7 +257,7 @@ std::string McpCsToolRefusal(const std::string& tool, const std::string& action,
 		return "a city-state's treasury is the game's to keep: it never falls below zero, so it is not yours to balance";
 	if(tool == "unit_action" && action == "disband")
 		return "a city-state does not disband its units: the game takes your city back with the forces it gave you, and running short of gold costs you nothing";
-	if(tool == "set_production" && item.compare(0, 8, "PROCESS_") == 0)
+	if((tool == "set_production" || tool == "city_queue") && item.compare(0, 8, "PROCESS_") == 0)
 		return "a city-state's city builds things rather than turning its work into gold or research: your treasury never falls below zero, so running short costs you nothing";
 	return "";
 }

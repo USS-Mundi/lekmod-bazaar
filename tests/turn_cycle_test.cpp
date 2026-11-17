@@ -688,6 +688,126 @@ namespace
 		// The failed order is the first thing to deal with.
 		CHECK(McpPlanEndHeld(true, 2) == McpPlanEndHeld(true, 0));
 	}
+
+	void TestAnOrderForWhatIsAlreadySoCountsAsDone()
+	{
+		CHECK(McpOrderAlreadyDone("unit_action", MCP_ALREADY_RESTING));
+		CHECK(McpOrderAlreadyDone("set_production", std::string("this city cannot build BUILDING_MONUMENT: ") + MCP_CITY_HAS_IT));
+		CHECK(McpOrderAlreadyDone("buy", std::string("cannot buy that here now: the city cannot build it: ") + MCP_CITY_HAS_IT));
+		CHECK(McpOrderAlreadyDone("set_production", std::string("this city cannot build BUILDING_GREAT_LIBRARY: ") + MCP_TEAM_HAS_IT));
+		CHECK(McpOrderAlreadyDone("set_research", std::string(MCP_KNOWN_TECH) + "Bronze Working"));
+		CHECK(McpOrderAlreadyDone("adopt_policy", MCP_HAVE_POLICY));
+		// A unit with no moves left can do nothing more this turn, whatever is decided.
+		CHECK(McpOrderAlreadyDone("move_unit", MCP_NO_MOVES_LEFT));
+		CHECK(McpOrderAlreadyDone("unit_action", MCP_NO_MOVES_LEFT));
+		// An attack that cannot be made is a choice still open: another unit may make it.
+		CHECK(!McpOrderAlreadyDone("attack", MCP_NO_MOVES_LEFT));
+		CHECK(!McpOrderAlreadyDone("city_attack", MCP_NO_MOVES_LEFT));
+		// Anything else that fails is the seat's to look at.
+		CHECK(!McpOrderAlreadyDone("move_unit", "path step 2 (4,5) cannot be entered: a unit of yours stands there; the rest of the path is dropped"));
+		CHECK(!McpOrderAlreadyDone("set_production", "this city cannot build BUILDING_TEMPLE: needs Shrine in this city first"));
+		CHECK(!McpOrderAlreadyDone("unit_action", "cannot do that build on this tile (wrong unit, tech missing, or terrain)"));
+		CHECK(!McpOrderAlreadyDone("end_turn", MCP_ALREADY_RESTING));
+	}
+
+	void TestABuildTheUnitCannotStartHereWaitsForItsQueuedMove()
+	{
+		CHECK(McpChooseBuildStep(true, false, false) == MCP_BUILD_HERE);
+		// Where it stands wins, as the order says; its queued move is replaced.
+		CHECK(McpChooseBuildStep(true, true, true) == MCP_BUILD_HERE);
+		// A worker that fell short of the tile builds there when it arrives.
+		CHECK(McpChooseBuildStep(false, true, true) == MCP_BUILD_ON_ARRIVAL);
+		CHECK(McpChooseBuildStep(false, true, false) == MCP_BUILD_REFUSED);
+		CHECK(McpChooseBuildStep(false, false, false) == MCP_BUILD_REFUSED);
+	}
+
+	void TestAQueueItemMovesByNeighbourSwaps()
+	{
+		CHECK(McpQueueMoveSwaps(2, 2).empty());
+		// Item 3 (index 2) to the front: swap 1-2, then 0-1.
+		std::vector<int> up = McpQueueMoveSwaps(2, 0);
+		CHECK(up.size() == 2 && up[0] == 1 && up[1] == 0);
+		std::vector<int> down = McpQueueMoveSwaps(0, 2);
+		CHECK(down.size() == 2 && down[0] == 0 && down[1] == 1);
+	}
+
+	void TestQueuePositionsCountFromOne()
+	{
+		CHECK(McpQueuePositionFault(1, 3, false).empty());
+		CHECK(McpQueuePositionFault(3, 3, false).empty());
+		CHECK(McpQueuePositionFault(4, 3, false) == "the queue has 3 items: give a position from 1 to 3");
+		CHECK(McpQueuePositionFault(0, 3, false) == "the queue has 3 items: give a position from 1 to 3");
+		// An item can go in after the last one.
+		CHECK(McpQueuePositionFault(4, 3, true).empty());
+		CHECK(McpQueuePositionFault(5, 3, true) == "the queue has 3 items: give a position from 1 to 4");
+		CHECK(McpQueuePositionFault(1, 0, false) == "the queue is empty");
+		CHECK(McpQueuePositionFault(1, 0, true).empty());
+	}
+
+	McpOpeningCity OpeningCity(int id, const char* name, bool finishes, bool unit, const char* item, bool after)
+	{
+		McpOpeningCity c;
+		c.id = id; c.name = name; c.finishes = finishes; c.unit = unit; c.item = item; c.queuedAfter = after;
+		return c;
+	}
+
+	void TestAPlanAnswersWhatTheTurnOpeningBrings()
+	{
+		McpOpening o;
+		o.idle.push_back(std::make_pair(7, std::string("Warrior 7 at (3,4) has no order")));
+		o.cities.push_back(OpeningCity(1, "Rome", true, true, "Settler", false));
+		o.cities.push_back(OpeningCity(2, "Antium", true, false, "Library", true));
+		o.cities.push_back(OpeningCity(3, "Cumae", false, false, "Granary", false));
+		McpOpeningCity idle = OpeningCity(4, "Neapolis", false, false, "", false);
+		idle.nothing = true;
+		o.cities.push_back(idle);
+		o.researchFinishes = true;
+		o.research = "Writing";
+		McpPlanCovers none;
+		std::vector<std::string> owed = McpOpeningOwed(o, none, false);
+		CHECK(owed.size() == 5);
+		CHECK(Has(owed, "Warrior 7 at (3,4) has no order"));
+		CHECK(Has(owed, "Rome finishes Settler as the turn opens: give the new unit its orders in this plan, with from_city 1 in place of unit_id"));
+		CHECK(Has(owed, "Rome finishes Settler as the turn opens, with nothing queued after it: queue what comes next"));
+		CHECK(Has(owed, "Neapolis has nothing to build"));
+		CHECK(Has(owed, "research: Writing finishes as the turn opens, with nothing queued after it: set what comes next"));
+		// What the plan orders is answered; a queued item after the one finishing already answers the city.
+		McpPlanCovers all;
+		all.units.insert(7);
+		all.newUnits.insert(1);
+		all.cities.insert(1);
+		all.cities.insert(4);
+		all.research = true;
+		CHECK(McpOpeningOwed(o, all, false).empty());
+		// With the turn open only what stops it from ending is owed: the opening has already happened.
+		std::vector<std::string> open = McpOpeningOwed(o, none, true);
+		CHECK(open.size() == 2 && Has(open, "Warrior 7 at (3,4) has no order") && Has(open, "Neapolis has nothing to build"));
+		McpOpening r;
+		r.researchNone = true;
+		CHECK(McpOpeningOwed(r, none, true).size() == 1 && McpOpeningOwed(r, none, true)[0] == "research: nothing chosen");
+		// A city converting its production (a process) never finishes.
+		McpOpening w;
+		McpOpeningCity wealth = OpeningCity(5, "Ostia", true, false, "Wealth", false);
+		wealth.process = true;
+		w.cities.push_back(wealth);
+		CHECK(McpOpeningOwed(w, none, false).empty());
+	}
+
+	void TestAnOrderForAUnitNotYetBuiltWaitsIfNoneCame()
+	{
+		CHECK(McpOrderAlreadyDone("move_unit", std::string("Rome ") + MCP_NO_NEW_UNIT));
+	}
+
+	void TestOnlyAPathThatCanNeverBeWalkedIsRefused()
+	{
+		CHECK(!McpPathFaultRefuses(MCP_PATH_OK));
+		CHECK(McpPathFaultRefuses(MCP_PATH_MISSING));
+		CHECK(McpPathFaultRefuses(MCP_PATH_OFF_MAP));
+		CHECK(McpPathFaultRefuses(MCP_PATH_NOT_ADJACENT));
+		CHECK(McpPathFaultRefuses(MCP_PATH_MOUNTAIN));
+		// An earlier order may reveal the tile before the move runs.
+		CHECK(!McpPathFaultRefuses(MCP_PATH_UNEXPLORED));
+	}
 }
 
 namespace
@@ -797,6 +917,13 @@ int main()
 	TestWhatAnotherPlayerDidInSightWakes();
 	TestThreatsWake();
 	TestAPlannedTurnRunsUnlessSomethingHoldsIt();
+	TestAnOrderForWhatIsAlreadySoCountsAsDone();
+	TestABuildTheUnitCannotStartHereWaitsForItsQueuedMove();
+	TestOnlyAPathThatCanNeverBeWalkedIsRefused();
+	TestAQueueItemMovesByNeighbourSwaps();
+	TestQueuePositionsCountFromOne();
+	TestAPlanAnswersWhatTheTurnOpeningBrings();
+	TestAnOrderForAUnitNotYetBuiltWaitsIfNoneCame();
 	TestOnePictureWhenTheCitiesFit();
 	TestSpreadCitiesTakeMorePicturesUpToTheLimit();
 	TestTiesGoToTheTighterPicture();

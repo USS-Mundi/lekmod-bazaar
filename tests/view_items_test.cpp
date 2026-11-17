@@ -199,6 +199,44 @@ namespace
 	}
 }
 
+static void TestDamagedLines()
+{
+	// a pillaged improvement or road in the seat's land: what it is, where, near which city, and what mends it
+	CHECK_EQ(McpDamagedLine("Plantation", "Tobacco", false, 41, 12, "Hong Kong", false),
+		std::string("pillaged tobacco plantation (41,12) near Hong Kong: a worker on the tile repairs it (unit_action build, the repair in builds_here)"));
+	CHECK_EQ(McpDamagedLine("", "", true, 40, 12, "", false),
+		std::string("pillaged road (40,12): a worker on the tile repairs it (unit_action build, the repair in builds_here)"));
+	CHECK_EQ(McpDamagedLine("Farm", "", true, 9, 3, "Cusco", true),
+		std::string("pillaged farm and road (9,3) near Cusco: a worker is repairing it"));
+}
+
+static void TestBranchesOpenToTheSeatAreNotCalledLocked()
+{
+	// A branch the era allows is the seat's to open with its next policy, culture in hand or not; only a later
+	// era's branch waits.
+	picojson::value v = Parse("[{\"name\":\"Tradition\",\"unlocked\":true,\"policies\":[{\"name\":\"Aristocracy\",\"owned\":true},{\"name\":\"Legalism\",\"owned\":false}]},"
+		"{\"name\":\"Liberty\",\"unlocked\":false,\"can_unlock_now\":false,\"opens_with_a_policy\":true},"
+		"{\"name\":\"Honor\",\"unlocked\":false,\"can_unlock_now\":true,\"opens_with_a_policy\":true},"
+		"{\"name\":\"Patronage\",\"unlocked\":false,\"can_unlock_now\":false,\"requires_era\":\"Classical\"},"
+		"{\"name\":\"Freedom\",\"unlocked\":false,\"can_unlock_now\":false,\"requires_era\":\"Industrial\"},"
+		"{\"name\":\"Piety\",\"unlocked\":false,\"can_unlock_now\":false}]");
+	std::vector<std::pair<std::string, std::string> > f;
+	McpBranchFields(v.get<picojson::array>(), f);
+	CHECK_EQ(Join(f), std::string("opened Tradition 1/2 (left: Legalism) · can open Liberty, Honor · later Patronage (Classical), Freedom (Industrial), Piety"));
+	f.clear();
+	McpBranchFields(Parse("[]").get<picojson::array>(), f);
+	CHECK(f.empty());
+}
+
+static void TestBranchHelpLeavesOutWhomItSuits()
+{
+	CHECK_EQ(McpBranchHelpFacts("Tradition is best for small empires.\n\nAdopting Tradition greatly increases the rate of border expansion.\n\nAdopting all Policies in the Tradition tree will grant +15% Growth."),
+		std::string("Adopting Tradition greatly increases the rate of border expansion.\n\nAdopting all Policies in the Tradition tree will grant +15% Growth."));
+	CHECK_EQ(McpBranchHelpFacts("Autocracy is for militaristic civilizations. Adopting Autocracy gives x."), std::string("Adopting Autocracy gives x."));
+	CHECK_EQ(McpBranchHelpFacts("No opening line here."), std::string("No opening line here."));
+	CHECK_EQ(McpBranchHelpFacts(""), std::string(""));
+}
+
 int main()
 {
 	TestAListGoingFromEmptyToOneKeepsTheOtherListsNames();
@@ -212,6 +250,9 @@ int main()
 	TestClockFieldsTick();
 	TestNotesHealingFallingTurnsAndDemographicsTick();
 	TestUnitLinesLeaveOutWhatDoesNotApply();
+	TestDamagedLines();
+	TestBranchesOpenToTheSeatAreNotCalledLocked();
+	TestBranchHelpLeavesOutWhomItSuits();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all view item tests passed\n");
 	return 0;

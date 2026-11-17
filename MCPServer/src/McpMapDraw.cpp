@@ -354,7 +354,13 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		// The ground line sits under whatever stands on the hex, so nothing covers it; a city's ground is left out. A
 		// worked tile says so there in a letter, which reads surely where a dot was missed.
 		if(h.worked) ground += ground.empty() ? "W" : " W";
-		if(!ground.empty() && !h.city) DrawCentered(g, ground, labelFont, ink, px, py + 19 * s);
+		// A pillaged tile gives nothing until a worker repairs it: its ground line says so first, in red, and keeps only
+		// what was pillaged so the word always fits.
+		if(h.pillaged && !h.city)
+		{
+			DrawCentered(g, "PIL " + h.pillagedWhat, labelFont, Color(255, 255, 60, 60), px, py + 19 * s, 1.5f);
+		}
+		else if(!ground.empty() && !h.city) DrawCentered(g, ground, labelFont, ink, px, py + 19 * s);
 		if(h.city)
 		{
 			PointF c[6];

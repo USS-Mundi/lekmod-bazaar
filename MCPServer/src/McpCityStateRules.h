@@ -59,6 +59,27 @@ McpCsNextSteps McpCsNextStepsFor(const std::vector<McpCsTier>& tiers, int influe
 // The ally's message to its city-state is the one word that switches it off: "dismiss" (or "/dismiss"), any case.
 bool McpCsIsDismissal(const std::string& text);
 
+// The human may write to a city-state while it lives and the human is its ally: the rule of the log window's chat and
+// the Message Center's list. ally and human are player numbers, -1 for none.
+bool McpCsHumanMaySpeak(bool bAlive, bool bMinor, int ally, int human);
+
+// Gold a city-state is given goes into its treasury, and tribute comes out of it: the game moves neither.
+// The gold that left a giver's treasury over a gift (0 when the city-state refused it).
+int McpCsGoldMoved(int giverBefore, int giverAfter);
+// What the city-state pays of a tribute: what it has, never below zero. The taker's sum stays the game's.
+int McpCsTributePaid(int treasury, int tribute);
+// The deeds as its history records them, with the treasury before and after.
+std::string McpCsGiftDeed(int gold, int treasuryBefore);
+std::string McpCsTributeDeed(int tribute, int paid, int treasuryBefore);
+
+// Two city-states are one side while each has an ally and the two allies are on one team: they pass through each
+// other's land and do not fight. allyTeam is -1 for a city-state with no ally.
+bool McpCsSameSide(bool aMinor, bool bMinor, int allyTeamA, int allyTeamB);
+
+// A line of a city-state's conversation as the plugin records it, "turn N, <speaker>: text": its turn, whether the
+// city-state said it, and the text. False for anything else.
+bool McpCsReadTalkLine(const std::string& line, const std::string& cityState, int& turn, bool& byCityState, std::string& text);
+
 // Live sight a city-state shares with its ally: the plots each sharing unit has lit for the ally's team. It lives in
 // the city-state player's script data, which a save writes together with the visibility counts, so a load can take
 // exactly those plots off again.

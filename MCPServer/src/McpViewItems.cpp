@@ -1,4 +1,5 @@
 #include "McpViewItems.h"
+#include <sstream>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -257,6 +258,19 @@ namespace
 	}
 }
 
+std::string McpDamagedLine(const std::string& improvement, const std::string& resource, bool road, int x, int y,
+	const std::string& city, bool beingRepaired)
+{
+	std::string what;
+	if(!improvement.empty()) what = (resource.empty() ? std::string() : Lower(resource) + " ") + Lower(improvement);
+	if(road) what += (what.empty() ? "" : " and ") + std::string("road");
+	std::ostringstream o;
+	o << "pillaged " << what << " (" << x << "," << y << ")";
+	if(!city.empty()) o << " near " << city;
+	o << (beingRepaired ? ": a worker is repairing it" : ": a worker on the tile repairs it (unit_action build, the repair in builds_here)");
+	return o.str();
+}
+
 std::string McpTileShort(const picojson::object& tile)
 {
 	std::string name;
@@ -321,4 +335,48 @@ void McpCitizensFields(const picojson::object& citizens, std::vector<std::pair<s
 		}
 		if(!list.empty()) out.push_back(std::make_pair(std::string("specialists"), list));
 	}
+}
+
+void McpBranchFields(const picojson::array& branches, std::vector<std::pair<std::string, std::string> >& out)
+{
+	std::string opened, canOpen, later;
+	for(size_t i = 0; i < branches.size(); ++i)
+	{
+		if(!branches[i].is<JObj>()) continue;
+		const JObj& b = branches[i].get<JObj>();
+		std::string name = Text(b, "name");
+		if(Flag(b, "unlocked"))
+		{
+			int owned = 0, total = 0;
+			std::string left;
+			JObj::const_iterator pl = b.find("policies");
+			if(pl != b.end() && pl->second.is<JArr>())
+				for(size_t k = 0; k < pl->second.get<JArr>().size(); ++k)
+				{
+					const JVal& pv = pl->second.get<JArr>()[k];
+					if(!pv.is<JObj>()) continue;
+					++total;
+					if(Flag(pv.get<JObj>(), "owned")) ++owned;
+					else left += (left.empty() ? "" : ", ") + Text(pv.get<JObj>(), "name");
+				}
+			std::ostringstream count;
+			count << name << " " << owned << "/" << total;
+			opened += (opened.empty() ? "" : " \xC2\xB7 ") + count.str() + (left.empty() ? "" : " (left: " + left + ")");
+		}
+		else if(Flag(b, "opens_with_a_policy")) canOpen += (canOpen.empty() ? "" : ", ") + name;
+		else
+		{
+			std::string era = Text(b, "requires_era");
+			later += (later.empty() ? "" : ", ") + name + (era.empty() ? "" : " (" + era + ")");
+		}
+	}
+	if(!opened.empty()) out.push_back(std::make_pair(std::string("opened"), opened));
+	if(!canOpen.empty()) out.push_back(std::make_pair(std::string("can open"), canOpen));
+	if(!later.empty()) out.push_back(std::make_pair(std::string("later"), later));
+}
+
+std::string McpBranchHelpFacts(const std::string& help)
+{
+	size_t at = help.find("Adopting");
+	return at == std::string::npos ? help : help.substr(at);
 }

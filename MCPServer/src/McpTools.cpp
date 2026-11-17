@@ -4,6 +4,7 @@
 #include "McpTurnCycle.h"
 #include "McpToolSupport.h"
 #include "McpRules.h"
+#include "McpChronicleGame.h"
 #include "McpSeat.h"
 #include "McpLogText.h"
 #include "McpToolHandlers.h"
@@ -622,17 +623,26 @@ MCP_TOOL(ToolResearchOptions)
 
 // The route a move takes, as the player gives it: tiles in order, each next to the one before, the first next to the
 // unit. A destination alone is not taken: the route is the player's to choose.
-bool McpTool::ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err)
+bool McpTool::ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err, int* pFault)
 {
+	return ReadPathFrom(args, u->getX(), u->getY(), u->getTeam(), steps, err, pFault);
+}
+
+bool McpTool::ReadPathFrom(const JObj& args, int startX, int startY, TeamTypes eTeam, std::vector<CvPlot*>& steps, std::string& err, int* pFault)
+{
+	int fault = MCP_PATH_OK;
+	if(!pFault) pFault = &fault;
+	*pFault = MCP_PATH_OK;
 	JObj::const_iterator it = args.find("path");
 	if(it == args.end() || !it->second.is<JArr>() || it->second.get<JArr>().empty())
 	{
 		err = "path must list the tiles to step through, in order, each next to the one before and the first next to the unit, ending at the destination: [[x,y],[x,y],...]";
+		*pFault = MCP_PATH_MISSING;
 		return false;
 	}
 	const JArr& list = it->second.get<JArr>();
 	CvMap& map = GC.getMap();
-	int px = u->getX(), py = u->getY();
+	int px = startX, py = startY;
 	for(size_t i = 0; i < list.size(); ++i)
 	{
 		int x = -1, y = -1;
@@ -647,15 +657,16 @@ bool McpTool::ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& 
 			y = ArgInt(list[i].get<JObj>(), "y", -1);
 		}
 		std::string at = McpFormat("path step %d", (int)i + 1);
-		if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = at + " is not a tile on the map; give [x,y]"; return false; }
+		if(x < 0 || y < 0 || x >= map.getGridWidth() || y >= map.getGridHeight()) { err = at + " is not a tile on the map; give [x,y]"; *pFault = MCP_PATH_OFF_MAP; return false; }
 		if(plotDistance(px, py, x, y) != 1)
 		{
 			err = at + McpFormat(" (%d,%d) is not next to (%d,%d); each step must be one of the six tiles around the one before", x, y, px, py);
+			*pFault = MCP_PATH_NOT_ADJACENT;
 			return false;
 		}
 		CvPlot* p = map.plot(x, y);
-		if(!p->isRevealed(u->getTeam())) { err = at + McpFormat(" (%d,%d) is unexplored", x, y); return false; }
-		if(p->isMountain()) { err = at + McpFormat(" (%d,%d) is a mountain: impassable", x, y); return false; }
+		if(!p->isRevealed(eTeam)) { err = at + McpFormat(" (%d,%d) is unexplored", x, y); *pFault = MCP_PATH_UNEXPLORED; return false; }
+		if(p->isMountain()) { err = at + McpFormat(" (%d,%d) is a mountain: impassable", x, y); *pFault = MCP_PATH_MOUNTAIN; return false; }
 		steps.push_back(p);
 		px = x; py = y;
 	}
@@ -772,7 +783,22 @@ MCP_TOOL(ToolUnitAction)
 		std::string key = ArgStr(args, "build");
 		BuildTypes eBuild = FindBuildType(key);
 		if(eBuild == NO_BUILD) { err = "unknown build type '" + key + "' (use unit_options to list builds_here)"; return JVal(); }
-		if(!u->canBuild(p, eBuild)) { err = "cannot do that build on this tile (wrong unit, tech missing, or terrain)"; return JVal(); }
+		// A worker whose queued move ends elsewhere (it fell short of the tile) builds there when it arrives.
+		CvPlot* dest = u->LastMissionPlot();
+		bool bElsewhere = dest && dest != p;
+		McpBuildStep eStep = McpChooseBuildStep(u->canBuild(p, eBuild), bElsewhere, bElsewhere && u->canBuild(dest, eBuild));
+		if(eStep == MCP_BUILD_REFUSED) { err = "cannot do that build on this tile (wrong unit, tech missing, or terrain)"; return JVal(); }
+		if(eStep == MCP_BUILD_ON_ARRIVAL)
+		{
+			{
+				NetMessageScope scope;
+				u->PushMission(CvTypes::getMISSION_BUILD(), eBuild, -1, 0, true, true);
+			}
+			o["ok"] = J(true);
+			o["builds_on_arrival"] = J(McpFormat("the unit is still on its way to (%d,%d); it starts this build when it gets there", dest->getX(), dest->getY()));
+			o["unit"] = UnitJson(u);
+			return JVal(o);
+		}
 		PushOrderAndReport(o, me, u, CvTypes::getMISSION_BUILD(), eBuild, -1);
 		return JVal(o);
 	}
@@ -868,51 +894,132 @@ MCP_TOOL(ToolUnitAction)
 	return JVal();
 }
 
+namespace
+{
+	// Puts item in c's queue as the city screen does: bPop replaces what it builds now, bAppend adds it at the end.
+	// False, with err, when the city cannot take it; substituted names a civilization's own version used instead.
+	bool PushCityItem(CvPlayer* me, CvCity* c, const std::string& item, bool bPop, bool bAppend, std::string& substituted, std::string& err)
+	{
+		CityItem found = FindCityItem(me, item);
+		substituted = found.substituted;
+		UnitTypes eUnit = found.eUnit;
+		BuildingTypes eBuilding = found.eBuilding;
+		ProjectTypes eProject = (eUnit == NO_UNIT && eBuilding == NO_BUILDING) ? FindProjectType(item) : NO_PROJECT;
+		ProcessTypes eProcess = (eUnit == NO_UNIT && eBuilding == NO_BUILDING && eProject == NO_PROJECT) ? FindProcessType(item) : NO_PROCESS;
+		if(eUnit != NO_UNIT)
+		{
+			std::string why = TrainRefusal(c, eUnit, false);
+			if(!why.empty()) { err = "this city cannot train " + std::string(GC.getUnitInfo(eUnit)->GetType()) + ": " + why; return false; }
+			c->pushOrder(ORDER_TRAIN, eUnit, -1, false, bPop, bAppend);
+		}
+		else if(eBuilding != NO_BUILDING)
+		{
+			std::string why = BuildRefusal(c, eBuilding);
+			if(!why.empty()) { err = "this city cannot build " + std::string(GC.getBuildingInfo(eBuilding)->GetType()) + ": " + why; return false; }
+			c->pushOrder(ORDER_CONSTRUCT, eBuilding, -1, false, bPop, bAppend);
+		}
+		else if(eProject != NO_PROJECT)
+		{
+			if(!c->canCreate(eProject)) { err = "this city cannot work on " + item + " right now"; return false; }
+			c->pushOrder(ORDER_CREATE, eProject, -1, false, bPop, bAppend);
+		}
+		else if(eProcess != NO_PROCESS)
+		{
+			if(!c->canMaintain(eProcess)) { err = "this city cannot run " + item + " yet (its technology is missing)"; return false; }
+			c->pushOrder(ORDER_MAINTAIN, eProcess, -1, false, bPop, bAppend);
+		}
+		else
+		{
+			err = "unknown item '" + item + "'; use a type from city_options such as UNIT_WARRIOR, BUILDING_MONUMENT, PROJECT_APOLLO_PROGRAM or PROCESS_WEALTH";
+			return false;
+		}
+		return true;
+	}
+
+	// The city's queue, numbered from 1 (what it builds now), each item with its turns at the current production.
+	JVal QueueJson(CvCity* c)
+	{
+		JArr out;
+		for(int i = 0; i < c->getOrderQueueLength(); ++i)
+		{
+			const OrderData* od = c->getOrderFromQueue(i);
+			if(!od) continue;
+			int turns = -1;
+			if(od->eOrderType == ORDER_TRAIN) turns = c->getProductionTurnsLeft((UnitTypes)od->iData1, i);
+			else if(od->eOrderType == ORDER_CONSTRUCT) turns = c->getProductionTurnsLeft((BuildingTypes)od->iData1, i);
+			else if(od->eOrderType == ORDER_CREATE) turns = c->getProductionTurnsLeft((ProjectTypes)od->iData1, i);
+			std::string line = McpFormat("%d. %s", i + 1, OrderName(od).c_str());
+			if(od->eOrderType == ORDER_MAINTAIN) line += " (every turn, until something else is set)";
+			else if(turns >= 0 && turns < 100000) line += McpFormat(" %dt", turns);
+			out.push_back(J(line));
+		}
+		return JVal(out);
+	}
+}
+
 MCP_TOOL(ToolSetProduction)
 {
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
 	CvCity* c = RequireCity(me, args, err);
 	if(!c) return JVal();
-	std::string item = ArgStr(args, "item");
 	bool bAppend = ArgBool(args, "append", false);
+	std::string substituted;
+	if(!PushCityItem(me, c, ArgStr(args, "item"), !bAppend, bAppend, substituted, err)) return JVal();
+	JObj o;
+	o["ok"] = J(true);
+	if(!substituted.empty()) o["substituted"] = J(substituted);
+	o["city"] = CityJson(c);
+	return JVal(o);
+}
 
-	CityItem found = FindCityItem(me, item);
-	UnitTypes eUnit = found.eUnit;
-	BuildingTypes eBuilding = found.eBuilding;
-	ProjectTypes eProject = (eUnit == NO_UNIT && eBuilding == NO_BUILDING) ? FindProjectType(item) : NO_PROJECT;
-	ProcessTypes eProcess = (eUnit == NO_UNIT && eBuilding == NO_BUILDING && eProject == NO_PROJECT) ? FindProcessType(item) : NO_PROCESS;
-	if(eUnit != NO_UNIT)
+// The city's build queue, managed as the city screen does: item (with at) puts an item in, remove takes one out, move
+// (with to) moves one. Positions count from 1, what the city builds now.
+MCP_TOOL(ToolCityQueue)
+{
+	CvPlayer* me = MeActing(err);
+	if(!me) return JVal();
+	CvCity* c = RequireCity(me, args, err);
+	if(!c) return JVal();
+	int n = c->getOrderQueueLength();
+	bool bInsert = args.count("item") > 0, bRemove = args.count("remove") > 0, bMove = args.count("move") > 0;
+	if((int)bInsert + (int)bRemove + (int)bMove != 1)
 	{
-		std::string why = TrainRefusal(c, eUnit, false);
-		if(!why.empty()) { err = "this city cannot train " + std::string(GC.getUnitInfo(eUnit)->GetType()) + ": " + why; return JVal(); }
-		c->pushOrder(ORDER_TRAIN, eUnit, -1, false, !bAppend, bAppend);
-	}
-	else if(eBuilding != NO_BUILDING)
-	{
-		std::string why = BuildRefusal(c, eBuilding);
-		if(!why.empty()) { err = "this city cannot build " + std::string(GC.getBuildingInfo(eBuilding)->GetType()) + ": " + why; return JVal(); }
-		c->pushOrder(ORDER_CONSTRUCT, eBuilding, -1, false, !bAppend, bAppend);
-	}
-	else if(eProject != NO_PROJECT)
-	{
-		if(!c->canCreate(eProject)) { err = "this city cannot work on " + item + " right now"; return JVal(); }
-		c->pushOrder(ORDER_CREATE, eProject, -1, false, !bAppend, bAppend);
-	}
-	else if(eProcess != NO_PROCESS)
-	{
-		if(!c->canMaintain(eProcess)) { err = "this city cannot run " + item + " yet (its technology is missing)"; return JVal(); }
-		c->pushOrder(ORDER_MAINTAIN, eProcess, -1, false, !bAppend, bAppend);
-	}
-	else
-	{
-		err = "unknown item '" + item + "'; use a type from city_options such as UNIT_WARRIOR, BUILDING_MONUMENT, PROJECT_APOLLO_PROGRAM or PROCESS_WEALTH";
+		err = "give one of: item (with at, to put it in the queue; at defaults to the end), remove (a position), or move (a position, with to)";
 		return JVal();
 	}
 	JObj o;
+	if(bInsert)
+	{
+		int at = ArgInt(args, "at", n + 1);
+		err = McpQueuePositionFault(at, n, true);
+		if(!err.empty()) return JVal();
+		std::string substituted;
+		if(!PushCityItem(me, c, ArgStr(args, "item"), false, true, substituted, err)) return JVal();
+		if(!substituted.empty()) o["substituted"] = J(substituted);
+		std::vector<int> swaps = McpQueueMoveSwaps(c->getOrderQueueLength() - 1, at - 1);
+		for(size_t i = 0; i < swaps.size(); ++i) c->swapOrder(swaps[i]);
+	}
+	else if(bRemove)
+	{
+		int at = ArgInt(args, "remove", 0);
+		err = McpQueuePositionFault(at, n, false);
+		if(!err.empty()) return JVal();
+		c->popOrder(at - 1, false, false);
+	}
+	else
+	{
+		int from = ArgInt(args, "move", 0), to = ArgInt(args, "to", 0);
+		err = McpQueuePositionFault(from, n, false);
+		if(err.empty()) err = McpQueuePositionFault(to, n, false);
+		if(!err.empty()) return JVal();
+		std::vector<int> swaps = McpQueueMoveSwaps(from - 1, to - 1);
+		for(size_t i = 0; i < swaps.size(); ++i) c->swapOrder(swaps[i]);
+	}
 	o["ok"] = J(true);
-	if(!found.substituted.empty()) o["substituted"] = J(found.substituted);
-	o["city"] = CityJson(c);
+	o["city"] = J(c->getName().c_str());
+	o["queue"] = QueueJson(c);
+	if(c->getOrderQueueLength() == 0) o["note"] = J("the queue is empty: the city builds nothing until you give it something");
 	return JVal(o);
 }
 
@@ -936,7 +1043,7 @@ MCP_TOOL(ToolSetResearch)
 	}
 	else
 	{
-		if(GET_TEAM(me->getTeam()).GetTeamTechs()->HasTech(eTech)) { err = std::string("you already know ") + TechName(eTech); return JVal(); }
+		if(GET_TEAM(me->getTeam()).GetTeamTechs()->HasTech(eTech)) { err = std::string(MCP_KNOWN_TECH) + TechName(eTech); return JVal(); }
 		if(!me->GetPlayerTechs()->CanEverResearch(eTech)) { err = std::string("your civilization can never research ") + TechName(eTech); return JVal(); }
 		if(bAdd && me->GetPlayerTechs()->IsResearchingTech(eTech)) { err = std::string(TechName(eTech)) + " is already in your research queue"; return JVal(); }
 		std::vector<TechTypes> previous;
@@ -1155,9 +1262,7 @@ MCP_TOOL(ToolTakeSeat)
 		o["playing"] = J("the civilization on screen, with the human");
 		return JVal(o);
 	}
-	bool bAssignedOpponent = false;
-	if(key == "opponent") { e = McpWaitingOpponentSeat(); bAssignedOpponent = (e != NO_PLAYER); } // the one opponent seat left behind, before a fresh pick
-	if(e == NO_PLAYER && (key == "teammate" || key == "opponent"))
+	if(key == "teammate" || key == "opponent")
 	{
 		std::vector<PlayerTypes> choices = ClaimableCivs(key == "teammate");
 		if(choices.empty()) { err = "no computer-run " + key + " civilization is left to play"; return JVal(); }
@@ -1165,7 +1270,7 @@ MCP_TOOL(ToolTakeSeat)
 	}
 	else if(e == NO_PLAYER) e = FindPlayer(key);
 	if(e == NO_PLAYER) { err = "unknown civilization '" + key + "'; use a name from civs, or teammate, opponent or human"; return JVal(); }
-	if(!McpClaimSeat(e, err, bAssignedOpponent)) return JVal();
+	if(!McpClaimSeat(e, err)) return JVal();
 	JObj o;
 	o["ok"] = J(true);
 	o["playing"] = J(CivName(e));
@@ -1182,9 +1287,34 @@ MCP_TOOL(ToolTakeSeat)
 		return JVal(o);
 	}
 	o["your_civilization"] = CivilizationRules(GET_PLAYER(e).getCivilizationType(), GET_PLAYER(e).getLeaderType());
+	std::string page = McpWhoYouAre(&GET_PLAYER(e));
+	if(!page.empty()) o["who_you_are"] = J(page);
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
 	o["next"] = J(std::string(plan) + "your turn comes after the human's each round");
 	return JVal(o);
+}
+
+MCP_TOOL(ToolSay)
+{
+	if(!RequireIdentity(err)) return JVal();
+	CvPlayer* me = Me(err);
+	if(!me) return JVal();
+	std::string to = ArgStr(args, "to"), words = ArgStr(args, "words");
+	if(to.empty() || words.empty()) { err = "to and words are required: to is a civilization, several joined by commas, human, or all"; return JVal(); }
+	McpSayQueue(me, to, words);
+	JObj o;
+	o["ok"] = J(true);
+	o["said_to"] = J(to);
+	return JVal(o);
+}
+
+MCP_TOOL(ToolChronicle)
+{
+	if(!RequireIdentity(err)) return JVal();
+	CvPlayer* me = Me(err);
+	if(!me) return JVal();
+	if(!McpChronicleOn(me) || McpWhoYouAre(me).empty()) { err = "this seat keeps no chronicle"; return JVal(); }
+	return McpChronicleToolView(me);
 }
 
 MCP_TOOL(ToolReleaseSeat)
@@ -1305,7 +1435,7 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
+		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view, unless the reply already carries it: it does when your plan is waiting on you. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
 		{ "turn_view",
 		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan; opening it on your turn reads the game messages it shows, so they need no acknowledge_messages. A civilization also opens it once its round has opened, before its turn, to plan the turn from.",
@@ -1314,10 +1444,10 @@ namespace
 		  "One of your cities in full: its buildings, health and defense, its clocks (build, growth, next border tile) with the price to buy its build, its queue, and the tiles it works and could work.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"}},\"required\":[\"city_id\"]}", ToolCityDetail, LOG_NONE, false },
 		{ MCP_TOOL_PLAN_TURN,
-		  "Revise your plan and send your turn's orders. A civilization sends them once its round has opened, from that round's turn_view: every order for the turn, in order, and a complete plan runs by itself when the turn opens. A city-state sends its next turn any time after it ends a turn. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations (each player: what you intend toward them and what you want from them). Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. aim: what this turn moves in your plan.",
-		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"position\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"next_turns\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":\"string\"}}},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
+		  "Revise your plan and send your turn's orders. A civilization sends them once its round has opened, from that round's turn_view: every order for the turn, in order, and a complete plan runs by itself when the turn opens. A city-state sends its next turn any time after it ends a turn. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations. Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. A move whose path can never be walked as written (a step not next to the one before, off the map, a mountain) or an order for a unit or city you do not have is refused, and nothing is saved. Before your turn, the plan also answers what your turn opening brings, or it is not saved: every unit ready to act gets an order; a city finishing a unit gives that unit its orders, named by from_city (the city id) in place of unit_id; a city or the research finishing with nothing queued after it gets what comes next (city_queue or set_production, set_research). A social policy coming due is left to the turn. aim: what this turn moves in your plan. A civilization with a chronicle writes position, direction and relations in its own voice, and three things more. relations is one entry for each player in your story: {\"<civilization>\": {text: what they are to you and what you will do about them, until: the turn the entry holds until, at most 30 ahead, why: when you write an entry again}}; an entry is owed again, changed or unchanged, when something is done by or to that player or its turn passes. threads: {open: [{with, words, vow}], end: [{id, ending}]}: what you have sworn, claimed or are owed; a thread stays open until you write how it ended; vow, optional, is {kind: war, peace, pact, deal, take or hold, subject: the city for take and hold, by: the turn}, and the game marks it kept or broken. chapter, when the turn view says one is due (your era changes, a civilization leaves the game, one of your cities is taken, or 40 turns pass): {title, became: who you have become, threads: [{id, state: kept, broken or owed, words}] for every open thread, nature: [{fault: its number, ruled: first, second, both or neither}] for every fault line of your first page and {unwritten: its number, settled: one sentence} for an unwritten line this chapter settled, direction: written again from nothing, said: [{to, words}], which may be empty}. What the chronicle is owed comes back as one list, and nothing is saved until it is all there.",
+		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"position\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"next_turns\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":[\"object\",\"string\"]}}},\"threads\":{\"type\":\"object\"},\"chapter\":{\"type\":\"object\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
 		{ MCP_TOOL_RUN_PLAN,
-		  "Carry out your planned orders for this turn in one call, after turn_view: each order runs in turn as if you had called it. A game message one of them brings (a ruin explored, a city-state met) does not stop the orders after it; it comes back in messages_while_running. end_turn runs only if nothing before it failed and no such message came. Give every unit and city turn_view lists under your_plan_leaves_open an order with add, or the turn will not end. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
+		  "Carry out your planned orders for this turn in one call, after turn_view: each order runs in turn as if you had called it. A game message one of them brings (a ruin explored, a city-state met) does not stop the orders after it; it comes back in messages_while_running. An order for what is already so counts as done: the unit already rests, the city or your team already has the building, the tech is known, the policy taken, or a unit to move or act has no moves left. end_turn runs only if nothing before it failed and no such message came. Give every unit and city turn_view lists under your_plan_leaves_open an order with add, or the turn will not end. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
 		  "{\"type\":\"object\",\"properties\":{\"drop\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}},\"add\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"set_aside\":{\"type\":\"boolean\"},\"why\":{\"type\":\"object\"}}}", NULL, LOG_NONE, false },
 		{ "briefing",
 		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
@@ -1365,7 +1495,7 @@ namespace
 		  "Move a unit along the path you choose: path lists the tiles in order, [[x,y],[x,y],...], each next to the one before, the first next to the unit, the last the destination. The unit steps along it as far as its moves go this turn (terrain, rivers and zone of control cost as usual), stands where it stops through the other players' turns, and walks the rest when your next turns open; do not re-issue it. preview_only=true checks the path without moving. To attack, use attack.",
 		  SCHEMA_UNIT_PATH_PREVIEW, ToolMoveUnit, LOG_MOVE, false },
 		{ "unit_action",
-		  "Give a unit an order on its current tile. action is one of the names unit_options lists under actions, build (with build=BUILD_... from builds_here), rebase (aircraft, with x and y of one of your cities or carriers), air_sweep (fighters, x and y of the tile to clear of interceptors), paradrop (paratroopers, x and y of the landing tile), nuke (atomic bombs and nuclear missiles, x and y of the target), or disband. Aircraft bomb with the attack tool. stop_automation takes back a unit the game's AI was moving.",
+		  "Give a unit an order on its current tile. action is one of the names unit_options lists under actions, build (with build=BUILD_... from builds_here; a unit still on its way along a queued move starts the build when it reaches the end of the move, if it can build there), rebase (aircraft, with x and y of one of your cities or carriers), air_sweep (fighters, x and y of the tile to clear of interceptors), paradrop (paratroopers, x and y of the landing tile), nuke (atomic bombs and nuclear missiles, x and y of the target), or disband. Aircraft bomb with the attack tool. stop_automation takes back a unit the game's AI was moving.",
 		  "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"action\":{\"type\":\"string\"},\"build\":{\"type\":\"string\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"unit_id\",\"action\"]}", ToolUnitAction, LOG_UNIT, false },
 		{ "attack",
 		  "Attack the enemy unit or city on a tile with one of your units (melee needs to be adjacent; ranged units strike from range). Returns the game's own damage estimate; pass preview_only=true to see the estimate without attacking.",
@@ -1380,8 +1510,11 @@ namespace
 		  "Upgrade a unit for gold (units list upgrade_available_to and upgrade_cost). The unit keeps its position; its id changes.",
 		  SCHEMA_UNIT, ToolUpgradeUnit, LOG_UNIT, false },
 		{ "set_production",
-		  "Set what a city builds. item is a type string from city_options (UNIT_..., BUILDING_..., PROJECT_... or PROCESS_...). Replaces the current item unless append=true, which adds it to the end of the queue.",
+		  "Set what a city builds. item is a type string from city_options (UNIT_..., BUILDING_..., PROJECT_... or PROCESS_...). Replaces the current item unless append=true, which adds it to the end of the queue. city_queue puts items in at any position, takes them out and reorders them.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"item\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"city_id\",\"item\"]}", ToolSetProduction, LOG_CITY, false },
+		{ "city_queue",
+		  "Manage a city's build queue as the city screen does, and see it. Positions count from 1, what the city builds now; each item keeps its own progress. item (a type from city_options) with at puts it in at that position (1 builds it now, the rest wait behind it; at defaults to the end); remove takes out the item at a position; move with to moves an item. Returns the queue with each item's turns at the current production. In a plan, it runs when your turn opens, after the city has finished what was due.",
+		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"item\":{\"type\":\"string\"},\"at\":{\"type\":\"integer\"},\"remove\":{\"type\":\"integer\"},\"move\":{\"type\":\"integer\"},\"to\":{\"type\":\"integer\"}},\"required\":[\"city_id\"]}", ToolCityQueue, LOG_CITY, false },
 		{ "buy",
 		  "Buy a unit or building in a city with gold (item type from city_options; the price is buy_gold), or with faith when with_faith=true (price buy_faith).",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"item\":{\"type\":\"string\"},\"with_faith\":{\"type\":\"boolean\"}},\"required\":[\"city_id\",\"item\"]}", ToolBuy, LOG_CITY, false },
@@ -1502,8 +1635,14 @@ namespace
 		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
 		  "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"provider\",\"model\",\"version\"]}", ToolSetIdentity, LOG_TURN, false },
 		{ "take_seat",
-		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back a seat from status.seats_waiting_for_a_player (civ=opponent takes the one opponent seat waiting, without naming it). civ=human plays the civilization on screen instead. A city-state can be taken by name while its ally has switched it on (status.seats_waiting_for_a_player lists them); you then play it for that ally.",
+		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back your own seat from status.seats_waiting_for_a_player; an opponent seat another model left waits for that model only. civ=human plays the civilization on screen instead. A city-state can be taken by name while its ally has switched it on (status.seats_waiting_for_a_player lists them); you then play it for that ally.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}},\"required\":[\"civ\"]}", ToolTakeSeat, LOG_TURN, false },
+		{ "say",
+		  "Say something to other players: to is a civilization's name, several joined by commas for a group, human, or all for the whole table. As an order in plan_turn it is said when the plan runs, so a plan that depends on what another player does can ask them in the same turn.",
+		  "{\"type\":\"object\",\"properties\":{\"to\":{\"type\":\"string\"},\"words\":{\"type\":\"string\"}},\"required\":[\"to\",\"words\"]}", ToolSay, LOG_TURN, false },
+		{ "chronicle",
+		  "Your chronicle in full: what was done by and to each player you know (the ledger), your entries on them, every thread with its vow and how it ended, and every chapter you closed. The turn view shows only what is open.",
+		  SCHEMA_EMPTY, ToolChronicle, LOG_NONE, false },
 		{ "release_seat",
 		  "Hand the claimed civilization back to the game's AI.",
 		  SCHEMA_EMPTY, ToolReleaseSeat, LOG_TURN, false },

@@ -1,5 +1,6 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpToolSupport.h"
+#include "McpTurnCycle.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvTeam.h"
@@ -142,7 +143,7 @@ namespace McpTool
 		BuildingClassTypes eClass = (BuildingClassTypes)info->GetBuildingClassType();
 		if(GC.getGame().isOption(GAMEOPTION_NO_ESPIONAGE) && info->IsEspionage()) return "espionage is disabled in this game";
 		if(p.getCivilizationInfo().getCivilizationBuildings(eClass) != eBuilding) return "your civilization has its own building in place of this one";
-		if(c->GetCityBuildings()->GetNumBuilding(eBuilding) > 0) return "the city already has it";
+		if(c->GetCityBuildings()->GetNumBuilding(eBuilding) > 0) return MCP_CITY_HAS_IT;
 		if(!bPurchase && c->getFirstBuildingOrder(eBuilding) != -1) return "it is already in this city's build queue";
 		if(!bPurchase && info->GetProductionCost() == -1) return "it cannot be built with production";
 		PolicyBranchTypes eBranch = (PolicyBranchTypes)info->GetPolicyBranchType();
@@ -160,7 +161,7 @@ namespace McpTool
 		if(info->GetVictoryPrereq() != NO_VICTORY && !GC.getGame().isVictoryValid((VictoryTypes)info->GetVictoryPrereq())) return "the victory it serves is disabled in this game";
 		if(info->GetMaxStartEra() != NO_ERA && GC.getGame().getStartEra() > info->GetMaxStartEra()) return "not available with this game's starting era";
 		if(GC.getGame().isBuildingClassMaxedOut(eClass)) return "it has already been built somewhere in the world";
-		if(t.isBuildingClassMaxedOut(eClass)) return "your team already has it";
+		if(t.isBuildingClassMaxedOut(eClass)) return MCP_TEAM_HAS_IT;
 		if(p.isBuildingClassMaxedOut(eClass)) return "you already have one; only one is allowed";
 		if(p.getNumCities() < info->GetNumCitiesPrereq()) return McpFormat("needs %d cities", info->GetNumCitiesPrereq());
 		if(p.getHighestUnitLevel() < info->GetUnitLevelPrereq()) return McpFormat("needs a unit of level %d", info->GetUnitLevelPrereq());
@@ -214,7 +215,7 @@ namespace McpTool
 
 	std::string RestRefusal(CvUnit* u, CvPlot* p, const std::string& action)
 	{
-		if(u->isWaiting()) return "the unit is already resting (fortified, asleep or on alert)";
+		if(u->isWaiting()) return MCP_ALREADY_RESTING;
 		if(p->getNumFriendlyUnitsOfType(u) > GC.getPLOT_UNIT_LIMIT()) return Stacked(u, p) + "; one must move away before this unit can rest";
 		if(action == "fortify")
 		{

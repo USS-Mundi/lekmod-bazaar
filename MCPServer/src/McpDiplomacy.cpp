@@ -711,6 +711,37 @@ namespace
 	}
 }
 
+// ------------------------------------------------------------- the turn view's trade line
+
+McpTradeView McpTradeViewWith(CvPlayer* me, PlayerTypes eOther)
+{
+	McpTradeView v;
+	CvPlayer& other = GET_PLAYER(eOther);
+	CvDeal deal = NewDeal(me->GetID(), eOther);
+	for(int i = 0; i < GC.getNumResourceInfos(); ++i)
+	{
+		ResourceTypes e = (ResourceTypes)i;
+		CvResourceInfo* info = GC.getResourceInfo(e);
+		if(!info) continue;
+		bool bLux = info->getResourceUsage() == RESOURCEUSAGE_LUXURY;
+		if(!bLux && info->getResourceUsage() != RESOURCEUSAGE_STRATEGIC) continue;
+		McpTradeItem item;
+		item.name = ResourceName(e);
+		if(deal.IsPossibleToTradeItem(me->GetID(), eOther, TRADE_ITEM_RESOURCES, e, 1))
+		{
+			item.count = deal.GetNumResource(me->GetID(), e);
+			(bLux ? v.youGiveLux : v.youGiveStrat).push_back(item);
+		}
+		if(deal.IsPossibleToTradeItem(eOther, me->GetID(), TRADE_ITEM_RESOURCES, e, 1))
+		{
+			item.count = deal.GetNumResource(eOther, e);
+			(bLux ? v.theyGiveLux : v.theyGiveStrat).push_back(item);
+		}
+		if(bLux && me->getNumResourceAvailable(e) > 0 && other.getNumResourceAvailable(e) > 0) v.bothHave.push_back(item.name);
+	}
+	return v;
+}
+
 // ------------------------------------------------------------- hooks
 
 namespace

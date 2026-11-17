@@ -122,7 +122,10 @@ namespace McpTool
 	std::string RestRefusal(CvUnit* u, CvPlot* p, const std::string& action);
 	std::string MoveRefusal(CvUnit* u, CvPlot* dest);
 	// move_unit's path as the player gives it: tiles in order, each next to the one before, the first next to the unit.
-	bool ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err);
+	// pFault, when given, gets what is wrong with it (McpTurnCycle.h's McpPathFault, as an int).
+	bool ReadPath(const JObj& args, const CvUnit* u, std::vector<CvPlot*>& steps, std::string& err, int* pFault = NULL);
+	// The same path, walked from (x, y) as team sees the map: for a unit that does not exist yet (from_city).
+	bool ReadPathFrom(const JObj& args, int x, int y, TeamTypes eTeam, std::vector<CvPlot*>& steps, std::string& err, int* pFault = NULL);
 	std::string UpgradeRefusal(CvUnit* u);
 	// Matches a civilization's short name, player name, or numeric id as text.
 	PlayerTypes FindPlayer(const std::string& key);

@@ -631,6 +631,80 @@ std::string McpPlanEndHeld(bool bOrderFailed, int iMessagesCame)
 	return "";
 }
 
+const char* const MCP_ALREADY_RESTING = "the unit is already resting (fortified, asleep or on alert)";
+const char* const MCP_CITY_HAS_IT = "the city already has it";
+const char* const MCP_TEAM_HAS_IT = "your team already has it";
+const char* const MCP_KNOWN_TECH = "you already know ";
+const char* const MCP_HAVE_POLICY = "you already have that policy";
+const char* const MCP_NO_MOVES_LEFT = "this unit has no moves left this turn; try again next turn";
+const char* const MCP_NO_NEW_UNIT = "finished no new unit this turn, so this order has nothing to move";
+
+bool McpOrderAlreadyDone(const std::string& tool, const std::string& err)
+{
+	if(tool == "end_turn" || tool == "attack" || tool == "city_attack") return false;
+	if(err.find(MCP_NO_MOVES_LEFT) != std::string::npos) return tool == "move_unit" || tool == "unit_action";
+	const char* const already[] = { MCP_ALREADY_RESTING, MCP_CITY_HAS_IT, MCP_TEAM_HAS_IT, MCP_KNOWN_TECH, MCP_HAVE_POLICY, MCP_NO_NEW_UNIT };
+	for(size_t i = 0; i < sizeof(already) / sizeof(already[0]); ++i)
+		if(err.find(already[i]) != std::string::npos) return true;
+	return false;
+}
+
+McpBuildStep McpChooseBuildStep(bool bCanHere, bool bQueuedMoveEndsElsewhere, bool bCanThere)
+{
+	if(bCanHere) return MCP_BUILD_HERE;
+	return (bQueuedMoveEndsElsewhere && bCanThere) ? MCP_BUILD_ON_ARRIVAL : MCP_BUILD_REFUSED;
+}
+
+bool McpPathFaultRefuses(McpPathFault eFault)
+{
+	return eFault != MCP_PATH_OK && eFault != MCP_PATH_UNEXPLORED;
+}
+
+std::vector<int> McpQueueMoveSwaps(int iFrom, int iTo)
+{
+	std::vector<int> out;
+	for(int i = iFrom; i > iTo; --i) out.push_back(i - 1);
+	for(int i = iFrom; i < iTo; ++i) out.push_back(i);
+	return out;
+}
+
+std::string McpQueuePositionFault(int iPos, int n, bool bInsert)
+{
+	int last = bInsert ? n + 1 : n;
+	if(last < 1) return "the queue is empty";
+	if(iPos >= 1 && iPos <= last) return "";
+	return "the queue has " + Num(n) + " items: give a position from 1 to " + Num(last);
+}
+
+std::vector<std::string> McpOpeningOwed(const McpOpening& o, const McpPlanCovers& c, bool bTurnOpen)
+{
+	std::vector<std::string> out;
+	for(size_t i = 0; i < o.idle.size(); ++i)
+		if(!c.units.count(o.idle[i].first)) out.push_back(o.idle[i].second);
+	for(size_t i = 0; i < o.cities.size(); ++i)
+	{
+		const McpOpeningCity& city = o.cities[i];
+		if(city.nothing)
+		{
+			if(!c.cities.count(city.id)) out.push_back(city.name + " has nothing to build");
+			continue;
+		}
+		if(bTurnOpen || !city.finishes || city.process) continue;
+		if(city.unit && !c.newUnits.count(city.id))
+			out.push_back(city.name + " finishes " + city.item + " as the turn opens: give the new unit its orders in this plan, with from_city "
+				+ Num(city.id) + " in place of unit_id");
+		if(!city.queuedAfter && !c.cities.count(city.id))
+			out.push_back(city.name + " finishes " + city.item + " as the turn opens, with nothing queued after it: queue what comes next");
+	}
+	if(!c.research)
+	{
+		if(o.researchNone) out.push_back("research: nothing chosen");
+		else if(!bTurnOpen && o.researchFinishes && !o.researchAfter)
+			out.push_back("research: " + o.research + " finishes as the turn opens, with nothing queued after it: set what comes next");
+	}
+	return out;
+}
+
 int McpPlanMadeOnTurn(int gameTurn, bool bMyTurn, int lastEndedTurn)
 {
 	if(bMyTurn || lastEndedTurn < 0 || lastEndedTurn > gameTurn) return gameTurn;

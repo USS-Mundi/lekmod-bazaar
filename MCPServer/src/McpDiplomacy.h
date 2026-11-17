@@ -2,8 +2,10 @@
 
 #include <string>
 #include "picojson.h"
+#include "McpTradeLine.h"
 
 class CvDeal;
+class CvPlayer;
 
 // Diplomacy for the civilizations models play, without the leader screens. Game thread only.
 
@@ -35,3 +37,6 @@ void McpRemindHumanOfDeals();
 void McpResetDiploRequests();
 // For status: what awaits the seat's answer; empty when nothing does.
 std::string McpDiploWaitingNote();
+
+// What each side could put in a deal with the other, as the trade screen allows it, and the luxuries both hold.
+McpTradeView McpTradeViewWith(CvPlayer* me, PlayerTypes eOther);
