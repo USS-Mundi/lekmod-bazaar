@@ -697,9 +697,12 @@ namespace
 		CHECK(McpOrderAlreadyDone("set_production", std::string("this city cannot build BUILDING_GREAT_LIBRARY: ") + MCP_TEAM_HAS_IT));
 		CHECK(McpOrderAlreadyDone("set_research", std::string(MCP_KNOWN_TECH) + "Bronze Working"));
 		CHECK(McpOrderAlreadyDone("adopt_policy", MCP_HAVE_POLICY));
-		// A unit with no moves left can do nothing more this turn, whatever is decided.
-		CHECK(McpOrderAlreadyDone("move_unit", MCP_NO_MOVES_LEFT));
+		// A unit with no moves left can do nothing more this turn, whatever is decided; it is skipped, not "already so".
+		// (move_unit queues its route instead of failing, so a move is never skipped.)
 		CHECK(McpOrderAlreadyDone("unit_action", MCP_NO_MOVES_LEFT));
+		CHECK(!McpOrderAlreadyDone("move_unit", MCP_NO_MOVES_LEFT));
+		CHECK(McpOrderDoneNote(MCP_NO_MOVES_LEFT) == "skipped, no moves left this turn");
+		CHECK(McpOrderDoneNote(MCP_ALREADY_RESTING) == "already so");
 		// An attack that cannot be made is a choice still open: another unit may make it.
 		CHECK(!McpOrderAlreadyDone("attack", MCP_NO_MOVES_LEFT));
 		CHECK(!McpOrderAlreadyDone("city_attack", MCP_NO_MOVES_LEFT));
@@ -791,6 +794,37 @@ namespace
 		wealth.process = true;
 		w.cities.push_back(wealth);
 		CHECK(McpOpeningOwed(w, none, false).empty());
+	}
+
+	void TestAnOrderForANewUnitNamesWhichOneWhenACityMakesSeveral()
+	{
+		int type = -1;
+		std::vector<int> made;
+		CHECK(McpNewUnitType(made, -1, type) == MCP_NEW_UNIT_NONE);
+		made.push_back(7);
+		CHECK(McpNewUnitType(made, -1, type) == MCP_NEW_UNIT_OK && type == 7);
+		CHECK(McpNewUnitType(made, 9, type) == MCP_NEW_UNIT_NOT_MADE);
+		// A Warrior finished and a Settler bought: the order says which.
+		made.push_back(9);
+		CHECK(McpNewUnitType(made, -1, type) == MCP_NEW_UNIT_WHICH);
+		CHECK(McpNewUnitType(made, 9, type) == MCP_NEW_UNIT_OK && type == 9);
+		// Two of one kind are one kind: nth tells them apart.
+		std::vector<int> two(2, 7);
+		CHECK(McpNewUnitType(two, -1, type) == MCP_NEW_UNIT_OK && type == 7);
+	}
+
+	void TestTheNthNewUnitIsInTheCityFirstThenNearestThenLowestId()
+	{
+		std::vector<std::pair<int, int> > c;
+		CHECK(McpPickNewUnit(c, 1) == -1);
+		c.push_back(std::make_pair(1, 40));
+		c.push_back(std::make_pair(0, 55));
+		c.push_back(std::make_pair(0, 50));
+		CHECK(McpPickNewUnit(c, 1) == 2);   // in the city, lowest id
+		CHECK(McpPickNewUnit(c, 2) == 1);
+		CHECK(McpPickNewUnit(c, 3) == 0);
+		CHECK(McpPickNewUnit(c, 4) == -1);
+		CHECK(McpPickNewUnit(c, 0) == -1);
 	}
 
 	void TestAnOrderForAUnitNotYetBuiltWaitsIfNoneCame()
@@ -924,6 +958,8 @@ int main()
 	TestQueuePositionsCountFromOne();
 	TestAPlanAnswersWhatTheTurnOpeningBrings();
 	TestAnOrderForAUnitNotYetBuiltWaitsIfNoneCame();
+	TestAnOrderForANewUnitNamesWhichOneWhenACityMakesSeveral();
+	TestTheNthNewUnitIsInTheCityFirstThenNearestThenLowestId();
 	TestOnePictureWhenTheCitiesFit();
 	TestSpreadCitiesTakeMorePicturesUpToTheLimit();
 	TestTiesGoToTheTighterPicture();

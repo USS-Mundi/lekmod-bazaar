@@ -642,11 +642,38 @@ const char* const MCP_NO_NEW_UNIT = "finished no new unit this turn, so this ord
 bool McpOrderAlreadyDone(const std::string& tool, const std::string& err)
 {
 	if(tool == "end_turn" || tool == "attack" || tool == "city_attack") return false;
-	if(err.find(MCP_NO_MOVES_LEFT) != std::string::npos) return tool == "move_unit" || tool == "unit_action";
+	if(err.find(MCP_NO_MOVES_LEFT) != std::string::npos) return tool == "unit_action";
 	const char* const already[] = { MCP_ALREADY_RESTING, MCP_CITY_HAS_IT, MCP_TEAM_HAS_IT, MCP_KNOWN_TECH, MCP_HAVE_POLICY, MCP_NO_NEW_UNIT };
 	for(size_t i = 0; i < sizeof(already) / sizeof(already[0]); ++i)
 		if(err.find(already[i]) != std::string::npos) return true;
 	return false;
+}
+
+std::string McpOrderDoneNote(const std::string& err)
+{
+	return err.find(MCP_NO_MOVES_LEFT) != std::string::npos ? "skipped, no moves left this turn" : "already so";
+}
+
+McpNewUnitPick McpNewUnitType(const std::vector<int>& made, int named, int& type)
+{
+	if(made.empty()) return MCP_NEW_UNIT_NONE;
+	if(named >= 0)
+	{
+		for(size_t i = 0; i < made.size(); ++i) if(made[i] == named) { type = named; return MCP_NEW_UNIT_OK; }
+		return MCP_NEW_UNIT_NOT_MADE;
+	}
+	for(size_t i = 1; i < made.size(); ++i) if(made[i] != made[0]) return MCP_NEW_UNIT_WHICH;
+	type = made[0];
+	return MCP_NEW_UNIT_OK;
+}
+
+int McpPickNewUnit(const std::vector<std::pair<int, int> >& candidates, int nth)
+{
+	if(nth < 1 || nth > (int)candidates.size()) return -1;
+	std::vector<std::pair<std::pair<int, int>, int> > order;
+	for(size_t i = 0; i < candidates.size(); ++i) order.push_back(std::make_pair(candidates[i], (int)i));
+	std::sort(order.begin(), order.end());
+	return order[nth - 1].second;
 }
 
 McpBuildStep McpChooseBuildStep(bool bCanHere, bool bQueuedMoveEndsElsewhere, bool bCanThere)

@@ -1748,7 +1748,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 			std::string said = r.is<std::string>() ? r.get<std::string>() : std::string();
 			if(bErr && McpOrderAlreadyDone(tool, said))
 			{
-				results.push_back(Outcome(tool, picojson::value("already so: " + said), false));
+				results.push_back(Outcome(tool, picojson::value(McpOrderDoneNote(said) + ": " + said), false));
 				continue;
 			}
 			results.push_back(Outcome(tool, r, bErr));

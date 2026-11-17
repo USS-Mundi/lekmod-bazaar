@@ -434,17 +434,17 @@ namespace McpTool
 		return szDescription && _stricmp(szDescription, key.c_str()) == 0;
 	}
 
-	// The unit a city finished this turn, for an order planned with from_city before it existed: one of the seat's units
-	// made this game turn within two tiles of the city, of the type the plan expected (_unit_type, when known), the one
-	// in the city first, then the nearest, then the lowest id.
+	// The unit a city made this turn, for an order planned with from_city before it existed: of the seat's units made
+	// this game turn within two tiles of the city, of the type the plan expected (_unit_type, when known), the nth
+	// (nth, from 1) by McpPickNewUnit: the ones in the city first, then the nearer, then the lower id.
 	CvUnit* NewUnitFromCity(CvPlayer* me, const JObj& args, std::string& err)
 	{
 		CvCity* c = me->getCity(ArgInt(args, "from_city", -1));
 		if(!c) { err = "no city of yours has that from_city id"; return NULL; }
 		int iType = ArgInt(args, "_unit_type", -1);
 		int iTurn = GC.getGame().getGameTurn();
-		CvUnit* best = NULL;
-		int bestDist = 99;
+		std::vector<CvUnit*> units;
+		std::vector<std::pair<int, int> > candidates;
 		int iLoop;
 		for(CvUnit* u = me->firstUnit(&iLoop); u; u = me->nextUnit(&iLoop))
 		{
@@ -452,10 +452,12 @@ namespace McpTool
 			if(iType >= 0 && (int)u->getUnitType() != iType) continue;
 			int d = plotDistance(u->getX(), u->getY(), c->getX(), c->getY());
 			if(d > 2) continue;
-			if(!best || d < bestDist || (d == bestDist && u->GetID() < best->GetID())) { best = u; bestDist = d; }
+			units.push_back(u);
+			candidates.push_back(std::make_pair(d, u->GetID()));
 		}
-		if(!best) err = std::string(c->getName().c_str()) + " " + MCP_NO_NEW_UNIT;
-		return best;
+		int pick = McpPickNewUnit(candidates, ArgInt(args, "nth", 1));
+		if(pick < 0) { err = std::string(c->getName().c_str()) + " " + MCP_NO_NEW_UNIT; return NULL; }
+		return units[pick];
 	}
 
 	CvUnit* RequireUnit(CvPlayer* me, const JObj& args, std::string& err)

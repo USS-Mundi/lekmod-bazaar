@@ -358,14 +358,15 @@ namespace
 
 	// Orders that can never run as written, whatever happens before the turn opens: a unit or city of the seat's that
 	// does not exist, a unit's first move with a path that cannot be walked (McpPathFaultRefuses), or an order for a
-	// new unit (from_city) from a city that finishes none as the turn opens and buys none earlier in the plan. A move
+	// new unit (from_city) the city does not make as the turn opens, or not unambiguously (McpNewUnitType). A move
 	// after another order for the same unit is not judged: that order may move it. An order for a new unit is given the
-	// unit type it expects (_unit_type), so the turn finds that unit.
+	// unit type it means (_unit_type), so the turn finds that unit; nth (from 1) tells two of one kind apart.
 	std::vector<std::string> OrdersThatCannotRun(CvPlayer* me, std::vector<McpPlannedOrder>& orders)
 	{
 		std::vector<std::string> out;
 		std::set<int> named;
-		std::map<int, int> bought; // city id -> unit type a buy earlier in the plan makes there
+		std::set<std::string> namedNew;
+		std::map<int, std::vector<int> > bought; // city id -> unit types the plan buys there, in order
 		for(size_t i = 0; i < orders.size(); ++i)
 		{
 			JVal v;
@@ -380,46 +381,55 @@ namespace
 			if(tool == "buy" && me->getCity(ArgInt(a, "city_id", -1)))
 			{
 				CityItem item = FindCityItem(me, ArgStr(a, "item"));
-				if(item.eUnit != NO_UNIT) bought[ArgInt(a, "city_id", -1)] = (int)item.eUnit;
+				if(item.eUnit != NO_UNIT) bought[ArgInt(a, "city_id", -1)].push_back((int)item.eUnit);
 			}
 			if(id < 0 && a.count("from_city"))
 			{
 				CvCity* c = me->getCity(ArgInt(a, "from_city", -1));
 				if(!c) { out.push_back(head + "no city of yours has that from_city id"); continue; }
+				std::vector<int> made;
 				const OrderData* od = c->getOrderQueueLength() > 0 ? c->getOrderFromQueue(0) : NULL;
+				if(od && od->eOrderType == ORDER_TRAIN && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1) made.push_back(od->iData1);
+				const std::vector<int>& b = bought[c->GetID()];
+				made.insert(made.end(), b.begin(), b.end());
+				int namedType = a.count("unit") ? (int)FindCityItem(me, ArgStr(a, "unit")).eUnit : -1;
+				if(a.count("unit") && namedType < 0) { out.push_back(head + "unknown unit type '" + ArgStr(a, "unit") + "'"); continue; }
 				int type = -1;
-				if(od && od->eOrderType == ORDER_TRAIN && !c->isProductionProcess() && c->getProductionTurnsLeft() <= 1) type = od->iData1;
-				else if(bought.count(c->GetID())) type = bought[c->GetID()];
-				if(type < 0)
+				McpNewUnitPick pick = McpNewUnitType(made, namedType, type);
+				std::string kinds;
+				for(size_t k = 0; k < made.size(); ++k) kinds += std::string(k ? ", " : "") + UnitTypeName((UnitTypes)made[k]);
+				std::string city = c->getName().c_str();
+				if(pick == MCP_NEW_UNIT_NONE)
 				{
-					out.push_back(head + c->getName().c_str() + " finishes no unit as the turn opens"
+					out.push_back(head + city + " finishes no unit as the turn opens"
 						+ (od ? std::string(" (it builds ") + c->getProductionName() + McpFormat(", %dt)", c->getProductionTurnsLeft()) : std::string(""))
 						+ ", and no buy before this order makes one there");
 					continue;
 				}
+				if(pick == MCP_NEW_UNIT_NOT_MADE) { out.push_back(head + city + " makes no " + ArgStr(a, "unit") + " for this order; it makes " + kinds); continue; }
+				if(pick == MCP_NEW_UNIT_WHICH) { out.push_back(head + city + " makes more than one kind of unit (" + kinds + "): name which with unit"); continue; }
 				a["_unit_type"] = J(type);
 				orders[i].args = v.serialize();
-				if(tool == "move_unit")
+				std::string key = McpFormat("%d:%d:%d", c->GetID(), type, ArgInt(a, "nth", 1));
+				if(tool == "move_unit" && namedNew.insert(key).second)
 				{
 					std::vector<CvPlot*> steps;
 					std::string why;
 					int fault = MCP_PATH_OK;
 					if(!ReadPathFrom(a, c->getX(), c->getY(), me->getTeam(), steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault))
-						out.push_back(head + why + " (the new unit starts in " + c->getName().c_str() + ")");
+						out.push_back(head + why + " (the new unit starts in " + city + ")");
 				}
+				else namedNew.insert(key);
 				continue;
 			}
-			if(tool == "move_unit")
+			if(id >= 0 && !me->getUnit(id)) { out.push_back(head + "no unit of yours has that unit_id"); continue; }
+			if(tool == "move_unit" && id < 0) out.push_back(head + "give unit_id, or from_city for a unit a city makes as the turn opens");
+			if(tool == "move_unit" && id >= 0 && !named.count(id))
 			{
-				CvUnit* u = me->getUnit(id);
-				if(!u) out.push_back(head + "no unit of yours has that unit_id");
-				else if(!named.count(id))
-				{
-					std::vector<CvPlot*> steps;
-					std::string why;
-					int fault = MCP_PATH_OK;
-					if(!ReadPath(a, u, steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault)) out.push_back(head + why);
-				}
+				std::vector<CvPlot*> steps;
+				std::string why;
+				int fault = MCP_PATH_OK;
+				if(!ReadPath(a, me->getUnit(id), steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault)) out.push_back(head + why);
 			}
 			if(id >= 0) named.insert(id);
 		}

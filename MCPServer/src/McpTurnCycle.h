@@ -208,8 +208,8 @@ std::string McpPlanEndHeld(bool bOrderFailed, int iMessagesCame);
 
 // What the game says when an order asks for what is already so. The refusals are written with these, and run_plan
 // counts such an order as done: the unit already rests, the city or team already has the building, the tech is known,
-// the policy taken, or a unit to move or act has no moves left this turn (nothing more it can do, whatever is decided).
-// An attack with no moves left is not done: another unit may make it.
+// the policy taken, or a unit to act has no moves left this turn (nothing more it can do, whatever is decided). An
+// attack with no moves left is not done: another unit may make it; a move with no moves left queues its route instead.
 extern const char* const MCP_ALREADY_RESTING;
 extern const char* const MCP_CITY_HAS_IT;
 extern const char* const MCP_TEAM_HAS_IT;
@@ -219,6 +219,18 @@ extern const char* const MCP_NO_MOVES_LEFT;
 // An order for the unit a city finishes as the turn opens (from_city) when the city finished none: nothing to order.
 extern const char* const MCP_NO_NEW_UNIT;
 bool McpOrderAlreadyDone(const std::string& tool, const std::string& err);
+// How run_plan reports such an order: "already so", or "skipped, no moves left this turn".
+std::string McpOrderDoneNote(const std::string& err);
+
+// The unit type an order for a new unit (from_city) means. made: the types the city makes for it (what it finishes as
+// the turn opens, and what the plan buys there before the order); named: the type the order names (unit), -1 if none.
+// OK with type set; NONE when the city makes no unit, NOT_MADE when the named one is not among them, WHICH when it makes
+// more than one kind and the order names none.
+enum McpNewUnitPick { MCP_NEW_UNIT_OK, MCP_NEW_UNIT_NONE, MCP_NEW_UNIT_NOT_MADE, MCP_NEW_UNIT_WHICH };
+McpNewUnitPick McpNewUnitType(const std::vector<int>& made, int named, int& type);
+// Which of a city's new units an order for its nth (from 1) goes to: candidates as (distance from the city, unit id),
+// the ones in the city first, then the nearer, then the lower id. The candidate's index, or -1 when there are fewer.
+int McpPickNewUnit(const std::vector<std::pair<int, int> >& candidates, int nth);
 
 // A build order for a unit: on its tile if it can build there (its queued move is replaced, as the order says), else on
 // arrival when its queued move ends on a tile where it can (a worker that fell short), else refused.
