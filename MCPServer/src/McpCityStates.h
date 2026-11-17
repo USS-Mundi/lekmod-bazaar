@@ -41,6 +41,10 @@ bool McpIsCityStateSeat(PlayerTypes e);
 // the city-state is switched off or the ally's standing falls below the sight step.
 bool McpCsShareSight(CvUnit* u, bool bOn, std::string& err);
 std::vector<int> McpCsSharingUnits(PlayerTypes eMinor);
+// At the highest standing the ally does not ask: every unit of a switched-on city-state sees for them, and its
+// player cannot stop one. The second is the influence that takes, -1 when no step shares sight.
+bool McpCsEveryUnitSees(PlayerTypes eMinor);
+int McpCsEveryUnitSeesFrom();
 void McpCsSightAfterMove(const CvUnit* u);
 void McpCsSightBeforeKill(const CvUnit* u);
 // What a city-state's player sees in status: its ally, what the alliance buys, its own character.

@@ -206,6 +206,72 @@ static void TestSameSide()
 	CHECK(!McpCsSameSide(false, true, 2, 2));
 }
 
+static std::vector<int> Ints(int a = -1, int b = -1, int c = -1)
+{
+	std::vector<int> v;
+	if(a >= 0) v.push_back(a);
+	if(b >= 0) v.push_back(b);
+	if(c >= 0) v.push_back(c);
+	return v;
+}
+
+static void TestLiveSightForEveryUnit()
+{
+	std::vector<McpCsTier> tiers = McpCsDefaultTiers();
+	McpCsSettings s = McpCsDefaultSettings();
+	// with nothing set, the highest step is where every unit sees for the ally without being asked
+	CHECK(McpCsLiveSightFrom(tiers, s) == 150);
+	CHECK(!McpCsSightIsAutomatic(tiers, s, 149));
+	CHECK(McpCsSightIsAutomatic(tiers, s, 150));
+	CHECK(McpCsSightIsAutomatic(tiers, s, 400));
+	// the mod's settings may name another influence
+	s.liveSightInfluence = 120;
+	CHECK(McpCsLiveSightFrom(tiers, s) == 120);
+	CHECK(McpCsSightIsAutomatic(tiers, s, 120));
+	CHECK(!McpCsSightIsAutomatic(tiers, s, 119));
+	// ...but never one below the step that puts its sight on the ally's map at all
+	s.liveSightInfluence = 70;
+	CHECK(McpCsLiveSightFrom(tiers, s) == 80);
+	CHECK(!McpCsSightIsAutomatic(tiers, s, 79));
+	CHECK(McpCsSightIsAutomatic(tiers, s, 80));
+	// no step shares sight: never
+	std::vector<McpCsTier> blind;
+	McpCsTier t = { 60, 0, 0, false, false };
+	blind.push_back(t);
+	CHECK(McpCsLiveSightFrom(blind, McpCsDefaultSettings()) == -1);
+	CHECK(!McpCsSightIsAutomatic(blind, McpCsDefaultSettings(), 500));
+	CHECK(McpCsLiveSightFrom(std::vector<McpCsTier>(), McpCsDefaultSettings()) == -1);
+}
+
+static void TestAutoSightChange()
+{
+	// the rule holds: every unit not lit yet is lit and counted as the rule's; one its player chose stays chosen
+	McpCsSightChange c = McpCsAutoSightChange(true, Ints(1, 2, 3), Ints(2), Ints());
+	CHECK(c.light == Ints(1, 3) && c.drop.empty() && c.autoLit == Ints(1, 3));
+	// nothing new: nothing to do, and the rule's units stay the rule's
+	c = McpCsAutoSightChange(true, Ints(1, 2, 3), Ints(1, 2, 3), Ints(1, 3));
+	CHECK(c.light.empty() && c.drop.empty() && c.autoLit == Ints(1, 3));
+	// a unit that died is forgotten; a new one is lit
+	c = McpCsAutoSightChange(true, Ints(1, 4), Ints(1), Ints(1, 3));
+	CHECK(c.light == Ints(4) && c.drop.empty() && c.autoLit == Ints(1, 4));
+	// the standing fell: the rule's units go dark, the chosen ones stay lit
+	c = McpCsAutoSightChange(false, Ints(1, 2, 3), Ints(1, 2, 3), Ints(1, 3));
+	CHECK(c.light.empty() && c.drop == Ints(1, 3) && c.autoLit.empty());
+	// ...and one of the rule's that is already dark is only forgotten
+	c = McpCsAutoSightChange(false, Ints(1, 2), Ints(2), Ints(1));
+	CHECK(c.light.empty() && c.drop.empty() && c.autoLit.empty());
+	// the rule does not hold and never did: the player's choices are left alone
+	c = McpCsAutoSightChange(false, Ints(1, 2, 3), Ints(2), Ints());
+	CHECK(c.light.empty() && c.drop.empty() && c.autoLit.empty());
+}
+
+static void TestSightOffRefusal()
+{
+	// while every unit sees for the ally, a unit's sight is not its player's to withhold
+	CHECK(McpCsSightOffRefusal(false).empty());
+	CHECK(McpCsSightOffRefusal(true) == "at this standing every unit of yours sees for your ally: it is not yours to withhold");
+}
+
 int main()
 {
 	TestTierLookup();
@@ -221,6 +287,9 @@ int main()
 	TestSightLedger();
 	TestGold();
 	TestSameSide();
+	TestLiveSightForEveryUnit();
+	TestAutoSightChange();
+	TestSightOffRefusal();
 	if(s_failures) { std::printf("%d check(s) failed\n", s_failures); return 1; }
 	std::printf("all city-state rule checks pass\n");
 	return 0;

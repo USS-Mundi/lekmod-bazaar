@@ -199,6 +199,8 @@ namespace
 			o["units_it_will_send_out"] = J(McpCsSendCapFor(minor.GetID()));
 			o["units_out_now"] = J(McpCsUnitsOut(minor.GetID()));
 			o["its_sight_on_your_map"] = J(tier && tier->revealSight);
+			o["you_see_what_every_unit_of_it_sees"] = J(McpCsEveryUnitSees(minor.GetID()));
+			if(!McpCsEveryUnitSees(minor.GetID()) && McpCsEveryUnitSeesFrom() > 0) o["you_see_what_every_unit_of_it_sees_from_influence"] = J(McpCsEveryUnitSeesFrom());
 			o["may_enter_your_land"] = J(tier && tier->enterAllyLand);
 			o["extra_influence_cost_per_turn_while_a_model_plays_it"] = J(McpCsGetSettings().influenceCost);
 		}

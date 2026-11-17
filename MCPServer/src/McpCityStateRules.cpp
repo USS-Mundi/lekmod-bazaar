@@ -2,6 +2,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstddef>
+#include <set>
 #include <sstream>
 
 namespace
@@ -50,7 +51,7 @@ std::vector<McpCsDisposition> McpCsDefaultDispositions()
 
 McpCsSettings McpCsDefaultSettings()
 {
-	McpCsSettings s = { 1, 20, 60, 5, 15 };
+	McpCsSettings s = { 1, 20, 60, 5, 15, 0 };
 	return s;
 }
 
@@ -209,6 +210,50 @@ bool McpCsSightLedgerRead(const std::string& text, McpCsSightLedger& ledger)
 	}
 	ledger = read;
 	return true;
+}
+
+int McpCsLiveSightFrom(const std::vector<McpCsTier>& tiers, const McpCsSettings& settings)
+{
+	int top = -1, firstSight = -1;
+	for(size_t i = 0; i < tiers.size(); ++i)
+	{
+		if(tiers[i].minInfluence > top) top = tiers[i].minInfluence;
+		if(tiers[i].revealSight && (firstSight < 0 || tiers[i].minInfluence < firstSight)) firstSight = tiers[i].minInfluence;
+	}
+	if(firstSight < 0) return -1;
+	int from = settings.liveSightInfluence > 0 ? settings.liveSightInfluence : top;
+	return from < firstSight ? firstSight : from;
+}
+
+bool McpCsSightIsAutomatic(const std::vector<McpCsTier>& tiers, const McpCsSettings& settings, int influence)
+{
+	int from = McpCsLiveSightFrom(tiers, settings);
+	if(from < 0 || influence < from) return false;
+	const McpCsTier* tier = McpCsTierFor(tiers, influence);
+	return tier && tier->revealSight;
+}
+
+McpCsSightChange McpCsAutoSightChange(bool automatic, const std::vector<int>& units, const std::vector<int>& lit, const std::vector<int>& autoLit)
+{
+	std::set<int> has(units.begin(), units.end()), isLit(lit.begin(), lit.end()), rule;
+	McpCsSightChange c;
+	// the rule's units that are still there and still lit
+	for(size_t i = 0; i < autoLit.size(); ++i)
+		if(has.count(autoLit[i]) && isLit.count(autoLit[i])) rule.insert(autoLit[i]);
+	if(!automatic)
+	{
+		c.drop.assign(rule.begin(), rule.end());
+		return c;
+	}
+	for(std::set<int>::const_iterator it = has.begin(); it != has.end(); ++it)
+		if(!isLit.count(*it)) { c.light.push_back(*it); rule.insert(*it); }
+	c.autoLit.assign(rule.begin(), rule.end());
+	return c;
+}
+
+std::string McpCsSightOffRefusal(bool automatic)
+{
+	return automatic ? "at this standing every unit of yours sees for your ally: it is not yours to withhold" : "";
 }
 
 const char* McpCsModifierText(McpCsModifier modifier)

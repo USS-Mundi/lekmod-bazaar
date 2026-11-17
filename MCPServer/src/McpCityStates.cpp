@@ -17,6 +17,7 @@
 #include "CvCity.h"
 #include "CvTypes.h"
 #include <map>
+#include <set>
 
 using namespace McpTool;
 
@@ -258,6 +259,7 @@ namespace
 			else if(name == "MCP_CITY_STATE_SECURE_LEAD") s.secureLead = v;
 			else if(name == "MCP_CITY_STATE_TREND_TURNS") s.trendTurns = v;
 			else if(name == "MCP_CITY_STATE_TREND_AMOUNT") s.trendAmount = v;
+			else if(name == "MCP_CITY_STATE_LIVE_SIGHT_INFLUENCE") s.liveSightInfluence = v;
 			else continue;
 			++n;
 		}
@@ -325,6 +327,69 @@ namespace
 		for(std::map<int, std::vector<int> >::const_iterator it = l.unitPlots.begin(); it != l.unitPlots.end(); ++it) LightPlots((TeamTypes)l.team, it->second, -1);
 		GET_PLAYER(eMinor).setScriptData("");
 	}
+
+	// At the highest standing every unit sees for the ally without being asked (McpCsSightIsAutomatic). These are
+	// the units that rule lit, as against the ones the city-state's player chose: when the standing falls only
+	// these go dark. Not kept in a save: a load takes every lit plot off, and the rule lights them again.
+	std::set<int> s_autoSight[MAX_CIV_PLAYERS];
+	bool s_autoSightOn[MAX_CIV_PLAYERS];
+
+	// Lights what u sees for its city-state's ally and enters it in the ledger; false when it sees nothing.
+	bool LightUnit(PlayerTypes eMinor, const CvUnit* u)
+	{
+		McpCsSightLedger& l = s_sight[eMinor];
+		if(l.unitPlots.count(u->GetID())) return true;
+		std::vector<int> plots = SightPlots(u);
+		if(plots.empty()) return false;
+		l.team = GET_PLAYER(McpCsPatron(eMinor)).getTeam();
+		LightPlots((TeamTypes)l.team, plots, 1);
+		l.unitPlots[u->GetID()] = plots;
+		SaveSight(eMinor);
+		return true;
+	}
+
+	void ForgetAutoSight(PlayerTypes eMinor)
+	{
+		s_autoSight[eMinor].clear();
+		s_autoSightOn[eMinor] = false;
+	}
+}
+
+bool McpCsEveryUnitSees(PlayerTypes eMinor)
+{
+	return McpCsIsSwitchedOn(eMinor) && McpCsSightIsAutomatic(s_tiers, s_settings, McpCsInfluence(eMinor));
+}
+
+int McpCsEveryUnitSeesFrom() { return McpCsLiveSightFrom(s_tiers, s_settings); }
+
+namespace
+{
+	// Every game update, for a switched-on city-state: keeps what the rule lit in step with its units and its ally's
+	// standing, and tells the ally when the rule starts and stops holding.
+	void KeepAutoSight(PlayerTypes eMinor)
+	{
+		bool automatic = McpCsEveryUnitSees(eMinor);
+		std::set<int>& mine = s_autoSight[eMinor];
+		if(!automatic && mine.empty() && !s_autoSightOn[eMinor]) return;
+		std::vector<int> units, lit = McpCsSharingUnits(eMinor);
+		CvPlayer& p = GET_PLAYER(eMinor);
+		int iLoop;
+		for(CvUnit* u = p.firstUnit(&iLoop); u != NULL; u = p.nextUnit(&iLoop))
+			if(u->plot() && !u->isDelayedDeath()) units.push_back(u->GetID());
+		McpCsSightChange c = McpCsAutoSightChange(automatic, units, lit, std::vector<int>(mine.begin(), mine.end()));
+		for(size_t i = 0; i < c.drop.size(); ++i) DropSight(eMinor, c.drop[i]);
+		mine = std::set<int>(c.autoLit.begin(), c.autoLit.end());
+		for(size_t i = 0; i < c.light.size(); ++i)
+		{
+			CvUnit* u = p.getUnit(c.light[i]);
+			if(!u || !LightUnit(eMinor, u)) mine.erase(c.light[i]);
+		}
+		if(automatic == s_autoSightOn[eMinor]) return;
+		s_autoSightOn[eMinor] = automatic;
+		PlayerTypes ePatron = McpCsPatron(eMinor);
+		if(automatic) TellPatron(ePatron, CivName(eMinor) + " keeps nothing from you now: you see what every one of its units sees, without asking.");
+		else TellPatron(ePatron, CivName(eMinor) + McpFormat(" no longer shows you what all its units see: your influence fell below %d. A unit it chose to share still sees for you.", McpCsEveryUnitSeesFrom()));
+	}
 }
 
 void McpCsLoadSettings()
@@ -367,6 +432,7 @@ void McpCsSwitchOff(PlayerTypes eMinor, const std::string& why)
 	CsState* s = Find(eMinor);
 	if(!s || !s->on) return;
 	ClearSight(eMinor);
+	ForgetAutoSight(eMinor);
 	PlayerTypes ePatron = s->patron;
 	s->on = false;
 	--s_switchedOn;
@@ -516,8 +582,14 @@ bool McpCsShareSight(CvUnit* u, bool bOn, std::string& err)
 {
 	PlayerTypes e = u->getOwner();
 	if(!McpIsCityStateSeat(e) || !McpCsIsSwitchedOn(e)) { err = "only a switched-on city-state shares its units' sight"; return false; }
-	McpCsSightLedger& l = s_sight[e];
-	if(!bOn) { DropSight(e, u->GetID()); return true; }
+	if(!bOn)
+	{
+		err = McpCsSightOffRefusal(McpCsEveryUnitSees(e));
+		if(!err.empty()) return false;
+		DropSight(e, u->GetID());
+		s_autoSight[e].erase(u->GetID());
+		return true;
+	}
 	const McpCsTier* tier = McpCsCurrentTier(e);
 	if(!tier || !tier->revealSight)
 	{
@@ -525,13 +597,8 @@ bool McpCsShareSight(CvUnit* u, bool bOn, std::string& err)
 		err = next.sight > 0 ? McpFormat("your ally's influence must reach %d before your units' sight can reach them", next.sight) : "your ally's influence does not open your sight to them";
 		return false;
 	}
-	if(l.unitPlots.count(u->GetID())) return true;
-	std::vector<int> plots = SightPlots(u);
-	if(plots.empty()) { err = "this unit sees nothing from where it stands"; return false; }
-	l.team = GET_PLAYER(McpCsPatron(e)).getTeam();
-	LightPlots((TeamTypes)l.team, plots, 1);
-	l.unitPlots[u->GetID()] = plots;
-	SaveSight(e);
+	if(!LightUnit(e, u)) { err = "this unit sees nothing from where it stands"; return false; }
+	s_autoSight[e].erase(u->GetID());   // its player chose it: it stays lit if the standing falls
 	return true;
 }
 
@@ -585,6 +652,7 @@ void McpCsTick()
 			const McpCsTier* tier = McpCsCurrentTier(e);
 			if(!tier || !tier->revealSight) ClearSight(e);
 		}
+		if(s.on) KeepAutoSight(e);
 		if(s.on || s.releaseAfterTurn) EndTurnIfGone(e, s);
 		if(s.releaseAfterTurn && !GET_PLAYER(e).isTurnActive())
 		{
@@ -676,12 +744,14 @@ picojson::value McpCsSeatView(PlayerTypes eMinor)
 		std::vector<int> units = McpCsSharingUnits(eMinor);
 		for(size_t i = 0; i < units.size(); ++i) sharing.push_back(J(units[i]));
 		o["units_sharing_live_sight"] = JVal(sharing);
+		o["every_unit_sees_for_your_ally"] = J(McpCsEveryUnitSees(eMinor));
 	}
 	McpCsNextSteps next = NextSteps(eMinor);
 	JObj opens;
 	if(next.moreUnitsOut > 0) opens["more_units_out"] = J(next.moreUnitsOut);
 	if(next.sight > 0) opens["your_sight_on_their_map"] = J(next.sight);
 	if(next.enterAllyLand > 0) opens["entering_their_land"] = J(next.enterAllyLand);
+	if(McpCsEveryUnitSeesFrom() > influence) opens["every_unit_sees_for_them_unasked"] = J(McpCsEveryUnitSeesFrom());
 	if(!opens.empty()) o["next_opens_at_influence"] = JVal(opens);
 	std::vector<std::string> talk = McpCsConversation(eMinor, ePatron);
 	if(!talk.empty()) o["conversation_with_your_ally"] = JVal(Latest(talk, MCP_CS_TALK_SHOWN));
@@ -713,6 +783,7 @@ void McpCsResetForNewGame()
 	for(int i = MAX_MAJOR_CIVS; i < MAX_CIV_PLAYERS; ++i)
 	{
 		s_sight[i] = McpCsSightLedger();
+		ForgetAutoSight((PlayerTypes)i);
 		if(GET_PLAYER((PlayerTypes)i).isMinorCiv()) UnlightLoadedSight((PlayerTypes)i);
 	}
 	s_talk.clear();
