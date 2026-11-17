@@ -62,3 +62,12 @@ read through `plugin-compat/` instead; the attack preview's strength calls, on
 LEKMOD's `CvCombatInfo` form of those functions; and the two diplomacy hook
 points, under the names our hook-id registry gives them with LEKMOD's parameter
 lists. Without the define the sources are the author's, unchanged.
+
+**`lekmod-trait-merge.patch`** — `lekmod`, `CvInfos.*`, `CvTraitClasses.*`. Lets a leader carry two abilities at once
+(the Second Leader mod). `CvLeaderHeadInfo::hasOwnTrait` tells the leader's own traits from ones a plugin adds;
+`CvPlayerTraits` reads its own first. In `InitPlayerTraits` every field combines instead of keeping the last trait's
+value: amounts add up, flags and allowances join, ranges and caps take the larger, a slot that holds one thing (the
+combat-bonus improvement, a build's time override) keeps the first trait that fills it, and bans come from the
+leader's own traits only. The capital's free building and its tech now come from the same trait. No LEKMOD leader has
+two traits of its own, so a game without Second Leader plays as before. `internal/second-leader/tests/
+check_trait_loader.py` checks the loader.

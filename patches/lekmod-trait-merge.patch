@@ -1,0 +1,349 @@
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvInfos.h
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvInfos.h
+@@ -1907,6 +1907,8 @@
+ 
+ 	// Arrays
+ 	bool hasTrait(int i) const;
++	// lekmod-bazaar: the leader's own traits, as the database gives them; hasTrait also answers for any a plugin adds.
++	bool hasOwnTrait(int i) const;
+ 	int getFlavorValue(int i) const;
+ 
+ 	// Other
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvInfos.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvInfos.cpp
+@@ -6253,6 +6253,13 @@
+ 	return m_pbTraits ? m_pbTraits[i] : false;
+ }
+ //------------------------------------------------------------------------------
++bool CvLeaderHeadInfo::hasOwnTrait(int i) const
++{
++	CvAssertMsg(i < GC.getNumTraitInfos(), "Index out of bounds");
++	CvAssertMsg(i > -1, "Index out of bounds");
++	return m_pbTraits ? m_pbTraits[i] : false;
++}
++//------------------------------------------------------------------------------
+ int CvLeaderHeadInfo::getFlavorValue(int i) const
+ {
+ 	CvAssertMsg(i < GC.getNumFlavorTypes(), "Index out of bounds");
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTraitClasses.h
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTraitClasses.h
+@@ -1428,6 +1428,8 @@
+ 	const std::vector<TraitTypes> GetPotentiallyActiveTraits() { return m_vPotentiallyActiveLeaderTraits; }
+ 
+ private:
++	// lekmod-bazaar: which traits the leader has, its own first and then any a plugin adds (Second Leader)
++	void PrecomputeLeaderTraits();
+ 	bool ConvertBarbarianCamp(CvPlot* pPlot);
+ 	bool ConvertBarbarianNavalUnit(UnitHandle pUnit);
+ 
+--- a/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTraitClasses.cpp
++++ b/LEKMOD_DLL/CvGameCoreDLL_Expansion2/CvTraitClasses.cpp
+@@ -3229,27 +3229,43 @@
+ }
+ 
+ /// Store off data on bonuses from traits
+-void CvPlayerTraits::InitPlayerTraits()
+-{
+-
+-	// precompute the traits our leader has
++/// lekmod-bazaar: which traits the leader has, its own first, then any a plugin adds (Second Leader), so that what one
++/// trait alone can give (a free building, a build time) is the leader's own where both give it
++void CvPlayerTraits::PrecomputeLeaderTraits()
++{
+ 	m_vPotentiallyActiveLeaderTraits.clear();
+-	for(int iI = 0; iI < GC.getNumTraitInfos(); iI++)
++	for(int iPass = 0; iPass < 2; iPass++)
+ 	{
+-		m_vLeaderHasTrait[iI] = false;
+-		if (m_pPlayer && m_pPlayer->isMajorCiv() && m_pPlayer->isAlive() && m_pPlayer->getLeaderInfo().hasTrait( (TraitTypes)iI ))
++		for(int iI = 0; iI < GC.getNumTraitInfos(); iI++)
+ 		{
+-			m_vLeaderHasTrait[iI] = true;
+-			m_vPotentiallyActiveLeaderTraits.push_back( (TraitTypes)iI );
++			if(iPass == 0)
++				m_vLeaderHasTrait[iI] = false;
++			if (m_pPlayer && m_pPlayer->isMajorCiv() && m_pPlayer->isAlive() && m_pPlayer->getLeaderInfo().hasTrait( (TraitTypes)iI ))
++			{
++				if(m_pPlayer->getLeaderInfo().hasOwnTrait(iI) != (iPass == 0))
++					continue;
++				m_vLeaderHasTrait[iI] = true;
++				m_vPotentiallyActiveLeaderTraits.push_back( (TraitTypes)iI );
++			}
+ 		}
+ 	}
+-#ifdef AUI_WARNING_FIXES
+-	for (uint iI = 0; iI < GC.getNumTraitInfos(); iI++)
+-#else
+-	for(int iI = 0; iI < GC.getNumTraitInfos(); iI++)
+-#endif
++}
+ 
++void CvPlayerTraits::InitPlayerTraits()
++{
++
++	// precompute the traits our leader has
++	PrecomputeLeaderTraits();
++	// lekmod-bazaar: the leader's own traits first (pass 0), then any a plugin adds (pass 1). With two traits (Second Leader)
++	// every field combines: amounts add up, flags and allowances join, ranges and caps take the larger, a slot that
++	// holds one thing keeps the first trait that fills it, and bans come from the leader's own traits only. With one
++	// trait each field gets that trait's value, as before.
++	for(int iPass = 0; iPass < 2; iPass++)
++	for(int iI = 0; iI < GC.getNumTraitInfos(); iI++)
+ 	{
++		const bool bOwn = m_pPlayer != NULL && m_pPlayer->getLeaderInfo().hasOwnTrait(iI);
++		if(bOwn != (iPass == 0))
++			continue;
+ 		if(HasTrait((TraitTypes)iI))
+ 		{
+ 			CvTraitEntry* trait = GC.getTraitInfo((TraitTypes)iI);
+@@ -3302,7 +3318,7 @@
+ 			m_iNaturalWonderFirstFinderGold += trait->GetNaturalWonderFirstFinderGold();
+ 			m_iNaturalWonderSubsequentFinderGold += trait->GetNaturalWonderSubsequentFinderGold();
+ #if defined(TRAITIFY) // CvPlayerTraits::InitPlayerTraits
+-			m_bHalfMoreSpecialistUnhappiness = trait->IsHalfMoreSpecialistUnhappiness();
++			if(trait->IsHalfMoreSpecialistUnhappiness()) m_bHalfMoreSpecialistUnhappiness = true;
+ 
+ 			m_iNumExtraLeagueVotes += trait->GetNumExtraLeagueVotes();
+ 			m_iNumTradeRouteBonus += trait->GetNumTradeRouteBonus();
+@@ -3326,7 +3342,7 @@
+ 			m_iGreatGeneralSiegeBonus += trait->GetGreatGeneralSiegeBonus();
+ #endif
+ #if defined(LEKMOD_v34)
+-			m_bReligionEnhanceReformation = trait->IsReligionEnhanceReformation();
++			if(trait->IsReligionEnhanceReformation()) m_bReligionEnhanceReformation = true;
+ 			m_iSelfReligiousPressureModifier += trait->GetSelfReligiousPressureModifier();
+ #endif
+ 			//EAP: Natural wonder faith for the finder
+@@ -3335,8 +3351,11 @@
+ 
+ 			m_iNaturalWonderYieldModifier += trait->GetNaturalWonderYieldModifier();
+ 			m_iNaturalWonderHappinessModifier += trait->GetNaturalWonderHappinessModifier();
+-			m_iNearbyImprovementCombatBonus += trait->GetNearbyImprovementCombatBonus();
+-			m_iNearbyImprovementBonusRange += trait->GetNearbyImprovementBonusRange();
++			// the bonus beside an improvement goes with the improvement kept (the first trait that names one)
++			const bool bKeepsImprovement = trait->GetCombatBonusImprovement() == NO_IMPROVEMENT || m_eCombatBonusImprovement == NO_IMPROVEMENT
++				|| m_eCombatBonusImprovement == trait->GetCombatBonusImprovement();
++			if(bKeepsImprovement) m_iNearbyImprovementCombatBonus += trait->GetNearbyImprovementCombatBonus();
++			if(bKeepsImprovement) m_iNearbyImprovementBonusRange += trait->GetNearbyImprovementBonusRange();
+ 			m_iCultureBuildingYieldChange += trait->GetCultureBuildingYieldChange();
+ 			m_iCombatBonusVsHigherTech += trait->GetCombatBonusVsHigherTech();
+ 			m_iCombatBonusVsLargerCiv += trait->GetCombatBonusVsLargerCiv();
+@@ -3436,7 +3455,8 @@
+ 			{
+ 				m_bMayaCalendarBonuses = true;
+ 			}
+-			if (trait->IsNoAnnexing())
++			// a ban (no annexing, so no Settlers and every new city a puppet): from the leader's own traits only
++			if(bOwn && trait->IsNoAnnexing())
+ 			{
+ 				m_bNoAnnexing = true;
+ 			}
+@@ -3463,15 +3483,15 @@
+ 				{
+ 					m_iExtraYieldThreshold[iYield] = trait->GetExtraYieldThreshold(iYield);
+ 				}
+-				m_iFreeCityYield[iYield] = trait->GetYieldChange(iYield);
+-				m_iYieldChangeStrategicResources[iYield] = trait->GetYieldChangeStrategicResources(iYield);
+-				m_iYieldChangeLuxuryResources[iYield] = trait->GetYieldChangeLuxuryResources(iYield); // NQMP GJS - New Netherlands UA
+-				m_iYieldChangeNaturalWonder[iYield] = trait->GetYieldChangeNaturalWonder(iYield);
++				m_iFreeCityYield[iYield] += trait->GetYieldChange(iYield);
++				m_iYieldChangeStrategicResources[iYield] += trait->GetYieldChangeStrategicResources(iYield);
++				m_iYieldChangeLuxuryResources[iYield] += trait->GetYieldChangeLuxuryResources(iYield); // NQMP GJS - New Netherlands UA
++				m_iYieldChangeNaturalWonder[iYield] += trait->GetYieldChangeNaturalWonder(iYield);
+ #if !defined(TRADE_REFACTOR)
+-				m_iYieldChangePerTradePartner[iYield] = trait->GetYieldChangePerTradePartner(iYield);
+-				m_iYieldChangeIncomingTradeRoute[iYield] = trait->GetYieldChangeIncomingTradeRoute(iYield);
++				m_iYieldChangePerTradePartner[iYield] += trait->GetYieldChangePerTradePartner(iYield);
++				m_iYieldChangeIncomingTradeRoute[iYield] += trait->GetYieldChangeIncomingTradeRoute(iYield);
+ #else
+-				m_iTradePartnerYieldFlatBonusPerEra[iYield] = trait->GetTradePartnerYieldFlatBonusPerEra(iYield);
++				m_iTradePartnerYieldFlatBonusPerEra[iYield] += trait->GetTradePartnerYieldFlatBonusPerEra(iYield);
+ 				for (int iDomain = 0; iDomain < NUM_DOMAIN_TYPES; iDomain++)
+ 				{
+ 					int iChange = trait->GetYieldChangePerTradePartnerByDomain((DomainTypes)iDomain, (YieldTypes)iYield);
+@@ -3531,21 +3551,21 @@
+ 					}
+ 				}
+ #endif
+-				m_iYieldRateModifier[iYield] = trait->GetYieldModifier(iYield);
++				m_iYieldRateModifier[iYield] += trait->GetYieldModifier(iYield);
+ #if defined(FULL_YIELD_FROM_KILLS) // CvPlayerTraits::InitPlayerTraits, Arrays
+-				m_iYieldFromKills[iYield] = trait->GetYieldFromKills(iYield);
+-				m_iYieldFromKillsMax[iYield] = trait->GetYieldFromKillsMax(iYield);
++				m_iYieldFromKills[iYield] += trait->GetYieldFromKills(iYield);
++				if(trait->GetYieldFromKillsMax(iYield) > m_iYieldFromKillsMax[iYield]) m_iYieldFromKillsMax[iYield] = trait->GetYieldFromKillsMax(iYield);
+ #endif
+ #if defined(LEKMOD_EXPERIMENTAL_CHANGES)
+-				m_iWorldWonderYieldChange[iYield] = trait->GetWorldWonderYieldChanges(iYield);
++				m_iWorldWonderYieldChange[iYield] += trait->GetWorldWonderYieldChanges(iYield);
+ #endif
+ #if defined(TRAITIFY)
+-				m_iPuppetYieldModifiers[iYield] = trait->GetPuppetYieldModifiers(iYield);
+-				m_iGoldenAgeYieldModifier[iYield] = trait->GetGoldenAgeYieldModifier(iYield);
++				m_iPuppetYieldModifiers[iYield] += trait->GetPuppetYieldModifiers(iYield);
++				m_iGoldenAgeYieldModifier[iYield] += trait->GetGoldenAgeYieldModifier(iYield);
+ #endif
+ #if defined(LEKMOD_CITY_YIELDS_TRAITS)
+ 				m_aiCapitalYieldChange[iYield] += trait->GetCapitalYieldChange(iYield);
+-				m_aiCityYieldChange[iYield] = trait->GetCityYieldChange(iYield);
++				m_aiCityYieldChange[iYield] += trait->GetCityYieldChange(iYield);
+ 				for (int iEraLoop = 0; iEraLoop < GC.getNumEraInfos(); iEraLoop++)
+ 				{
+ 					int iChange = trait->GetCapitalEraYieldChange((EraTypes)iEraLoop, (YieldTypes)iYield);
+@@ -3661,7 +3681,7 @@
+ 				}
+ #endif
+ #if defined(LEKMOD_GREAT_WORK_YIELD_EFFECTS)
+-				m_iGreatWorkYieldChange[iYield] = trait->GetGreatWorkYieldChange((YieldTypes)iYield);
++				m_iGreatWorkYieldChange[iYield] += trait->GetGreatWorkYieldChange((YieldTypes)iYield);
+ 				for (int iGreatWorkLoop = 0; iGreatWorkLoop < GC.getNumGreatWorkClassInfos(); iGreatWorkLoop++)
+ 				{
+ 					int iChange = trait->GetGreatWorkClassYieldChange((GreatWorkClass)iGreatWorkLoop, (YieldTypes)iYield);
+@@ -3736,13 +3756,13 @@
+ #if defined(TRAITIFY) // Building Class Loop for non Yield Arrays
+ 			for (int iBuildingClass = 0; iBuildingClass < GC.getNumBuildingClassInfos(); iBuildingClass++)
+ 			{
+-				m_aiBuildingClassHappiness[iBuildingClass] = trait->GetBuildingClassHappiness((BuildingClassTypes)iBuildingClass);
+-				m_aiBuildingClassGlobalHappiness[iBuildingClass] = trait->GetBuildingClassGlobalHappiness((BuildingClassTypes)iBuildingClass);
+-				m_abRemoveRequiredTerrain[iBuildingClass] = trait->IsBuildingClassRemoveRequiredTerrain((BuildingClassTypes)iBuildingClass);
++				m_aiBuildingClassHappiness[iBuildingClass] += trait->GetBuildingClassHappiness((BuildingClassTypes)iBuildingClass);
++				m_aiBuildingClassGlobalHappiness[iBuildingClass] += trait->GetBuildingClassGlobalHappiness((BuildingClassTypes)iBuildingClass);
++				if(trait->IsBuildingClassRemoveRequiredTerrain((BuildingClassTypes)iBuildingClass)) m_abRemoveRequiredTerrain[iBuildingClass] = true;
+ 			}
+ 			for (int iRouteType = 0; iRouteType < NUM_ROUTE_TYPES; iRouteType++)
+ 			{
+-				m_iRouteMovementChange[iRouteType] = trait->GetRouteMovementChange((RouteTypes)iRouteType);
++				m_iRouteMovementChange[iRouteType] += trait->GetRouteMovementChange((RouteTypes)iRouteType);
+ 			}
+ #endif
+ #ifdef AUI_WARNING_FIXES
+@@ -3751,7 +3771,7 @@
+ 			for(int iTerrain = 0; iTerrain < GC.getNumTerrainInfos(); iTerrain++)
+ #endif
+ 			{
+-				m_iStrategicResourceQuantityModifier[iTerrain] = trait->GetStrategicResourceQuantityModifier(iTerrain);
++				m_iStrategicResourceQuantityModifier[iTerrain] += trait->GetStrategicResourceQuantityModifier(iTerrain);
+ 			}
+ 
+ #ifdef AUI_WARNING_FIXES
+@@ -3760,7 +3780,7 @@
+ 			for(int iResource = 0; iResource < GC.getNumResourceInfos(); iResource++)
+ #endif
+ 			{
+-				m_aiResourceQuantityModifier[iResource] = trait->GetResourceQuantityModifier(iResource);
++				m_aiResourceQuantityModifier[iResource] += trait->GetResourceQuantityModifier(iResource);
+ 			}
+ 
+ #ifdef AUI_WARNING_FIXES
+@@ -3769,9 +3789,9 @@
+ 			for (int iUnitClass = 0; iUnitClass < GC.getNumUnitClassInfos(); iUnitClass++)
+ #endif
+ 			{
+-				m_abNoTrain[iUnitClass] = trait->NoTrain((UnitClassTypes)iUnitClass);
++				if(bOwn && trait->NoTrain((UnitClassTypes)iUnitClass)) m_abNoTrain[iUnitClass] = true;
+ #if defined(TRAITIFY) // UnitClassForceSpawnCapital insert
+-				m_abForceSpawnCapital[iUnitClass] = trait->IsUnitClassForceSpawnCapital((UnitClassTypes)iUnitClass);
++				if(trait->IsUnitClassForceSpawnCapital((UnitClassTypes)iUnitClass)) m_abForceSpawnCapital[iUnitClass] = true;
+ #endif
+ 			}
+ 
+@@ -3779,10 +3799,10 @@
+ 			for (int iImprovement = 0; iImprovement < GC.getNumImprovementInfos(); iImprovement++)
+ 			{
+ #ifdef LEKMOD_TRAIT_NO_BUILD_IMPROVEMENTS
+-				m_abNoBuild[iImprovement] = trait->NoBuildImprovements((ImprovementTypes)iImprovement);
++				if(bOwn && trait->NoBuildImprovements((ImprovementTypes)iImprovement)) m_abNoBuild[iImprovement] = true;
+ #if defined(v35_TRAITIFY)
+-				m_viBuildCompleteTileClaimRange[iImprovement] = trait->GetBuildCompleteTileClaimRange(iImprovement);
+-				m_viBuildCompleteTileStealRange[iImprovement] = trait->GetBuildCompleteTileStealRange(iImprovement);
++				if(trait->GetBuildCompleteTileClaimRange(iImprovement) > m_viBuildCompleteTileClaimRange[iImprovement]) m_viBuildCompleteTileClaimRange[iImprovement] = trait->GetBuildCompleteTileClaimRange(iImprovement);
++				if(trait->GetBuildCompleteTileStealRange(iImprovement) > m_viBuildCompleteTileStealRange[iImprovement]) m_viBuildCompleteTileStealRange[iImprovement] = trait->GetBuildCompleteTileStealRange(iImprovement);
+ #endif
+ #endif
+ 			}
+@@ -3791,10 +3811,10 @@
+ 			for (int iMission = 0; iMission < GC.getNumMissionInfos(); iMission++)
+ 			{
+ #if defined(LEKMOD_TRAIT_BAN_UNIT_MISSIONS)
+-				m_abBannedUnitMissions[iMission] = trait->IsBannedUnitMission((MissionTypes)iMission);
++				if(bOwn && trait->IsBannedUnitMission((MissionTypes)iMission)) m_abBannedUnitMissions[iMission] = true;
+ #endif
+ #if defined(v35_TRAITIFY) // mission loop
+-				m_vbEmbarkedAllowedMissions[iMission] = trait->IsEmbarkedMissionAllowed((MissionTypes)iMission);
++				if(trait->IsEmbarkedMissionAllowed((MissionTypes)iMission)) m_vbEmbarkedAllowedMissions[iMission] = true;
+ #endif
+ 			}
+ 
+@@ -3802,8 +3822,10 @@
+ 	// Copy the backward compatibility vectors
+ 	for (int iBuild = 0; iBuild < GC.getNumBuildInfos(); iBuild++)
+ 	{
+-		m_aiBuildTimeOverride[iBuild] = trait->GetBuildTimeOverrideVector(iBuild);
+-		m_aiBuildTimeOverrideResourceClassRequired[iBuild] = trait->GetBuildTimeOverrideResourceClassRequiredVector(iBuild);
++		// the first trait with an override for a build keeps it, with the resource class it needs
++		const bool bTakeOverride = m_aiBuildTimeOverride[iBuild] < 0 && trait->GetBuildTimeOverrideVector(iBuild) >= 0;
++		if(bTakeOverride) m_aiBuildTimeOverrideResourceClassRequired[iBuild] = trait->GetBuildTimeOverrideResourceClassRequiredVector(iBuild);
++		if(bTakeOverride) m_aiBuildTimeOverride[iBuild] = trait->GetBuildTimeOverrideVector(iBuild);
+ 
+ 	}
+ 
+@@ -3828,7 +3850,7 @@
+ 				m_aFreeTraitUnits.push_back(traitUnit);
+ 			}
+ 
+-			m_eCombatBonusImprovement = trait->GetCombatBonusImprovement();
++			if(m_eCombatBonusImprovement == NO_IMPROVEMENT) m_eCombatBonusImprovement = trait->GetCombatBonusImprovement();
+ 
+ #ifdef AUI_WARNING_FIXES
+ 			for (uint jJ = 0; jJ < GC.getNumUnitCombatClassInfos(); jJ++)
+@@ -5182,7 +5204,8 @@
+ 	for(size_t iI = 0; iI < m_vPotentiallyActiveLeaderTraits.size(); iI++)
+ 	{
+ 		CvTraitEntry* pkTraitInfo = GC.getTraitInfo(m_vPotentiallyActiveLeaderTraits[iI]);
+-		if(pkTraitInfo && HasTrait(m_vPotentiallyActiveLeaderTraits[iI]) && pkTraitInfo->GetFreeBuildingPrereqTech())
++		// lekmod-bazaar: the first trait that has one (NO_TECH is -1, which the old test took as one)
++		if(pkTraitInfo && HasTrait(m_vPotentiallyActiveLeaderTraits[iI]) && pkTraitInfo->GetFreeBuildingPrereqTech() != NO_TECH)
+ 			return pkTraitInfo->GetFreeBuildingPrereqTech();
+ 	}
+ 
+@@ -5194,7 +5217,8 @@
+ 	for(size_t iI = 0; iI < m_vPotentiallyActiveLeaderTraits.size(); iI++)
+ 	{
+ 		CvTraitEntry* pkTraitInfo = GC.getTraitInfo(m_vPotentiallyActiveLeaderTraits[iI]);
+-		if(pkTraitInfo && HasTrait(m_vPotentiallyActiveLeaderTraits[iI]) && pkTraitInfo->GetCapitalFreeBuildingPrereqTech())
++		// lekmod-bazaar: the tech that gates the capital's free building comes from the trait that gives it
++		if(pkTraitInfo && HasTrait(m_vPotentiallyActiveLeaderTraits[iI]) && pkTraitInfo->GetFreeCapitalBuilding() != NO_BUILDING)
+ 			return pkTraitInfo->GetCapitalFreeBuildingPrereqTech();
+ 	}
+ 
+@@ -5281,9 +5305,10 @@
+ {
+ 	CvAssertMsg(eBuild < GC.getNumBuildInfos(), "Invalid eBuild parameter in call to CvPlayerTraits::GetBuildTimeOverride()");
+ 
+-	for (int iI = 0; iI < GC.getNumTraitInfos(); iI++)
++	// lekmod-bazaar: the leader's own traits first (PrecomputeLeaderTraits)
++	for (size_t iT = 0; iT < m_vPotentiallyActiveLeaderTraits.size(); iT++)
+ 	{
+-		TraitTypes eTrait = static_cast<TraitTypes>(iI);
++		TraitTypes eTrait = m_vPotentiallyActiveLeaderTraits[iT];
+ 		if (!HasTrait(eTrait))
+ 			continue;
+ 
+@@ -5659,16 +5684,7 @@
+ 	{ FILogFile* pDbg = LOGFILEMGR.GetLog("LoadDebug.log", FILogFile::kDontTimeStamp); pDbg->Msg("  [CvPlayerTraits::Read] uiVersion=%u (expected 19)", uiVersion); }
+ 
+ 	// precompute the traits our leader has
+-	m_vPotentiallyActiveLeaderTraits.clear();
+-	for(int iI = 0; iI < GC.getNumTraitInfos(); iI++)
+-	{
+-		m_vLeaderHasTrait[iI] = false;
+-		if (m_pPlayer && m_pPlayer->isMajorCiv() && m_pPlayer->isAlive() && m_pPlayer->getLeaderInfo().hasTrait( (TraitTypes)iI ))
+-		{
+-			m_vLeaderHasTrait[iI] = true;
+-			m_vPotentiallyActiveLeaderTraits.push_back( (TraitTypes)iI );
+-		}
+-	}
++	PrecomputeLeaderTraits();
+ 
+ 	kStream >> m_iGreatPeopleRateModifier;
+ 	kStream >> m_iGreatScientistRateModifier;

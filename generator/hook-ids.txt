@@ -15770,3 +15770,5 @@
 15769	CvLuaUnit_lIsNearFeatureType	CvLuaUnit::lIsNearFeatureType(lua_State *)	static int
 15770	CvLuaUnit_lIsNearImprovementType	CvLuaUnit::lIsNearImprovementType(lua_State *)	static int
 15771	CvPlayer_acquireCity_with_CvCity_bool_bool_bool	CvPlayer::acquireCity(CvCity *, bool, bool, bool)	void
+15772	CvLeaderHeadInfo_hasOwnTrait	CvLeaderHeadInfo::hasOwnTrait(int) const	bool
+15773	CvPlayerTraits_PrecomputeLeaderTraits	CvPlayerTraits::PrecomputeLeaderTraits()	void
