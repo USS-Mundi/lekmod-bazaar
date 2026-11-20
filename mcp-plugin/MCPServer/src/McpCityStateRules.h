@@ -32,7 +32,6 @@ struct McpCsSettings
 	int secureLead;     // ...by at least this: secure
 	int trendTurns;     // rising or falling is judged over this many turns
 	int trendAmount;    // ...by at least this much influence
-	int liveSightInfluence;  // from this influence every unit sees for the ally, unasked; 0: from the highest step
 };
 
 enum McpCsModifier { MCP_CS_CONTESTED, MCP_CS_SECURE, MCP_CS_RISING, MCP_CS_FALLING };
@@ -96,24 +95,6 @@ struct McpCsSightLedger
 std::string McpCsSightLedgerWrite(const McpCsSightLedger& ledger);
 // false when the text is not a ledger this plugin wrote; "" reads as an empty ledger.
 bool McpCsSightLedgerRead(const std::string& text, McpCsSightLedger& ledger);
-
-// At the highest standing the ally does not have to ask: every unit of the city-state sees for them, live.
-// The influence that takes: the settings' own, or the highest step when they name none, and never below the first
-// step that puts its sight on the ally's map. -1 when no step does.
-int McpCsLiveSightFrom(const std::vector<McpCsTier>& tiers, const McpCsSettings& settings);
-bool McpCsSightIsAutomatic(const std::vector<McpCsTier>& tiers, const McpCsSettings& settings, int influence);
-// What to do about it now. units: every unit it has; lit: the units in its ledger; autoLit: those of them the rule
-// lit, not its player. While the rule holds every unit not lit is lit as the rule's; when it stops, the rule's go
-// dark and the ones its player chose stay. All three lists come back sorted.
-struct McpCsSightChange
-{
-	std::vector<int> light;
-	std::vector<int> drop;
-	std::vector<int> autoLit;  // the rule's units afterwards
-};
-McpCsSightChange McpCsAutoSightChange(bool automatic, const std::vector<int>& units, const std::vector<int>& lit, const std::vector<int>& autoLit);
-// Why its player may not stop a unit sharing, or "" when it may.
-std::string McpCsSightOffRefusal(bool automatic);
 
 const char* McpCsModifierText(McpCsModifier modifier);
 // allyHistory: the ally's influence once a turn, oldest first.
