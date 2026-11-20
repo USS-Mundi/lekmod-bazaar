@@ -135,6 +135,12 @@ std::string McpCsTributeDeed(int tribute, int paid, int treasuryBefore)
 	return o.str();
 }
 
+std::string McpCsPledgeDeed(bool wasProtected, bool isProtected)
+{
+	if(wasProtected == isProtected) return std::string();
+	return isProtected ? "pledged to protect them" : "withdrew their pledge of protection";
+}
+
 bool McpCsSameSide(bool aMinor, bool bMinor, int allyTeamA, int allyTeamB)
 {
 	return aMinor && bMinor && allyTeamA >= 0 && allyTeamA == allyTeamB;

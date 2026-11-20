@@ -195,6 +195,15 @@ static void TestGold()
 	CHECK(McpCsTributeDeed(240, 100, 100) == "took 240 gold from them by threat (treasury 100 to 0)");
 }
 
+static void TestPledge()
+{
+	CHECK(McpCsPledgeDeed(false, true) == "pledged to protect them");
+	CHECK(McpCsPledgeDeed(true, false) == "withdrew their pledge of protection");
+	// a dying city-state cancels the pledge of every civ, and only one that had pledged withdrew anything
+	CHECK(McpCsPledgeDeed(false, false).empty());
+	CHECK(McpCsPledgeDeed(true, true).empty());
+}
+
 static void TestSameSide()
 {
 	// two city-states are one side while each has an ally and the allies are on one team
@@ -286,6 +295,7 @@ int main()
 	TestTalkLine();
 	TestSightLedger();
 	TestGold();
+	TestPledge();
 	TestSameSide();
 	TestLiveSightForEveryUnit();
 	TestAutoSightChange();

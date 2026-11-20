@@ -677,6 +677,7 @@ std::vector<std::string> McpCsConversation(PlayerTypes eMinor, PlayerTypes eCiv)
 void McpCsNoteDeed(PlayerTypes eMinor, PlayerTypes eCiv, const std::string& what)
 {
 	if(eMinor < MAX_MAJOR_CIVS || eCiv == NO_PLAYER || eCiv >= MAX_MAJOR_CIVS) return;
+	if(!GET_PLAYER(eCiv).isEverAlive()) return; // a slot nobody plays has no civilization to name
 	Record(eMinor, eCiv, "deed", McpFormat("turn %d: ", GC.getGame().getGameTurn()) + what);
 }
 

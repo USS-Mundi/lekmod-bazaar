@@ -28,6 +28,8 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 picojson::value McpTakeMessagesThatCame(std::string& err);
 // A major seat's round has opened, its turn has not, it has no plan for it and has not been asked for one this round.
 bool McpRoundAwaitsPlan(CvPlayer* me);
+// A major seat whose round is open and whose turn has not opened yet: it plans now, and its turn tools wait for the turn.
+bool McpSeatRoundOpen(CvPlayer* me);
 // A major seat has a plan for the turn the game is on.
 bool McpPlanIsDue(CvPlayer* me);
 // What the agent plans from once its turn is over: what the next turns bring and its whole game plan.

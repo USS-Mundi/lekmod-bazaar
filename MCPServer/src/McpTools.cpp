@@ -52,6 +52,12 @@ MCP_TOOL(ToolGameSettings)
 {
 	CvPlayer* me = Me(err);
 	if(!me) return JVal();
+	return McpGameSettingsJson((int)me->GetID());
+}
+
+picojson::value McpGameSettingsJson(int iFallbackPlayer)
+{
+	PlayerTypes eFallback = (PlayerTypes)iFallbackPlayer;
 	JObj o;
 	CvEraInfo* pEra = GC.getEraInfo(CvPreGame::era());
 	if(pEra) o["start_era"] = J(pEra->GetDescription());
@@ -62,7 +68,8 @@ MCP_TOOL(ToolGameSettings)
 	o["map_type"] = J(dot == std::string::npos ? script : script.substr(0, dot));
 	o["map_size"] = J(GC.getMap().getWorldInfo().GetDescription());
 	PlayerTypes eHuman = GC.getGame().getActivePlayer();
-	CvHandicapInfo* pHandicap = GC.getHandicapInfo(CvPreGame::handicap(eHuman == NO_PLAYER ? me->GetID() : eHuman));
+	PlayerTypes eHandicap = eHuman == NO_PLAYER ? eFallback : eHuman;
+	CvHandicapInfo* pHandicap = eHandicap == NO_PLAYER ? NULL : GC.getHandicapInfo(CvPreGame::handicap(eHandicap));
 	if(pHandicap) o["difficulty"] = J(pHandicap->GetDescription());
 	CvGameSpeedInfo* pSpeed = GC.getGameSpeedInfo(CvPreGame::gameSpeed());
 	if(pSpeed) o["game_pace"] = J(pSpeed->GetDescription());
@@ -675,7 +682,7 @@ bool McpTool::ReadPathFrom(const JObj& args, int startX, int startY, TeamTypes e
 
 MCP_TOOL(ToolMoveUnit)
 {
-	CvPlayer* me = MeActing(err);
+	CvPlayer* me = MeActingOrPreview(args, err);
 	if(!me) return JVal();
 	CvUnit* u = RequireUnit(me, args, err);
 	if(!u) return JVal();
@@ -1094,6 +1101,8 @@ namespace
 	std::map<int, int> s_endingTurn;
 	// How many times the end_turn now running has ended a handed-back turn again by itself.
 	std::map<int, int> s_endedAgain;
+	// Units a running plan's end_turn let rest this turn: they finished their routes with moves left and wait for orders.
+	std::map<int, std::vector<std::string> > s_rested;
 
 	// Asks the game to end the seat's turn; bIdleUnits lets its idle units skip the turn first. False, with err, when
 	// the game does not take it.
@@ -1135,11 +1144,22 @@ namespace
 		if(eState == MCP_TURN_HANDED_BACK)
 		{
 			EndTurnBlockingTypes eBlock = EndTurnBlocking(me);
-			bool bBlocked = eBlock != NO_ENDTURN_BLOCKING_TYPE || !PendingCaptureDecision(me).empty();
-			if(McpEndTurnAgain(bBlocked, McpBridge::Get().CountUnread(me->GetID()), s_endedAgain[me->GetID()]))
+			bool bCapture = !PendingCaptureDecision(me).empty();
+			bool bBlocked = eBlock != NO_ENDTURN_BLOCKING_TYPE || bCapture;
+			bool bOnlyUnits = eBlock == ENDTURN_BLOCKING_UNITS && !bCapture;
+			McpHandBack eNext = McpAfterHandBack(bBlocked, bOnlyUnits, McpBridge::RunningPlan(), McpBridge::Get().CountUnread(me->GetID()), s_endedAgain[me->GetID()]);
+			if(eNext != MCP_HAND_BACK)
 			{
+				bool bSkip = eNext == MCP_END_AGAIN_SKIPPING_UNITS;
+				if(bSkip)
+				{
+					int iLoop;
+					for(CvUnit* r = me->firstUnit(&iLoop); r; r = me->nextUnit(&iLoop))
+						if(r->ReadyToMove() && !r->isDelayedDeath())
+							s_rested[me->GetID()].push_back(McpFormat("%s %d at (%d,%d)", r->getName().GetCString(), r->GetID(), r->getX(), r->getY()));
+				}
 				++s_endedAgain[me->GetID()];
-				if(!SendEndTurn(me, false, err)) return JVal();
+				if(!SendEndTurn(me, bSkip, err)) return JVal();
 				s_endingTurn[me->GetID()] = iTurn;
 				return EndTurnOutcome(me, iTurn, err);
 			}
@@ -1154,6 +1174,15 @@ namespace
 		JObj o;
 		o["ok"] = J(true);
 		o["ended_turn"] = J(iTurn);
+		std::map<int, std::vector<std::string> >::iterator rested = s_rested.find(me->GetID());
+		if(rested != s_rested.end())
+		{
+			JArr names;
+			for(size_t i = 0; i < rested->second.size(); ++i) names.push_back(J(rested->second[i]));
+			o["rested_this_turn"] = JVal(names);
+			o["rested_why"] = J("these units finished their routes with moves left as the turn ended; they rest this turn and take orders in your next plan");
+			s_rested.erase(rested);
+		}
 		// A major seat plans when the next round opens, from the view it opens then; a city-state plans now.
 		bool bMajor = (int)me->GetID() < MAX_MAJOR_CIVS;
 		o["next"] = J(bMajor ? "call wait_for_my_turn: it returns when the next round opens, and you plan your turn then; the turn comes back to you early if a unit finishes a queued move with moves to spare"
@@ -1175,7 +1204,11 @@ MCP_TOOL(ToolEndTurn)
 		if(McpBridge::Retrying()) return EndTurnOutcome(seat, it->second, err);
 		s_endingTurn.erase(it);
 	}
-	if(!McpBridge::Retrying()) s_endedAgain.erase(seat->GetID());
+	if(!McpBridge::Retrying())
+	{
+		s_endedAgain.erase(seat->GetID());
+		s_rested.erase(seat->GetID());
+	}
 	CvPlayer* me = MeActing(err);
 	if(!me) return JVal();
 	bool bForce = ArgBool(args, "force", false);
@@ -1466,7 +1499,7 @@ namespace
 		  "Revise your plan and send your turn's orders. A civilization sends them once its round has opened, from that round's turn_view: every order for the turn, in order, and a complete plan runs by itself when the turn opens. A city-state sends its next turn any time after it ends a turn. Your plan is your compass and your journal, in layers, each following from the one above: position (where you stand now: what is working, what is failing, and why), direction (how you are optimizing your odds of winning from here), next_turns (what has to be true over the next ten to twenty turns for that direction to hold), then each area's part in it: cities, military, civilians, research, policy, relations. Every part counts as much as the others. Write as much as each needs, at the level of intent and reasons; unit-by-unit steps belong in orders. Walk it top to bottom against the whole position, yours and the other players' moves as far as you can infer them: does each part follow from the one above, and does any part contradict another or where you stand? Where one does, find which is wrong and revise it. Write judgements and commitments, not reports: what you will do, by when, what you expect, and what would make you change course; remove what you no longer believe. plan takes any headings at a time; the rest stay as they were, and each keeps the turn it was written. why: what made you change it. targets: what you aim at and by which turn, each {tech, by}, {city, build, by}, {city, size, by}, {gold, by} or {policy: \"next\", by}; the list replaces the last one; when one slips, push for it, move it, or let it go. orders: your next turn's orders, in order, each {tool, args, serves} with args exactly as you would call them and serves the part of your plan the order serves, and how; end with end_turn, or [] for none yet. A move whose path can never be walked as written (a step not next to the one before, off the map, a mountain) or an order for a unit or city you do not have is refused, and nothing is saved. Before your turn, the plan also answers what your turn opening brings, or it is not saved: every unit ready to act gets an order; a city finishing a unit gives that unit its orders, named by from_city (the city id) in place of unit_id (with unit, its type, when the city also buys one of another kind in the plan, and nth, 2 for the second of one kind); a city or the research finishing with nothing queued after it gets what comes next (city_queue or set_production, set_research). A social policy coming due is left to the turn. aim: what this turn moves in your plan. A civilization with a chronicle writes position, direction and relations in its own voice, and three things more. relations is one entry for each player in your story: {\"<civilization>\": {text: what they are to you and what you will do about them, until: the turn the entry holds until, at most 30 ahead, why: when you write an entry again}}; an entry is owed again, changed or unchanged, when something is done by or to that player or its turn passes. threads: {open: [{with, words, vow}], end: [{id, ending}]}: what you have sworn, claimed or are owed; a thread stays open until you write how it ended; vow, optional, is {kind: war, peace, pact, deal, take or hold, subject: the city for take and hold, by: the turn}, and the game marks it kept or broken. chapter, when the turn view says one is due (your era changes, a civilization leaves the game, one of your cities is taken, or 40 turns pass): {title, became: who you have become, threads: [{id, state: kept, broken or owed, words}] for every open thread, nature: [{fault: its number, ruled: first, second, both or neither}] for every fault line of your first page and {unwritten: its number, settled: one sentence} for an unwritten line this chapter settled, direction: written again from nothing, said: [{to, words}], which may be empty}. What the chronicle is owed comes back as one list, and nothing is saved until it is all there.",
 		  "{\"type\":\"object\",\"properties\":{\"orders\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"aim\":{\"type\":\"string\"},\"plan\":{\"type\":\"object\",\"properties\":{\"position\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"next_turns\":{\"type\":\"string\"},\"cities\":{\"type\":\"string\"},\"military\":{\"type\":\"string\"},\"civilians\":{\"type\":\"string\"},\"research\":{\"type\":\"string\"},\"policy\":{\"type\":\"string\"},\"relations\":{\"type\":[\"object\",\"string\"]}}},\"threads\":{\"type\":\"object\"},\"chapter\":{\"type\":\"object\"},\"targets\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"why\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"}},\"required\":[\"orders\",\"aim\"]}", ToolPlanTurn, LOG_NONE, false },
 		{ MCP_TOOL_RUN_PLAN,
-		  "Carry out your planned orders for this turn in one call, after turn_view: each order runs in turn as if you had called it. A game message one of them brings (a ruin explored, a city-state met) does not stop the orders after it; it comes back in messages_while_running. An order for what is already so counts as done (the unit already rests, the city or your team already has the building, the tech is known, the policy taken), and so does a unit action with no moves left to make it; a move with no moves left queues its route for your next turn. end_turn runs only if nothing before it failed and no such message came. Give every unit and city turn_view lists under your_plan_leaves_open an order with add, or the turn will not end. drop: plan order numbers to leave out; add: orders to add, each {tool, args}, which go before a final end_turn. set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
+		  "Carry out your planned orders for this turn in one call, after turn_view: each order runs in turn as if you had called it. A game message one of them brings (a ruin explored, a city-state met) does not stop the orders after it; it comes back in messages_while_running. An order for what is already so counts as done (the unit already rests, the city or your team already has the building, the tech is known, the policy taken), and so does a unit action with no moves left to make it; a move with no moves left queues its route for your next turn. end_turn runs only if nothing before it failed and no message came that asks something of you (a captured city, a civilian to return); a ruin, a camp cleared or a city-state met does not hold it. A unit that finishes its route with moves left as the turn ends rests that turn (rested_this_turn). Give every unit and city turn_view lists under your_plan_leaves_open an order with add, or the turn will not end. drop: plan order numbers to leave out; add: orders to add, each {tool, args, serves}, which go before a final end_turn (serves may be left out here). set_aside=true runs nothing and drops the plan, to play the turn yourself. why: what made you change the plan, when the result of turn_view asks for it.",
 		  "{\"type\":\"object\",\"properties\":{\"drop\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}},\"add\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"set_aside\":{\"type\":\"boolean\"},\"why\":{\"type\":\"object\"}}}", NULL, LOG_NONE, false },
 		{ "briefing",
 		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
@@ -1501,6 +1534,9 @@ namespace
 		{ "rankings",
 		  "Where you stand, as the game's Demographics and score screens show it: your rank and the best, average and worst for population, food, production, gold, land, military, approval and literacy (best and worst are named only if you have met them); your score breakdown; and each met civilization's score. With the InfoAddict mod loaded, met civilizations also show InfoAddict's figures. history_turns (up to 100) with history_metrics adds the game's per-turn history, e.g. [\"science_yield_per_turn\", \"military_might\"].",
 		  "{\"type\":\"object\",\"properties\":{\"history_turns\":{\"type\":\"integer\"},\"history_metrics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}", ToolRankings, LOG_NONE, false },
+		{ "history",
+		  "The game's own record from its first turn: per-turn figures it keeps for each player (score, militarymight, citycount, population, techsknown, scienceperturn, totalculture, goldperturn, totalfaith, excesshapiness, totalland and more), its event log (cities founded, taken and razed, wonders, wars and peace, pacts, religions) and the world wonders standing. A seat sees only its own civilization; the session playing the civilization on screen sees every player. from_turn and through_turn narrow the turns, metrics and civs narrow the figures and players, events=false leaves out the event log. file=true (on-screen session only) writes the whole record to Logs\\MCPServer-history-<game>.json, as the game also does each turn, and answers with the path.",
+		  "{\"type\":\"object\",\"properties\":{\"from_turn\":{\"type\":\"integer\"},\"through_turn\":{\"type\":\"integer\"},\"metrics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"civs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"events\":{\"type\":\"boolean\"},\"file\":{\"type\":\"boolean\"}}}", ToolHistory, LOG_NONE, false },
 		{ "mods",
 		  "The mods loaded in this game, each with its version and the description its author wrote, so you know how the game differs from the standard rules. They can change between loads of the same game.",
 		  SCHEMA_EMPTY, ToolMods, LOG_NONE, false },
@@ -1710,56 +1746,9 @@ const McpToolDef* McpGetTools(size_t& count)
 	return TOOLS;
 }
 
-namespace
-{
-	const char* TypeMismatch(const JVal& property, const JVal& value)
-	{
-		if(!property.is<JObj>() || value.is<picojson::null>()) return NULL;
-		JObj::const_iterator t = property.get<JObj>().find("type");
-		if(t == property.get<JObj>().end() || !t->second.is<std::string>()) return NULL;
-		const std::string& type = t->second.get<std::string>();
-		int i = 0;
-		if(type == "boolean") return value.is<bool>() ? NULL : "true or false";
-		if(type == "integer") return IsInt(value, i) ? NULL : "a whole number";
-		if(type == "number") return value.is<double>() ? NULL : "a number";
-		if(type == "string") return value.is<std::string>() ? NULL : "text";
-		if(type == "array") return value.is<JArr>() ? NULL : "a list";
-		if(type == "object") return value.is<JObj>() ? NULL : "an object";
-		return NULL;
-	}
-}
-
 std::string McpCheckArgs(const McpToolDef& tool, const picojson::object& args)
 {
-	picojson::value schema;
-	if(!picojson::parse(schema, std::string(tool.inputSchema)).empty() || !schema.is<JObj>())
-		return McpFormat("the argument schema for %s is broken; this is a bug in the mod", tool.name);
-	const JObj& s = schema.get<JObj>();
-	JObj props;
-	JObj::const_iterator pit = s.find("properties");
-	if(pit != s.end() && pit->second.is<JObj>()) props = pit->second.get<JObj>();
-	for(JObj::const_iterator it = args.begin(); it != args.end(); ++it)
-	{
-		JObj::const_iterator prop = props.find(it->first);
-		if(prop != props.end())
-		{
-			const char* kind = TypeMismatch(prop->second, it->second);
-			if(kind) return McpFormat("argument '%s' for %s must be %s", it->first.c_str(), tool.name, kind);
-			continue;
-		}
-		std::string known;
-		for(JObj::const_iterator k = props.begin(); k != props.end(); ++k) known += (known.empty() ? "" : ", ") + k->first;
-		return McpFormat("unknown argument '%s' for %s; it accepts %s", it->first.c_str(), tool.name, known.empty() ? "no arguments" : known.c_str());
-	}
-	JObj::const_iterator rit = s.find("required");
-	if(rit != s.end() && rit->second.is<JArr>())
-	{
-		const JArr& req = rit->second.get<JArr>();
-		for(size_t i = 0; i < req.size(); ++i)
-			if(req[i].is<std::string>() && !HasArg(args, req[i].get<std::string>().c_str()))
-				return McpFormat("missing required argument '%s' for %s", req[i].get<std::string>().c_str(), tool.name);
-	}
-	return "";
+	return McpArgsFault(tool.name, tool.inputSchema, args);
 }
 
 const McpToolDef* McpFindTool(const std::string& name)

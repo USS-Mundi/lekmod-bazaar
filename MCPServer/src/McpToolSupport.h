@@ -53,6 +53,8 @@ namespace McpTool
 	bool RequireIdentity(std::string& err);
 	// Only while the turn is open; use for every tool that changes game state.
 	CvPlayer* MeActing(std::string& err);
+	// As MeActing; a call with preview_only also answers while the seat's round is open, to plan from (it changes nothing).
+	CvPlayer* MeActingOrPreview(const JObj& args, std::string& err);
 
 	// The game flags unit orders for human players that arrive outside its network
 	// message path; its own handlers wrap such calls exactly like this.

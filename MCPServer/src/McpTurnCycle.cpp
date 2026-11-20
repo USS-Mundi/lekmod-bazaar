@@ -823,3 +823,153 @@ std::string McpTargetLabel(const McpTarget& t)
 	if(t.kind == "gold") return Num(t.amount) + " gold" + by;
 	return "next policy" + by;
 }
+
+namespace
+{
+	typedef picojson::object ArgObj;
+
+	bool WholeNumber(const picojson::value& v)
+	{
+		if(!v.is<double>()) return false;
+		double d = v.get<double>();
+		return d >= -2147483648.0 && d < 2147483648.0 && d == (double)(long long)d;
+	}
+
+	// What a value must be for its property, or NULL when it fits (or the property names no type).
+	const char* TypeMismatch(const picojson::value& property, const picojson::value& value)
+	{
+		if(!property.is<ArgObj>() || value.is<picojson::null>()) return NULL;
+		ArgObj::const_iterator t = property.get<ArgObj>().find("type");
+		if(t == property.get<ArgObj>().end() || !t->second.is<std::string>()) return NULL;
+		const std::string& type = t->second.get<std::string>();
+		if(type == "boolean") return value.is<bool>() ? NULL : "true or false";
+		if(type == "integer") return WholeNumber(value) ? NULL : "a whole number";
+		if(type == "number") return value.is<double>() ? NULL : "a number";
+		if(type == "string") return value.is<std::string>() ? NULL : "text";
+		if(type == "array") return value.is<picojson::array>() ? NULL : "a list";
+		if(type == "object") return value.is<ArgObj>() ? NULL : "an object";
+		return NULL;
+	}
+
+	bool Given(const ArgObj& args, const std::string& k)
+	{
+		ArgObj::const_iterator it = args.find(k);
+		return it != args.end() && !it->second.is<picojson::null>();
+	}
+
+	picojson::value Typed(const char* type)
+	{
+		ArgObj o;
+		o["type"] = picojson::value(std::string(type));
+		return picojson::value(o);
+	}
+}
+
+std::string McpArgsFault(const char* tool, const char* schema, const picojson::object& args)
+{
+	picojson::value parsed;
+	if(!picojson::parse(parsed, std::string(schema)).empty() || !parsed.is<ArgObj>())
+		return std::string("the argument schema for ") + tool + " is broken; this is a bug in the mod";
+	const ArgObj& s = parsed.get<ArgObj>();
+	ArgObj props;
+	ArgObj::const_iterator pit = s.find("properties");
+	if(pit != s.end() && pit->second.is<ArgObj>()) props = pit->second.get<ArgObj>();
+	// A tool that takes unit_id takes from_city in its place, for the unit a city makes as the turn opens
+	// (McpNewUnitType), with unit (its type), nth (which of one kind) and _unit_type (written by plan_turn) beside it.
+	const bool bFromCity = props.count("unit_id") && Given(args, "from_city");
+	if(bFromCity)
+	{
+		props["from_city"] = Typed("integer");
+		props["unit"] = Typed("string");
+		props["nth"] = Typed("integer");
+		props["_unit_type"] = Typed("integer");
+	}
+	for(ArgObj::const_iterator it = args.begin(); it != args.end(); ++it)
+	{
+		ArgObj::const_iterator prop = props.find(it->first);
+		if(prop != props.end())
+		{
+			const char* kind = TypeMismatch(prop->second, it->second);
+			if(kind) return "argument '" + it->first + "' for " + tool + " must be " + kind;
+			continue;
+		}
+		std::string known;
+		for(ArgObj::const_iterator k = props.begin(); k != props.end(); ++k) known += (known.empty() ? "" : ", ") + k->first;
+		return "unknown argument '" + it->first + "' for " + tool + "; it accepts " + (known.empty() ? std::string("no arguments") : known);
+	}
+	ArgObj::const_iterator rit = s.find("required");
+	if(rit != s.end() && rit->second.is<picojson::array>())
+	{
+		const picojson::array& req = rit->second.get<picojson::array>();
+		for(size_t i = 0; i < req.size(); ++i)
+			if(req[i].is<std::string>() && !Given(args, req[i].get<std::string>()) && !(bFromCity && req[i].get<std::string>() == "unit_id"))
+				return "missing required argument '" + req[i].get<std::string>() + "' for " + tool;
+	}
+	return "";
+}
+
+void McpCoverBoundUnits(const std::vector<McpNewUnitBinding>& bound, McpPlanCovers& c)
+{
+	for(size_t i = 0; i < bound.size(); ++i) c.units.insert(bound[i].unit);
+}
+
+std::string McpBindingLine(const McpNewUnitBinding& b)
+{
+	return "order " + Num(b.order) + " is for " + b.unitText + ", which " + b.city + " finished as the turn opened: it runs as planned; give it no other order";
+}
+
+const char* const MCP_SERVES_ADDED = "added when the turn opened";
+
+bool McpOrderServes(const std::string& tool, const std::string& given, bool bAddedAtTurnOpen, std::string& serves)
+{
+	serves = given;
+	if(!given.empty() || tool == "end_turn") return true;
+	if(!bAddedAtTurnOpen) return false;
+	serves = MCP_SERVES_ADDED;
+	return true;
+}
+
+std::string McpPlanBuildFault(bool bCan, bool bCanOnceTechKnown, bool bTechLandsAtOpen, const std::string& techName)
+{
+	if(bCan || (bCanOnceTechKnown && bTechLandsAtOpen)) return "";
+	if(bCanOnceTechKnown) return "it needs " + techName + " first, and that is not due as the turn opens";
+	return "it cannot make that build there (wrong unit, or the tile does not take it)";
+}
+
+std::string McpPlanStrikeFault(bool bMovesFirst, int iDistance, int iRange, bool bLineOfSight)
+{
+	if(bMovesFirst) return "";
+	const char* what = "; move it first in this plan, or plan another attacker";
+	if(iDistance > iRange) return "out of range: the target is " + Num(iDistance) + " tiles away and this unit's range is " + Num(iRange) + what;
+	if(!bLineOfSight) return std::string("no line of sight from where it stands: hills, mountains, forest or jungle block the view") + what;
+	return "";
+}
+
+std::string McpNotYourTurn(bool bRoundOpenForSeat)
+{
+	if(bRoundOpenForSeat) return "it is not your turn yet: put this in plan_turn's orders and it runs when your turn opens; with preview_only it answers now";
+	return "it is not your turn right now (the turn is ending or other civilizations are moving); call wait_for_my_turn";
+}
+
+bool McpAskForMissingPlan(bool bRoundOpen, bool bViewRead, bool bHasPlan, bool bAskedThisRound)
+{
+	return bRoundOpen && bViewRead && !bHasPlan && !bAskedThisRound;
+}
+
+McpHandBack McpAfterHandBack(bool bBlocked, bool bOnlyUnitsWait, bool bPlanRunning, int iUnread, int iTimesAgain)
+{
+	if(iUnread > 0) return MCP_HAND_BACK;
+	if(!bBlocked) return iTimesAgain == 0 ? MCP_END_AGAIN : MCP_HAND_BACK;
+	if(bOnlyUnitsWait && bPlanRunning && iTimesAgain < 2) return MCP_END_AGAIN_SKIPPING_UNITS;
+	return MCP_HAND_BACK;
+}
+
+bool McpMessageAsksNothing(const std::string& kind)
+{
+	const char* const kinds[] = { "BUTTONPOPUP_GOODY_HUT_REWARD", "BUTTONPOPUP_BARBARIAN_CAMP_REWARD", "BUTTONPOPUP_CITY_STATE_GREETING",
+		"BUTTONPOPUP_NATURAL_WONDER_REWARD", "BUTTONPOPUP_GREAT_PERSON_REWARD", "BUTTONPOPUP_GOLDEN_AGE_REWARD", "BUTTONPOPUP_TECH_AWARD",
+		"BUTTONPOPUP_NEW_ERA", "BUTTONPOPUP_WONDER_COMPLETED_ACTIVE_PLAYER", "BUTTONPOPUP_GREAT_WORK_COMPLETED_ACTIVE_PLAYER",
+		"BUTTONPOPUP_ADVISOR_COUNSEL", "BUTTONPOPUP_ADVISOR_INFO", "BUTTONPOPUP_WHOS_WINNING", "BUTTONPOPUP_LEAGUE_SPLASH" };
+	for(size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) if(kind == kinds[i]) return true;
+	return false;
+}

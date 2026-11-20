@@ -11,6 +11,7 @@
 #include "McpPopups.h"
 #include "McpSeat.h"
 #include "McpCityStates.h"
+#include "McpHistory.h"
 #include "McpCityStateRules.h"
 #include "McpPlanJournal.h"
 #include "McpTurnPlan.h"
@@ -207,7 +208,7 @@ struct McpBridge::Impl
 	picojson::value CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError);
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError, bool bAuto = false);
-	picojson::array MessagesThatCame(const std::string& token);
+	picojson::array MessagesThatCame(const std::string& token, int& iAsking);
 	bool PlanToRun(const std::string& token);
 	void SetAutoRun(const std::string& token, bool bOn, bool bTurnEnded);
 	bool AutoRunning();
@@ -540,7 +541,7 @@ int McpBridge::CountUnread(int player)
 	return n;
 }
 
-int McpBridge::Acknowledge(int player, const std::vector<int>* ids, std::vector<std::string>* pTexts)
+int McpBridge::Acknowledge(int player, const std::vector<int>* ids, std::vector<std::string>* pTexts, std::vector<std::string>* pKinds)
 {
 	int n = 0;
 	EnterCriticalSection(&m_pImpl->lock);
@@ -554,6 +555,7 @@ int McpBridge::Acknowledge(int player, const std::vector<int>* ids, std::vector<
 		p.read = true;
 		++n;
 		if(pTexts) pTexts->push_back(p.text);
+		if(pKinds) pKinds->push_back(p.kind);
 		if(!p.dialog.empty()) m_pImpl->dialogsToClose += p.dialog + "\n";
 	}
 	LeaveCriticalSection(&m_pImpl->lock);
@@ -714,6 +716,7 @@ void McpBridge::Impl::Tick()
 	DrainChat();
 	UpdateSessions();
 	McpCsTick();
+	McpHistoryTick();
 	McpKeepSeatTurnVisible();
 	McpRemindHumanOfDeals();
 	DrainPopups();
@@ -783,6 +786,7 @@ void McpBridge::Impl::DrainPopups()
 		popup.turn = GC.getGame().getGameTurn();
 		popup.player = p.onScreen ? (int)eActive : p.player;
 		popup.dialog = p.onScreen ? McpPopupDialogToClose(p.type) : "";
+		popup.kind = McpPopupKindName(p.type);
 		popup.text = McpTool::StripMarkup(McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text));
 		if(popup.text.empty())
 		{
@@ -1536,7 +1540,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		return picojson::value("no bridge handler for " + name);
 	}
 
-	int iNudgeAtStart = 0;
+	int iNudgeAtStart = 0, iWaitSeat = -1;
 	bool bPlanFirst = false, bHeld = false;
 	picojson::value ranByItself, heldPlan;
 	if(pTool->waitsForTurn)
@@ -1555,6 +1559,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		iNudgeAtStart = NudgeTold(token);
 		// A seat that owes a plan for its next turn is asked for it before it waits.
 		bPlanFirst = McpTakePlanReminder(iSeat, bMyTurn);
+		iWaitSeat = iSeat;
 		bool bClientGone = false;
 		while(!bPlanFirst && !shuttingDown && GetTickCount() - start < (DWORD)(timeout * 1000.0))
 		{
@@ -1592,8 +1597,10 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		return picojson::value(error);
 	}
 	if(bPlanFirst && result.is<picojson::object>())
-		result.get<picojson::object>()[MCP_DO_NOW] = picojson::value(std::string("call plan_turn. You have no plan for your next turn; "
-			"send it while the others play, then call wait_for_my_turn again."));
+		result.get<picojson::object>()[MCP_DO_NOW] = picojson::value(std::string(iWaitSeat >= 0 && iWaitSeat < MAX_MAJOR_CIVS
+			? "call plan_turn. You read this round's view but no plan is saved: your turn would open with nothing planned, and you would "
+			  "play it by hand while the human waits. Send it now (a refused plan lists what it needs), then call wait_for_my_turn again."
+			: "call plan_turn. You have no plan for your next turn; send it while the others play, then call wait_for_my_turn again."));
 	if(result.is<picojson::object>() && ranByItself.is<picojson::object>())
 		result.get<picojson::object>()["your_last_turn_ran_by_itself"] = ranByItself.get<picojson::object>()["ran"];
 	if(bHeld && result.is<picojson::object>())
@@ -1684,15 +1691,19 @@ namespace
 
 // run_plan: the plan is taken on the game thread, then each order goes through CallTool, exactly as the model's own call
 // would, with its checks, its line in the in-game log and its retries. A game message an order brings (a ruin explored,
-// a city-state met) does not stop the orders after it. end_turn runs only if nothing before it failed and no such
-// message came: the seat reads it first.
+// a city-state met) does not stop the orders after it. end_turn runs only if nothing before it failed and no message
+// that asks the seat something came (McpMessageAsksNothing): the seat reads that one first.
 // The game messages a running plan's own orders brought, marked read: their text, for run_plan's reply.
-picojson::array McpBridge::Impl::MessagesThatCame(const std::string& token)
+// iAsking: how many of them ask the seat something (McpMessageAsksNothing); only those hold the plan's end_turn.
+picojson::array McpBridge::Impl::MessagesThatCame(const std::string& token, int& iAsking)
 {
 	std::string error;
+	iAsking = 0;
 	picojson::value r = RunOnGameThread(token, MCP_JOB_PLAN_MESSAGES, picojson::object(), error);
 	if(!error.empty() || !r.is<picojson::object>()) return picojson::array();
 	const picojson::object& o = r.get<picojson::object>();
+	picojson::object::const_iterator ai = o.find("asking");
+	if(ai != o.end() && ai->second.is<double>()) iAsking = (int)ai->second.get<double>();
 	picojson::object::const_iterator it = o.find("messages");
 	return (it != o.end() && it->second.is<picojson::array>()) ? it->second.get<picojson::array>() : picojson::array();
 }
@@ -1713,6 +1724,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 	picojson::array results, came;
 	picojson::object planning;
 	bool bFailed = false, bEnded = false, bCameTaken = false;
+	int iAsking = 0;
 	if(t["acknowledge_first"].is<bool>() && t["acknowledge_first"].get<bool>())
 	{
 		bool bErr = false;
@@ -1733,9 +1745,9 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 			picojson::object a = (ai != order.end() && ai->second.is<picojson::object>()) ? ai->second.get<picojson::object>() : picojson::object();
 			if(tool == MCP_TOOL_END_TURN)
 			{
-				if(!bCameTaken) came = MessagesThatCame(token);
+				if(!bCameTaken) came = MessagesThatCame(token, iAsking);
 				bCameTaken = true;
-				std::string held = McpPlanEndHeld(bFailed, (int)came.size());
+				std::string held = McpPlanEndHeld(bFailed, iAsking);
 				if(!held.empty())
 				{
 					results.push_back(Outcome(tool, picojson::value(held), true));
@@ -1767,7 +1779,7 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 			}
 		}
 	}
-	if(!bCameTaken) came = MessagesThatCame(token);
+	if(!bCameTaken) came = MessagesThatCame(token, iAsking);
 	SetPlanRunning(token, false);
 	bool bJournal = t["journal_on"].is<bool>() && t["journal_on"].get<bool>();
 	if(bJournal && t["journal"].is<picojson::object>())

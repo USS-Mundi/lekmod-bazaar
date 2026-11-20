@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include "McpToolSupport.h"
 #include "McpTurnCycle.h"
+#include "McpTurnPlan.h"
 #include "McpSeat.h"
 #include "McpBridge.h"
 #include "CvGame.h"
@@ -129,13 +130,22 @@ namespace McpTool
 		return false;
 	}
 
+	CvPlayer* MeActingOrPreview(const JObj& args, std::string& err)
+	{
+		if(!ArgBool(args, "preview_only", false)) return MeActing(err);
+		CvPlayer* me = Me(err);
+		if(!me || !RequireIdentity(err)) return NULL;
+		if(McpSeatRoundOpen(me)) return me;
+		return MeActing(err);
+	}
+
 	CvPlayer* MeActing(std::string& err)
 	{
 		CvPlayer* me = Me(err);
 		if(!me || !RequireIdentity(err)) return NULL;
 		if(!McpIsPlayerTurn(*me))
 		{
-			err = "it is not your turn right now (the turn is ending or other civilizations are moving); call wait_for_my_turn";
+			err = McpNotYourTurn(McpSeatRoundOpen(me));
 			return NULL;
 		}
 		// A running plan's orders are not stopped by a message one of them brought: run_plan shows it before the turn ends.

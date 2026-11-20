@@ -62,6 +62,7 @@ namespace
 	std::map<int, int> s_roundViewTurn; // the game turn of each seat's last view before its turn
 	std::map<int, std::vector<McpViewItem> > s_viewAtRound; // what it could see then
 	std::map<int, std::map<std::string, std::string> > s_screensAtRound;
+	std::map<int, int> s_askedForPlan;  // the game turn each seat's wait was last armed to ask for its missing plan
 
 	bool Major(const CvPlayer* me) { return (int)me->GetID() < MAX_MAJOR_CIVS; }
 
@@ -74,7 +75,8 @@ namespace
 		return true;
 	}
 
-	bool ParseOrders(const JArr& list, std::vector<McpPlannedOrder>& out, std::string& err)
+	// bAdded: orders run_plan adds as the turn opens, which may leave out serves (McpOrderServes).
+	bool ParseOrders(const JArr& list, std::vector<McpPlannedOrder>& out, std::string& err, bool bAdded)
 	{
 		for(size_t i = 0; i < list.size(); ++i)
 		{
@@ -96,8 +98,7 @@ namespace
 			McpPlannedOrder p;
 			p.tool = tool;
 			p.args = JVal(a).serialize();
-			p.serves = ArgStr(o, "serves");
-			if(p.serves.empty() && tool != "end_turn")
+			if(!McpOrderServes(tool, ArgStr(o, "serves"), bAdded, p.serves))
 			{
 				err = McpFormat("order %d (%s): serves is required: the part of your plan this order serves, and how", (int)i + 1, tool.c_str());
 				return false;
@@ -364,9 +365,11 @@ namespace
 	std::vector<std::string> OrdersThatCannotRun(CvPlayer* me, std::vector<McpPlannedOrder>& orders)
 	{
 		std::vector<std::string> out;
-		std::set<int> named;
+		std::set<int> named, moving;
+		std::map<int, CvPlot*> planDest; // unit id -> where the plan's first move for it ends
 		std::set<std::string> namedNew;
 		std::map<int, std::vector<int> > bought; // city id -> unit types the plan buys there, in order
+		TechTypes eDue = TechDueNextTurn(me);
 		for(size_t i = 0; i < orders.size(); ++i)
 		{
 			JVal v;
@@ -430,7 +433,46 @@ namespace
 				std::string why;
 				int fault = MCP_PATH_OK;
 				if(!ReadPath(a, me->getUnit(id), steps, why, &fault) && McpPathFaultRefuses((McpPathFault)fault)) out.push_back(head + why);
+				else if(!steps.empty()) planDest[id] = steps.back();
 			}
+			// A build where the unit will stand when the order runs: the end of its move in this plan, else here or where
+			// its queued move ends (as unit_action does), allowing for a technology that lands as the turn opens.
+			if(tool == "unit_action" && id >= 0 && ArgStr(a, "action") == "build")
+			{
+				CvUnit* u = me->getUnit(id);
+				BuildTypes eBuild = FindBuildType(ArgStr(a, "build"));
+				if(u && eBuild != NO_BUILD)
+				{
+					std::map<int, CvPlot*>::const_iterator d = planDest.find(id);
+					CvPlot* at = d != planDest.end() ? d->second : (u->LastMissionPlot() ? u->LastMissionPlot() : u->plot());
+					bool bCan = u->canBuild(at, eBuild) || (d == planDest.end() && u->canBuild(u->plot(), eBuild));
+					TechTypes eTech = (TechTypes)GC.getBuildInfo(eBuild)->getTechPrereq();
+					bool bCanOnce = !bCan && u->canBuild(at, eBuild, true);
+					std::string why = McpPlanBuildFault(bCan, bCanOnce, eTech != NO_TECH && eTech == eDue,
+						eTech != NO_TECH ? std::string(GC.getTechInfo(eTech)->GetDescription()) : std::string("a technology"));
+					if(!why.empty()) out.push_back(head + McpFormat("%s %d at (%d,%d): ", u->getName().GetCString(), id, at->getX(), at->getY()) + why);
+				}
+			}
+			// A ranged attack from a unit the plan does not move first: range and line of sight are the terrain's, and do not
+			// change by the time the turn opens.
+			if(tool == "attack" && id >= 0)
+			{
+				CvUnit* u = me->getUnit(id);
+				int x = ArgInt(a, "x", -1), y = ArgInt(a, "y", -1);
+				CvPlot* p = GC.getMap().isPlot(x, y) ? GC.getMap().plot(x, y) : NULL;
+				if(u && p && u->isRanged() && u->getDomainType() != DOMAIN_AIR && !u->IsRangeAttackIgnoreLOS())
+				{
+					bool bMovesFirst = moving.count(id) > 0 || (u->LastMissionPlot() && u->LastMissionPlot() != u->plot());
+#ifdef MCP_LEKMOD
+					bool bSight = u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true));
+#else
+					bool bSight = u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true), u->getDomainType());
+#endif
+					std::string why = McpPlanStrikeFault(bMovesFirst, plotDistance(u->getX(), u->getY(), x, y), u->GetRange(), bSight);
+					if(!why.empty()) out.push_back(head + why);
+				}
+			}
+			if(tool == "move_unit" && id >= 0) moving.insert(id);
 			if(id >= 0) named.insert(id);
 		}
 		return out;
@@ -566,10 +608,37 @@ namespace
 
 	// What a plan leaves for the seat to decide when its turn opens (McpOpeningOwed), at most 12 lines. With the turn
 	// open (bTurnOpen), only what stops this turn from ending.
+	// With the turn open: the unit each from_city order goes to, found as run_plan will find it (RequireUnit).
+	std::vector<McpNewUnitBinding> BoundNewUnits(CvPlayer* me, const std::vector<McpPlannedOrder>& orders)
+	{
+		std::vector<McpNewUnitBinding> out;
+		for(size_t i = 0; i < orders.size(); ++i)
+		{
+			JVal v;
+			picojson::parse(v, orders[i].args);
+			if(!v.is<JObj>()) continue;
+			const JObj& a = v.get<JObj>();
+			if(!a.count("from_city") || a.count("unit_id")) continue;
+			std::string why;
+			CvUnit* u = RequireUnit(me, a, why);
+			CvCity* c = me->getCity(ArgInt(a, "from_city", -1));
+			if(!u || !c) continue;
+			McpNewUnitBinding b;
+			b.order = (int)i + 1;
+			b.unit = u->GetID();
+			b.unitText = McpFormat("%s %d", u->getName().GetCString(), u->GetID());
+			b.city = c->getName().c_str();
+			out.push_back(b);
+		}
+		return out;
+	}
+
 	std::vector<std::string> LeftOpen(CvPlayer* me, const std::vector<McpPlannedOrder>& orders, bool bTurnOpen)
 	{
 		const size_t LIMIT = 12;
-		std::vector<std::string> out = McpOpeningOwed(Opening(me), Covers(orders), bTurnOpen);
+		McpPlanCovers covers = Covers(orders);
+		if(bTurnOpen) McpCoverBoundUnits(BoundNewUnits(me, orders), covers);
+		std::vector<std::string> out = McpOpeningOwed(Opening(me), covers, bTurnOpen);
 		if(out.size() > LIMIT)
 		{
 			size_t more = out.size() - LIMIT;
@@ -616,7 +685,7 @@ MCP_TOOL(ToolPlanTurn)
 		}
 	}
 	SeatPlan plan;
-	if(!ParseOrders(it->second.get<JArr>(), plan.orders, err)) return JVal();
+	if(!ParseOrders(it->second.get<JArr>(), plan.orders, err, false)) return JVal();
 	plan.aim = ArgStr(args, "aim");
 	if(plan.aim.empty())
 	{
@@ -938,6 +1007,12 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 			s_viewAtRound[seat] = d.items;
 			s_screensAtRound[seat] = d.screens;
 		}
+		// A seat that has read the round's view and has no plan is asked for it once, if it goes back into the wait without one.
+		if(!bMine && McpAskForMissingPlan(BeforeItsTurn(me), true, HasDuePlan(seat), s_askedForPlan.count(seat) && s_askedForPlan[seat] == iTurn))
+		{
+			s_askedForPlan[seat] = iTurn;
+			McpOwePlan(seat);
+		}
 		s_viewText[seat] = text;
 		o["turn_view"] = J(text);
 		if(McpPlanJournalOn())
@@ -975,11 +1050,19 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 	if(!p.note.empty()) o["your_plan_note"] = J(p.note);
 	std::vector<std::string> open = LeftOpen(me, p.orders, true);
 	if(!open.empty()) o["your_plan_leaves_open"] = JVal(Lines(open));
+	std::vector<McpNewUnitBinding> bound = BoundNewUnits(me, p.orders);
+	if(!bound.empty())
+	{
+		std::vector<std::string> lines;
+		for(size_t i = 0; i < bound.size(); ++i) lines.push_back(McpBindingLine(bound[i]));
+		o["your_new_units"] = JVal(Lines(lines));
+	}
 	o["decide"] = J(std::string("It is your turn. run_plan carries out the planned orders: drop lists order numbers to leave out, add lists orders to "
 		"add (they go before a final end_turn). ")
 		+ (open.empty() ? "" : "The turn will not end while what your_plan_leaves_open lists has no order: add one for each in the same run_plan "
 			"(a unit that should stay put takes unit_action with sleep, fortify or skip). ")
-		+ "A game message one of your orders brings does not stop the rest; run_plan shows it and leaves the turn open for you. set_aside lets you "
+		+ "A game message one of your orders brings does not stop the rest; run_plan shows it, and leaves the turn open for you only when one asks "
+		"something of you (a captured city, a civilian to return). set_aside lets you "
 		"give orders one at a time with the other tools.");
 	if(McpPlanJournalOn())
 		o["explain_changes"] = J("Debug journal on: when you drop, add or set aside, give run_plan why = {saw: what made you change it, in a few words; "
@@ -1051,7 +1134,7 @@ picojson::value McpTakePlan(const picojson::object& args, std::string& err, bool
 	std::vector<int> drop = bAuto ? std::vector<int>() : Ints(args, "drop");
 	std::vector<McpPlannedOrder> add;
 	JObj::const_iterator ai = args.find("add");
-	if(!bAuto && ai != args.end() && ai->second.is<JArr>() && !ParseOrders(ai->second.get<JArr>(), add, err)) { err = "add: " + err; return JVal(); }
+	if(!bAuto && ai != args.end() && ai->second.is<JArr>() && !ParseOrders(ai->second.get<JArr>(), add, err, true)) { err = "add: " + err; return JVal(); }
 	std::vector<McpPlannedOrder> run;
 	if(!bSetAside)
 	{
@@ -1113,10 +1196,13 @@ picojson::value McpTakeMessagesThatCame(std::string& err)
 {
 	CvPlayer* me = Me(err);
 	if(!me) return JVal();
-	std::vector<std::string> texts;
-	McpBridge::Get().Acknowledge(me->GetID(), NULL, &texts);
+	std::vector<std::string> texts, kinds;
+	McpBridge::Get().Acknowledge(me->GetID(), NULL, &texts, &kinds);
+	int iAsking = 0;
+	for(size_t i = 0; i < kinds.size(); ++i) if(!McpMessageAsksNothing(kinds[i])) ++iAsking;
 	JObj o;
 	o["messages"] = JVal(Lines(texts));
+	o["asking"] = J(iAsking);
 	return JVal(o);
 }
 
@@ -1165,6 +1251,7 @@ void McpTurnPlanReset()
 	s_roundViewTurn.clear();
 	s_viewAtRound.clear();
 	s_screensAtRound.clear();
+	s_askedForPlan.clear();
 }
 
 bool McpRoundAwaitsPlan(CvPlayer* me)
@@ -1175,6 +1262,8 @@ bool McpRoundAwaitsPlan(CvPlayer* me)
 }
 
 bool McpPlanIsDue(CvPlayer* me) { return Major(me) && HasDuePlan((int)me->GetID()); }
+
+bool McpSeatRoundOpen(CvPlayer* me) { return me && BeforeItsTurn(me); }
 
 void McpOwePlan(int seat)
 {

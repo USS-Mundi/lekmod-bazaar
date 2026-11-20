@@ -33,6 +33,10 @@ struct McpToolDef
 	bool waitsForTurn;  // the HTTP thread blocks until it is the model's turn before running the handler
 };
 
+// How the game was set up (what the game_settings tool shows); iFallbackPlayer is whose difficulty to read when there
+// is no active human player (-1 for none).
+picojson::value McpGameSettingsJson(int iFallbackPlayer);
+
 const McpToolDef* McpGetTools(size_t& count);
 const McpToolDef* McpFindTool(const std::string& name);
 // "" when args match the tool's schema; otherwise the first unknown, mistyped or missing argument.

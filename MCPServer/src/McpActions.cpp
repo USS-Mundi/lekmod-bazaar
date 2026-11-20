@@ -236,7 +236,7 @@ namespace
 
 MCP_TOOL(ToolAttack)
 {
-	CvPlayer* me = MeActing(err);
+	CvPlayer* me = MeActingOrPreview(args, err);
 	if(!me) return JVal();
 	int x = 0, y = 0;
 	CvUnit* u = RequireUnit(me, args, err);

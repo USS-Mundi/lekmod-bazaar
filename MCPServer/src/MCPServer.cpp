@@ -217,9 +217,19 @@ static void AfterBullyUnit(CvMinorCivAI* self, PlayerTypes eMajor, UnitTypes eUn
 	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, std::string("took a ") + McpTool::UnitTypeName(eUnit) + " from them by threat");
 }
 
-static void AfterProtection(CvMinorCivAI* self, PlayerTypes eMajor, bool bProtect, bool)
+// A city-state that dies cancels the pledge of every civ slot, so a pledge is a deed only when it changed.
+static bool s_protectedBefore = false;
+static bool BeforeProtection(CvMinorCivAI* self, PlayerTypes eMajor, bool, bool)
 {
-	McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, bProtect ? "pledged to protect them" : "withdrew their pledge of protection");
+	s_protectedBefore = eMajor >= 0 && eMajor < MAX_MAJOR_CIVS && self->IsProtectedByMajor(eMajor);
+	return false;
+}
+
+static void AfterProtection(CvMinorCivAI* self, PlayerTypes eMajor, bool, bool)
+{
+	if(eMajor < 0 || eMajor >= MAX_MAJOR_CIVS) return;
+	std::string deed = McpCsPledgeDeed(s_protectedBefore, self->IsProtectedByMajor(eMajor));
+	if(!deed.empty()) McpCsNoteDeed(self->GetPlayer()->GetID(), eMajor, deed);
 }
 
 static void AfterWarOnMinor(CvMinorCivAI* self, TeamTypes eTeam)
@@ -420,6 +430,7 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &BeforeMinorGold), "before CvMinorCivAI::DoMajorBullyGold");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyGold>(host, &AfterBullyGold), "after CvMinorCivAI::DoMajorBullyGold");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoMajorBullyUnit>(host, &AfterBullyUnit), "after CvMinorCivAI::DoMajorBullyUnit");
+		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &BeforeProtection), "before CvMinorCivAI::DoChangeProtectionFromMajor");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoChangeProtectionFromMajor>(host, &AfterProtection), "after CvMinorCivAI::DoChangeProtectionFromMajor");
 		Check(CivRegisterAfter<CivHooks::CvMinorCivAI_DoTeamDeclaredWarOnMe>(host, &AfterWarOnMinor), "after CvMinorCivAI::DoTeamDeclaredWarOnMe");
 #ifdef MCP_LEKMOD

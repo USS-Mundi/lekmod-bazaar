@@ -18,3 +18,7 @@ const int MCP_POPUP_LEADER_MESSAGE = 100001;
 // behalf (the context ids in the game's UI/InGame/InGame.xml); "" otherwise.
 // Pure; safe from any thread.
 const char* McpPopupDialogToClose(int iType);
+
+// The popup type's name for the kinds that only inform (see McpMessageAsksNothing); "" for every other kind, which
+// counts as asking something. Pure; safe from any thread.
+const char* McpPopupKindName(int iType);

@@ -1106,7 +1106,7 @@ MCP_TOOL(ToolDealOptions)
 
 MCP_TOOL(ToolProposeDeal)
 {
-	CvPlayer* me = MeActing(err);
+	CvPlayer* me = MeActingOrPreview(args, err);
 	if(!me) return JVal();
 	CvPlayer* other = DealPartner(me, args, err);
 	if(!other) return JVal();

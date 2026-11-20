@@ -907,8 +907,139 @@ namespace
 	}
 }
 
+namespace
+{
+	// move_unit's and unit_action's schemas as McpTools.cpp declares them; a tool without unit_id beside them.
+	const char* MOVE_UNIT = "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"path\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"preview_only\":{\"type\":\"boolean\"}},\"required\":[\"unit_id\",\"path\"]}";
+	const char* UNIT_ACTION = "{\"type\":\"object\",\"properties\":{\"unit_id\":{\"type\":\"integer\"},\"action\":{\"type\":\"string\"},\"build\":{\"type\":\"string\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"unit_id\",\"action\"]}";
+	const char* NO_UNIT = "{\"type\":\"object\",\"properties\":{\"tech\":{\"type\":\"string\"}},\"required\":[\"tech\"]}";
+
+	picojson::object Args(const char* json)
+	{
+		picojson::value v;
+		picojson::parse(v, std::string(json));
+		return v.get<picojson::object>();
+	}
+}
+
+void TestAUnitToolTakesFromCityInPlaceOfUnitId()
+{
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"from_city\":8192,\"path\":[[20,29],[20,30]]}")) == "");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"from_city\":8192,\"unit\":\"UNIT_WARRIOR\",\"nth\":2,\"_unit_type\":7,\"path\":[[20,29]]}")) == "");
+	CHECK(McpArgsFault("unit_action", UNIT_ACTION, Args("{\"from_city\":8192,\"action\":\"fortify\"}")) == "");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"from_city\":\"Moscow\",\"path\":[[20,29]]}")) == "argument 'from_city' for move_unit must be a whole number");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"from_city\":8192,\"nth\":\"second\",\"path\":[[20,29]]}")) == "argument 'nth' for move_unit must be a whole number");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"from_city\":8192}")) == "missing required argument 'path' for move_unit");
+}
+
+void TestArgumentsOutsideTheSchemaAreStillRefused()
+{
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"unit_id\":5,\"path\":[[20,29]]}")) == "");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"path\":[[20,29]]}")) == "missing required argument 'unit_id' for move_unit");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"unit_id\":5,\"nth\":2,\"path\":[[20,29]]}")) == "unknown argument 'nth' for move_unit; it accepts path, preview_only, unit_id");
+	CHECK(McpArgsFault("set_research", NO_UNIT, Args("{\"from_city\":8192,\"tech\":\"TECH_POTTERY\"}")) == "unknown argument 'from_city' for set_research; it accepts tech");
+	CHECK(McpArgsFault("move_unit", MOVE_UNIT, Args("{\"unit_id\":5.5,\"path\":[[20,29]]}")) == "argument 'unit_id' for move_unit must be a whole number");
+	CHECK(McpArgsFault("end_turn", "{\"type\":\"object\",\"properties\":{}}", Args("{\"x\":1}")) == "unknown argument 'x' for end_turn; it accepts no arguments");
+	CHECK(McpArgsFault("move_unit", "{broken", Args("{}")) == "the argument schema for move_unit is broken; this is a bug in the mod");
+}
+
+McpNewUnitBinding Binding(int order, int unit, const char* text, const char* city)
+{
+	McpNewUnitBinding b;
+	b.order = order; b.unit = unit; b.unitText = text; b.city = city;
+	return b;
+}
+
+void TestAtTurnOpenAFromCityOrderCoversTheUnitItWasBoundTo()
+{
+	McpOpening o;
+	o.idle.push_back(std::make_pair(81924, std::string("Settler 81924 at (47,34) has no order")));
+	o.idle.push_back(std::make_pair(7, std::string("Warrior 7 at (3,4) has no order")));
+	McpPlanCovers c;
+	c.newUnits.insert(8192);
+	std::vector<McpNewUnitBinding> bound(1, Binding(2, 81924, "Settler 81924", "Stockholm"));
+	McpCoverBoundUnits(bound, c);
+	std::vector<std::string> owed = McpOpeningOwed(o, c, true);
+	CHECK(owed.size() == 1);
+	CHECK(Has(owed, "Warrior 7 at (3,4) has no order"));
+	CHECK(McpBindingLine(bound[0]) == "order 2 is for Settler 81924, which Stockholm finished as the turn opened: it runs as planned; give it no other order");
+}
+
+void TestAnOrderAddedWhenTheTurnOpensNeedsNoServes()
+{
+	std::string serves;
+	CHECK(!McpOrderServes("move_unit", "", false, serves));
+	CHECK(McpOrderServes("move_unit", "", true, serves) && serves == MCP_SERVES_ADDED);
+	CHECK(McpOrderServes("move_unit", "military: hold the pass", true, serves) && serves == "military: hold the pass");
+	CHECK(McpOrderServes("end_turn", "", false, serves) && serves.empty());
+	CHECK(std::string(MCP_SERVES_ADDED) == "added when the turn opened");
+}
+
+void TestAPlannedBuildMustBePossibleWhereTheUnitWillStand()
+{
+	CHECK(McpPlanBuildFault(true, true, false, "The Wheel") == "");
+	CHECK(McpPlanBuildFault(false, true, true, "The Wheel") == "");
+	CHECK(McpPlanBuildFault(false, true, false, "The Wheel") == "it needs The Wheel first, and that is not due as the turn opens");
+	CHECK(McpPlanBuildFault(false, false, true, "The Wheel") == "it cannot make that build there (wrong unit, or the tile does not take it)");
+}
+
+void TestAPlannedRangedAttackMustReachFromWhereTheUnitStands()
+{
+	CHECK(McpPlanStrikeFault(false, 2, 2, true) == "");
+	CHECK(McpPlanStrikeFault(true, 5, 2, false) == "");
+	CHECK(McpPlanStrikeFault(false, 3, 2, true) == "out of range: the target is 3 tiles away and this unit's range is 2; move it first in this plan, or plan another attacker");
+	CHECK(McpPlanStrikeFault(false, 2, 2, false) == "no line of sight from where it stands: hills, mountains, forest or jungle block the view; move it first in this plan, or plan another attacker");
+}
+
+void TestWhileTheRoundIsOpenATurnToolPointsToThePlan()
+{
+	CHECK(McpNotYourTurn(false) == "it is not your turn right now (the turn is ending or other civilizations are moving); call wait_for_my_turn");
+	CHECK(McpNotYourTurn(true) == "it is not your turn yet: put this in plan_turn's orders and it runs when your turn opens; with preview_only it answers now");
+}
+
+void TestAWaitWithTheViewReadAndNoPlanAsksForThePlanOnce()
+{
+	CHECK(McpAskForMissingPlan(true, true, false, false));
+	CHECK(!McpAskForMissingPlan(true, true, false, true));
+	CHECK(!McpAskForMissingPlan(true, true, true, false));
+	CHECK(!McpAskForMissingPlan(true, false, false, false));
+	CHECK(!McpAskForMissingPlan(false, true, false, false));
+}
+
+void TestAPlannedEndOfTurnSkipsUnitsThatOnlyFinishedTheirRoutes()
+{
+	CHECK(McpAfterHandBack(false, false, false, 0, 0) == MCP_END_AGAIN);
+	CHECK(McpAfterHandBack(false, false, true, 0, 1) == MCP_HAND_BACK);
+	CHECK(McpAfterHandBack(true, true, true, 0, 0) == MCP_END_AGAIN_SKIPPING_UNITS);
+	CHECK(McpAfterHandBack(true, true, true, 0, 1) == MCP_END_AGAIN_SKIPPING_UNITS);
+	CHECK(McpAfterHandBack(true, true, true, 0, 2) == MCP_HAND_BACK);
+	CHECK(McpAfterHandBack(true, true, false, 0, 0) == MCP_HAND_BACK);
+	CHECK(McpAfterHandBack(true, false, true, 0, 0) == MCP_HAND_BACK);
+	CHECK(McpAfterHandBack(true, true, true, 1, 0) == MCP_HAND_BACK);
+}
+
+void TestOnlyAMessageThatAsksSomethingHoldsAPlansEndOfTurn()
+{
+	CHECK(McpMessageAsksNothing("BUTTONPOPUP_GOODY_HUT_REWARD"));
+	CHECK(McpMessageAsksNothing("BUTTONPOPUP_BARBARIAN_CAMP_REWARD"));
+	CHECK(McpMessageAsksNothing("BUTTONPOPUP_CITY_STATE_GREETING"));
+	CHECK(McpMessageAsksNothing("BUTTONPOPUP_NATURAL_WONDER_REWARD"));
+	CHECK(!McpMessageAsksNothing("BUTTONPOPUP_CITY_CAPTURED"));
+	CHECK(!McpMessageAsksNothing("BUTTONPOPUP_RETURN_CIVILIAN"));
+	CHECK(!McpMessageAsksNothing("BUTTONPOPUP_TEXT"));
+	CHECK(!McpMessageAsksNothing(""));
+}
+
 int main()
 {
+	TestAtTurnOpenAFromCityOrderCoversTheUnitItWasBoundTo();
+	TestAnOrderAddedWhenTheTurnOpensNeedsNoServes();
+	TestAPlannedBuildMustBePossibleWhereTheUnitWillStand();
+	TestAPlannedRangedAttackMustReachFromWhereTheUnitStands();
+	TestWhileTheRoundIsOpenATurnToolPointsToThePlan();
+	TestAWaitWithTheViewReadAndNoPlanAsksForThePlanOnce();
+	TestAPlannedEndOfTurnSkipsUnitsThatOnlyFinishedTheirRoutes();
+	TestOnlyAMessageThatAsksSomethingHoldsAPlansEndOfTurn();
 	TestNothingChanged();
 	TestNewEnemyInSightIsNamedWithItsDistance();
 	TestNewEnemyAnywhereInSightIsShownEvenFarAway();
@@ -969,6 +1100,8 @@ int main()
 	TestAPlansEndOfTurnWaitsOnAFailedOrderOrANewMessage();
 	TestUnlabeledFieldsAndNewAndGoneFields();
 	TestAFallingCityGetsAClock();
+	TestAUnitToolTakesFromCityInPlaceOfUnitId();
+	TestArgumentsOutsideTheSchemaAreStillRefused();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all turn cycle tests passed\n");
 	return 0;

@@ -13,6 +13,7 @@ struct McpPopup
 	int player; // the player it was shown to (PlayerTypes)
 	std::string text;
 	std::string dialog; // InGame dialog context to close on acknowledgement; "" if a human must close it
+	std::string kind;   // McpPopupKindName: the game's popup type for a message that only informs, "" otherwise
 	bool read;
 };
 
@@ -166,7 +167,7 @@ public:
 	std::vector<McpPopup> GetPopupsSince(int player, int iTurn);
 	int CountUnread(int player);
 	// ids NULL = all. Returns how many were newly marked read, with their text in pTexts when given.
-	int Acknowledge(int player, const std::vector<int>* ids, std::vector<std::string>* pTexts = NULL);
+	int Acknowledge(int player, const std::vector<int>* ids, std::vector<std::string>* pTexts = NULL, std::vector<std::string>* pKinds = NULL);
 
 private:
 	McpBridge();

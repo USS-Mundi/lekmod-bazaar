@@ -120,4 +120,5 @@ MCP_TOOL(ToolKnownCities);
 
 // McpRankings.cpp
 MCP_TOOL(ToolRankings);
+MCP_TOOL(ToolHistory);
 MCP_TOOL(ToolClocks);

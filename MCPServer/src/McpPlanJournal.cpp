@@ -48,3 +48,22 @@ void McpPlanJournalAppend(const std::string& jsonLine)
 	}
 	LeaveCriticalSection(&s_lock.cs);
 }
+
+std::string McpLogsWrite(const std::string& name, const std::string& content)
+{
+	std::string path = LogsFile(name.c_str());
+	if(path.empty()) return "";
+	std::string part = path + ".part";
+	EnterCriticalSection(&s_lock.cs);
+	bool ok = false;
+	FILE* f = fopen(part.c_str(), "wb");
+	if(f)
+	{
+		ok = fwrite(content.data(), 1, content.size(), f) == content.size();
+		ok = (fclose(f) == 0) && ok;
+		ok = ok && MoveFileExA(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+		if(!ok) DeleteFileA(part.c_str());
+	}
+	LeaveCriticalSection(&s_lock.cs);
+	return ok ? path : "";
+}

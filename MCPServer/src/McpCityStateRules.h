@@ -72,6 +72,8 @@ int McpCsTributePaid(int treasury, int tribute);
 // The deeds as its history records them, with the treasury before and after.
 std::string McpCsGiftDeed(int gold, int treasuryBefore);
 std::string McpCsTributeDeed(int tribute, int paid, int treasuryBefore);
+// The deed of a pledge of protection that went from wasProtected to isProtected: empty when it did not change.
+std::string McpCsPledgeDeed(bool wasProtected, bool isProtected);
 
 // Two city-states are one side while each has an ally and the two allies are on one team: they pass through each
 // other's land and do not fight. allyTeam is -1 for a city-state with no ally.

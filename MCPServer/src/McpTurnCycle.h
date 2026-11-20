@@ -301,3 +301,50 @@ struct McpPicture
 // city k; a city is in a picture when it is within reach of the center. Each picture takes the center that shows the
 // most cities not yet shown, then the one whose farthest city is nearest, then the first.
 std::vector<McpPicture> McpPlanPictures(const std::vector<std::vector<int> >& dist, int reach, int maxPictures);
+
+// "" when args fit a tool's argument schema (its JSON text); otherwise the first unknown, mistyped or missing argument.
+std::string McpArgsFault(const char* tool, const char* schema, const picojson::object& args);
+
+// The unit a plan's from_city order goes to once the turn has opened, as the game found it: the order's number, the
+// unit's id and name ("Settler 81924"), and the city that made it.
+struct McpNewUnitBinding
+{
+	int order;
+	int unit;
+	std::string unitText;
+	std::string city;
+	McpNewUnitBinding() : order(0), unit(-1) {}
+};
+// With the turn open, the plan's from_city orders cover the units they were bound to.
+void McpCoverBoundUnits(const std::vector<McpNewUnitBinding>& bound, McpPlanCovers& c);
+// What the turn-open reply says of a binding, so the seat does not order the unit again.
+std::string McpBindingLine(const McpNewUnitBinding& b);
+
+// The serves an order keeps, into serves: its own; none for end_turn; MCP_SERVES_ADDED for an order added when the
+// turn opens (run_plan add) that gives none. False for a planned order that gives none.
+extern const char* const MCP_SERVES_ADDED;
+bool McpOrderServes(const std::string& tool, const std::string& given, bool bAddedAtTurnOpen, std::string& serves);
+
+// Why plan_turn refuses a planned build, or "": the unit cannot make it where it will stand (bCan false), unless only
+// a technology is missing (bCanOnceTechKnown) and that technology lands as the turn opens.
+std::string McpPlanBuildFault(bool bCan, bool bCanOnceTechKnown, bool bTechLandsAtOpen, const std::string& techName);
+// Why plan_turn refuses a planned ranged attack, or "": from a unit the plan does not move first, the target is out of
+// range or out of sight. Terrain decides both, so neither changes by the time the turn opens.
+std::string McpPlanStrikeFault(bool bMovesFirst, int iDistance, int iRange, bool bLineOfSight);
+
+// What a tool that acts on the seat's turn says when it is not: with the seat's round open, the order belongs in the
+// plan (and a preview answers now); otherwise wait.
+std::string McpNotYourTurn(bool bRoundOpenForSeat);
+// Whether the seat's wait answers at once, to ask for the plan: its round is open, it has read this round's view,
+// it has no plan for the turn, and it has not been asked this way this round.
+bool McpAskForMissingPlan(bool bRoundOpen, bool bViewRead, bool bHasPlan, bool bAskedThisRound);
+
+// What end_turn does when the game hands the turn back after the queued moves: ends it again once when nothing asks
+// for the seat; in a running plan, when only units that finished their routes wait for orders, those skip the turn and
+// it ends (up to twice in all); otherwise hands it back.
+enum McpHandBack { MCP_END_AGAIN, MCP_END_AGAIN_SKIPPING_UNITS, MCP_HAND_BACK };
+McpHandBack McpAfterHandBack(bool bBlocked, bool bOnlyUnitsWait, bool bPlanRunning, int iUnread, int iTimesAgain);
+
+// A game message, by the game's popup type name, that asks the seat nothing (a ruin, a camp, a city-state met, a
+// wonder found): a running plan's end_turn is not held for it. Every other kind holds it.
+bool McpMessageAsksNothing(const std::string& kind);
