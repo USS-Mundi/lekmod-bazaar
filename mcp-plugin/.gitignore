@@ -1,0 +1,22 @@
+# Output of build.cmd and tools/release.py, whose publish step needs a clean tree
+Build/
+Packages/
+**/src/out/
+**/mod/*.dll
+**/mod/LICENSE.txt
+**/mod/NOTICE.txt
+
+# Visual Studio 2008 per-user files
+*.suo
+*.ncb
+*.user
+
+__pycache__/
+
+# tools/agent_quiz.py's answer key and quizzes, built from the game's files
+tools/agent-quiz/
+
+# A global gitignore may skip .claude/; the release skill here is shared.
+!/.claude/
+/.claude/*
+!/.claude/skills/
