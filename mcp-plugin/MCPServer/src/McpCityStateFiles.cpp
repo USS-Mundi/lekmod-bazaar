@@ -117,10 +117,10 @@ void McpGameFileAppend(const std::string& gameId, const char* sub, const std::st
 	fclose(f);
 }
 
-bool McpCityStatesOffAtStart()
+bool McpCityStatesOnAtStart()
 {
 	wchar_t docs[MAX_PATH];
 	if(FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return false;
-	std::wstring path = std::wstring(docs) + L"\\My Games\\Sid Meier's Civilization 5\\MCPServer-city-states-off";
+	std::wstring path = std::wstring(docs) + L"\\My Games\\Sid Meier's Civilization 5\\MCPServer-city-states-on";
 	return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }

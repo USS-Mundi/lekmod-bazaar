@@ -416,8 +416,9 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &AfterEqualizeDeal), "after CvDealAI::DoEqualizeDealWithHuman");
 	Check(CivRegisterReplace<CivHooks::CvDealAI_IsDealWithHumanAcceptable>(host, &ReplaceIsDealWithHumanAcceptable), "replace CvDealAI::IsDealWithHumanAcceptable");
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
-	const bool bCityStates = !McpCityStatesOffAtStart();
-	if(!bCityStates) Log("city-state hooks off: MCPServer-city-states-off is in My Games\\Sid Meier's Civilization 5");
+	const bool bCityStates = McpCityStatesOnAtStart();
+	Log(bCityStates ? "city-state hooks on: MCPServer-city-states-on is in My Games\\Sid Meier's Civilization 5"
+	                : "city-state hooks off: to turn them on, put a file named MCPServer-city-states-on in My Games\\Sid Meier's Civilization 5");
 	if(bCityStates)
 	{
 		Check(CivRegisterBefore<CivHooks::CvMinorCivAI_SetAlly>(host, &BeforeSetAlly), "before CvMinorCivAI::SetAlly");
