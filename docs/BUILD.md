@@ -14,7 +14,7 @@ own and is driven from the shell; no Windows machine and no IDE are involved.
 |---|---|
 | Bazaar clone, with our generator patch applied | `~/repos/civ5-dll/bazaar` |
 | LEKMOD clone (v35.4), with our one-line fix applied | `~/repos/civ5-dll/lekmod` |
-| MCP plugin clone, with our LEKMOD patch applied | `~/repos/civ5-dll/mcp-plugin` |
+| MCP plugin source (spradlin-dev's MCP Server for Bazaar with our changes) | `mcp-plugin/` in this repository |
 | Bazaar SDK, unzipped from Bazaar's Releases page (`Bazaar-SDK-<version>.zip`) | `sdk-download/` |
 | Build wine prefix | `~/repos/civ5-dll/.winebuild` |
 | The compiler and Windows SDK inside it | `C:\vc9`, `C:\sdk6` |

@@ -45,24 +45,6 @@ capital's culture without checking that a capital exists, so a player with no
 city yet crashes the game at the end of a turn. With the guard, such a player
 has no influence per turn.
 
-**`mcp-plugin-skip-missing-entries.patch`** — `civ5-mcp-plugin`, the loops that
-hand a building, unit, policy, promotion or build to the game core skip the
-empty slots a mod leaves when it deletes rows. LEKMOD deletes some, and without
-this the game crashes the first time an agent opens a city's build list.
-Offered upstream; drop it once upstream has it.
-
-**`mcp-plugin-game-reference.patch`** — `civ5-mcp-plugin`, the game reference
-at `GET /game-reference`, offered upstream as a pull request. Apply the plugin patches in this order:
-skip-missing-entries, game-reference, lekmod, and drop it once upstream has it.
-
-**`mcp-plugin-lekmod.patch`** — `civ5-mcp-plugin`, the plugin's sources under
-`MCP_LEKMOD`, which `generator/build_mcp.sh` defines. Every change is one of:
-an argument VMC adds and LEKMOD lacks, dropped; an accessor Community Patch adds,
-read through `plugin-compat/` instead; the attack preview's strength calls, on
-LEKMOD's `CvCombatInfo` form of those functions; and the two diplomacy hook
-points, under the names our hook-id registry gives them with LEKMOD's parameter
-lists. Without the define the sources are the author's, unchanged.
-
 **`lekmod-trait-merge.patch`** — `lekmod`, `CvInfos.*`, `CvTraitClasses.*`. Lets a leader carry two abilities at once
 (the Second Leader mod). `CvLeaderHeadInfo::hasOwnTrait` tells the leader's own traits from ones a plugin adds;
 `CvPlayerTraits` reads its own first. In `InitPlayerTraits` every field combines instead of keeping the last trait's
