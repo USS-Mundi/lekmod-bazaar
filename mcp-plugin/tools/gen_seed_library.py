@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Writes MCPServer/src/McpSeedLibraryData.inc from the leader seed library (the operator's signed text).
-Usage: tools/gen_seed_library.py [path to library.txt]   (default: ~/repos/civ5-ai/seeds/library.txt)"""
+"""Writes MCPServer/src/McpSeedLibraryData.inc from the leader seed library's text, which is not in this repository.
+Usage: tools/gen_seed_library.py <path to library.txt>"""
 import hashlib, os, sys
-src = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/repos/civ5-ai/seeds/library.txt")
+if len(sys.argv) < 2: sys.exit(__doc__)
+src = sys.argv[1]
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "MCPServer", "src", "McpSeedLibraryData.inc")
 raw = open(src, encoding="utf-8").read()
 def lit(s):

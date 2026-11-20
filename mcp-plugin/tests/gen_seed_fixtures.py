@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Writes tests/seed_fixtures.inc: pages dealt by the Python composer the plugin's was ported from
-(~/repos/civ5-ai/seeds/compose.py), which McpSeedCompose must deal word for word. Run after the library changes."""
+"""Writes tests/seed_fixtures.inc: pages dealt by the Python composer the plugin's was ported from, which
+McpSeedCompose must deal word for word. Run after the library changes. The composer and the library's source are not
+in this repository. Usage: tests/gen_seed_fixtures.py <folder holding compose.py>"""
 import os, sys, json
-SEEDS = os.path.expanduser("~/repos/civ5-ai/seeds"); sys.path.insert(0, SEEDS)
+if len(sys.argv) < 2: sys.exit(__doc__)
+SEEDS = sys.argv[1]; sys.path.insert(0, SEEDS)
 import compose as C
 lib = C.load_library(unsigned=False)
 S = lambda *v: dict(zip(C.ORDER, v))

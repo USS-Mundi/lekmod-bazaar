@@ -103,13 +103,13 @@ Agents:
 
 | File | Change |
 |---|---|
-| `~/repos/civ5-ai/CLAUDE.md`, "Your turn" and the planning section | Rewritten for the new flow: plan when the round opens, a complete plan runs by itself, a held turn starts with `turn_view`. Shown to the operator before it is written. |
+| The agent rulebook's "Your turn" and planning sections | Rewritten for the new flow: plan when the round opens, a complete plan runs by itself, a held turn starts with `turn_view`. |
 
 Measurement:
 
 | File | Change |
 |---|---|
-| `~/repos/civ5-ai/tools/` | The round-wait, calls-per-turn and hold-reason counts used for the table above, as one script reading the transcripts and the plan journal. |
+| A measurement script | The round-wait, calls-per-turn and hold-reason counts used for the table above, read from the agents' transcripts and the plan journal. |
 
 ## Expected effect (estimates until measured)
 
