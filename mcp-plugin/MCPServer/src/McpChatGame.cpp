@@ -137,18 +137,22 @@ void McpChatTick()
 {
 	DWORD now = GetTickCount();
 	std::string game = McpGameId();
+	bool refresh;
+	{
+		Lock lock;
+		if(game != s_game)
+		{
+			s_game = game;
+			s_room.Open(Folder(game));
+			s_tableMs = 0;
+		}
+		refresh = s_tableMs == 0 || now - s_tableMs >= TABLE_REFRESH_MS;
+	}
+	if(!refresh) return;
+	McpChatTable t = TableNow(); // outside the lock: it reads the game, which takes locks of its own
 	Lock lock;
-	if(game != s_game)
-	{
-		s_game = game;
-		s_room.Open(Folder(game));
-		s_tableMs = 0;
-	}
-	if(s_tableMs == 0 || now - s_tableMs >= TABLE_REFRESH_MS)
-	{
-		s_table = TableNow();
-		s_tableMs = now == 0 ? 1 : now;
-	}
+	s_table = t;
+	s_tableMs = now == 0 ? 1 : now;
 }
 
 std::string McpChatToken(int player)

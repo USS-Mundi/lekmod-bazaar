@@ -168,6 +168,7 @@ struct McpBridge::Impl
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
 	McpDeskKit kit;          // what a launch needs, as of the game thread's last look; the launcher reads it on the HTTP thread
 	DWORD kitMs;
+	DWORD gameStartMs;        // when this game was started or loaded: its rules are written for the launcher a little later
 	std::string referenceFor; // the game whose rules were last written for the launcher
 	int unreadReplies;
 	int totalReplies;
@@ -604,7 +605,7 @@ std::vector<McpPopup> McpBridge::GetPopupsSince(int player, int iTurn)
 // ---------------------------------------------------------------- game thread
 
 McpBridge::Impl::Impl()
-	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), gameLoaded(false), unreadReplies(0), totalReplies(0), kitMs(0),
+	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), gameLoaded(false), unreadReplies(0), totalReplies(0), kitMs(0), gameStartMs(0),
 	  gameTurn(-1), testingMode(false), shuttingDown(false), screenHumanTurn(false), hiddenPlayers(0), lastTickMs(0)
 {
 	McpInstallCrashHandler();
@@ -910,6 +911,7 @@ void McpBridge::Impl::ResetForNewGame()
 	csMessages.clear();
 	pendingChat.clear();
 	kitMs = 0;
+	gameStartMs = GetTickCount();
 	unreadReplies = 0;
 	testingMode = false;
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end(); ++it)
@@ -1177,7 +1179,7 @@ void McpBridge::Impl::UpdateKit()
 	if(!k.folder.empty())
 	{
 		std::string reference = k.folder + "\\game-reference.md";
-		if(referenceFor != k.gameId)
+		if(referenceFor != k.gameId && now - gameStartMs > 10000) // after the game's own start-up work
 		{
 			referenceFor = k.gameId;
 			try
