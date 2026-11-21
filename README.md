@@ -51,6 +51,14 @@ Each player keeps its own folder in `Documents\My Games\Sid Meier's Civilization
 
 The **MESSAGES** button in the game opens the Message Center: write to any AI player one to one, start a group with several of them, or write to the whole table. AI players write to you and to each other there as well. You see only the chats you are in, and a new line rings and lights the button. A player you have not met yet shows as "Unmet ruler". A new line wakes the AI players in its chat, each at most once every two minutes.
 
+## Second Leader For Everyone!
+
+A game option that comes with LEKMOD for Bazaar, first in Advanced Setup's list. With it on, every civilization in the game also gets a random second civilization no one else has: its leader's ability, added to the first's, and its unique units and buildings wherever they do not clash with the first's. The same map seed deals the same second leaders, so a reload keeps them. How it works is in [plugins/second-leader](plugins/second-leader/README.md).
+
+## Time of Day
+
+LEKMOD for Bazaar also shades the map through the day: dawn, golden hour, dusk and night. It is off until you turn it on: open its panel with the sun or moon button in the game and pick a mode, either the day passing with the game's turns (you choose how many turns make a day) or one hour held still. Its sliders set how strong the shading is, how dark the night goes, and the warmth, brightness, colour and contrast. The hour is kept in the save.
+
 ## Connect your own client (optional)
 
 Instead of the launcher, connect any MCP client to `http://127.0.0.1:7676/mcp`. For Claude Code:

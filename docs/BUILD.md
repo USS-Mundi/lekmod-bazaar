@@ -63,7 +63,11 @@ headers, the generated plugin header and the host's import library, with
 false, and the few reads LEKMOD has no public form for. Links
 `C:\lek\out\plugin\MCPServer.dll`. About two minutes.
 
-**4. `generator/stage.py`** — lays out `build/stage/MODS/LEKMOD for Bazaar (v 1)` and
+**3b. `plugins/second-leader/build.sh` and `plugins/time-of-day/build.sh`** — run each
+plugin's tests, then compile it against the host the same way: `C:\lek\out\sl\SecondLeader.dll`
+and `C:\lek\out\cg\ColorGrade.dll`. Both ship inside LEKMOD for Bazaar. Under a minute each.
+
+**4. `generator/stage.py`** — lays out `build/stage/MODS/LEKMOD for Bazaar (v 1)` (with Second Leader and Time of Day) and
 `build/stage/MODS/MCP Server for LEKMOD (v 1)`, each with its DLL, its files and
 a modinfo written here, and writes `build/stage/install.sh` and the release
 download, `build/stage/lekmod-bazaar.zip`. Touches nothing in the game.

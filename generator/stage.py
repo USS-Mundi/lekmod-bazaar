@@ -25,6 +25,7 @@ STAGE = os.path.join(REPO, "build", "stage")
 OUT = os.path.join(HOME, "repos", "civ5-dll", ".winebuild", "drive_c", "lek", "out")
 BAZAAR_PKG = os.path.join(REPO, "sdk-download", "packages", "host")
 MCP_REPO = os.path.join(REPO, "mcp-plugin")
+PLUGINS = os.path.join(REPO, "plugins")
 LEKMOD_DLC = os.path.join(HOME, "repos", "lekmod-mac", "lekmod-dlc-parked")
 LEKMAP = os.path.join(HOME, "repos", "civ5-dll", "lekmod", "Lekmap")
 LEKMOD_LICENSE = os.path.join(HOME, "repos", "civ5-dll", "lekmod", "LICENSE")
@@ -137,6 +138,20 @@ def main():
     if not os.path.isfile(host_dll):
         sys.exit("no host DLL at %s; run build_host.sh first" % host_dll)
     host_dll = scrubbed(host_dll, os.path.join(STAGE, "dll", "CvGameCore_Expansion2.dll"))
+    # Second Leader and Time of Day ship inside LEKMOD for Bazaar: one mod to turn on. Each is built by its build.sh.
+    built = {}
+    for name, rel in (("SecondLeader.dll", "sl"), ("ColorGrade.dll", "cg")):
+        path = os.path.join(OUT, rel, name)
+        if not os.path.isfile(path):
+            sys.exit("no %s at %s; run plugins/%s/build.sh first" % (name, path, "second-leader" if rel == "sl" else "time-of-day"))
+        built[name] = scrubbed(path, os.path.join(STAGE, "dll", name))
+    sl = os.path.join(PLUGINS, "second-leader", "mod")
+    tod = os.path.join(PLUGINS, "time-of-day", "mod")
+    extras = ([(built["SecondLeader.dll"], "SecondLeader.dll", 0)]
+              + [(os.path.join(sl, f), f, 0) for f in ("SecondLeader.sql", "SecondLeaderScripts.lua", "SecondLeaderScripts.xml")]
+              + [(built["ColorGrade.dll"], "ColorGrade.dll", 0)]
+              + [(os.path.join(tod, f), f, 0) for f in ("TimeOfDay.sql", "TimeOfDay.lua", "TimeOfDay.xml")]
+              + [(os.path.join(tod, f), f, 1) for f in sorted(os.listdir(tod)) if f.endswith(".dds")])
 
     host_name = "LEKMOD for Bazaar"
     host_folder = os.path.join(STAGE, "MODS", "%s (v %d)" % (host_name, HOST_VERSION))
@@ -146,24 +161,37 @@ def main():
         + [(os.path.join(BAZAAR_PKG, rel), rel, imp) for rel, imp in [
             ("DllPlugins.sql", 0), ("LICENSE.txt", 0), ("NOTICE.txt", 0),
             ("frontend/AdvancedSetup.lua", 1), ("frontend/AdvancedSetup.xml", 1),
-            ("ingame/BazaarStopped.lua", 1), ("ingame/BazaarStopped.xml", 1)]],
+            ("ingame/BazaarStopped.lua", 1), ("ingame/BazaarStopped.xml", 1)]]
+        + extras,
         HOST_ID, HOST_VERSION,
         name=host_name,
         teaser="LEKMOD's game core with Bazaar's plugin loader built in, so Bazaar plugins run on LEKMOD.",
         description="LEKMOD's game core (v35.4) with the Bazaar Multi-DLL Mod Loader generated into it: Bazaar plugins "
                     "such as MCP Server for Bazaar load and run with LEKMOD's rules. Turn this on in place of Bazaar "
                     "itself; the two cannot both set the game's DLL. Needs LEKMOD's MP_MODSPACK data in the game's DLC "
-                    "folder. Single player only.",
+                    "folder. Single player only. Also in it: the game option Second Leader For Everyone! (every "
+                    "civilization gets a random second leader too) and Time of Day (shades the map through the day; off "
+                    "until you pick a mode in its panel).",
         authors="EnormousApplePie and the LEKMOD team (LEKMOD), spradlin-dev (Bazaar)",
         deps=[("Dlc", BNW_DLC_ID, 0, 999, "")],
         refs=[],
         blocks=[("Mod", BAZAAR_ID, 0, 999, "Bazaar Multi-DLL Mod Loader"),
                 ("Mod", OLD_MCP_ID, 0, 999, "Local MCP Server DLL")],
         actions=["    <OnGetDLLPath>", "      <SetDllPath>CvGameCore_Expansion2.dll</SetDllPath>", "    </OnGetDLLPath>",
-                 "    <OnModActivated>", "      <UpdateDatabase>DllPlugins.sql</UpdateDatabase>", "    </OnModActivated>"],
+                 "    <OnModActivated>", "      <UpdateDatabase>DllPlugins.sql</UpdateDatabase>",
+                 "      <UpdateDatabase>SecondLeader.sql</UpdateDatabase>", "      <UpdateDatabase>TimeOfDay.sql</UpdateDatabase>",
+                 "    </OnModActivated>"],
         entry_points=['    <EntryPoint type="InGameUIAddin" file="ingame/BazaarStopped.xml">',
                       "      <Name>Plugin stopped working</Name>",
                       "      <Description>Returns the player to the main menu after a plugin crashes in a game.</Description>",
+                      "    </EntryPoint>",
+                      '    <EntryPoint type="InGameUIAddin" file="SecondLeaderScripts.xml">',
+                      "      <Name>Second Leader scripts</Name>",
+                      "      <Description>LEKMOD's scripted abilities for merged second leaders.</Description>",
+                      "    </EntryPoint>",
+                      '    <EntryPoint type="InGameUIAddin" file="TimeOfDay.xml">',
+                      "      <Name>Time of Day</Name>",
+                      "      <Description>The Time of Day panel: off until a mode is picked.</Description>",
                       "    </EntryPoint>"])
     print("staged %s: %d files" % (host_folder, len(host_files)))
 

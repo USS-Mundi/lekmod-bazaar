@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Time of Day: the panel that sets the day the Time of Day plugin draws. Generated into mod/ by tools/ui_xml.py, which
+     expands each @9(texture,corner). -->
+<Context ID="TimeOfDay" ColorSet="Beige_Black" Font="TwCenMT16" FontStyle="Shadow">
+
+	<Button ID="OpenButton" Anchor="L,T" Offset="806,40" Size="34,30" ToolTip="Time of Day">
+		<Grid Anchor="C,C" Size="34,30" @9(dn_btn,5) />
+		<Image ID="OpenSun" Anchor="C,C" Size="18,18" Texture="dn_sun.dds" />
+		<Image ID="OpenMoon" Anchor="C,C" Size="18,18" Texture="dn_moon.dds" Hidden="1" />
+	</Button>
+
+	<Grid ID="Panel" Anchor="L,T" Offset="650,76" Size="350,538" @9(dn_win,8) ConsumeMouse="1" Hidden="1">
+		<Box Anchor="L,T" Offset="18,22" Size="92,1" Color="205,176,106,170" />
+		<Label Anchor="C,T" Offset="0,15" String="TIME OF DAY" Font="TwCenMT16" FontStyle="Shadow" />
+		<Box Anchor="R,T" Offset="48,22" Size="92,1" Color="205,176,106,170" />
+		<Button ID="CloseButton" Anchor="R,T" Offset="12,9" Size="26,26" ToolTip="Close">
+			<Grid Anchor="C,C" Size="26,26" @9(dn_ghost,5) />
+			<Image Anchor="C,C" Size="14,14" Texture="dn_close.dds" />
+		</Button>
+		<Box Anchor="L,T" Offset="4,42" Size="342,1" Color="200,194,160,220" />
+		<Box Anchor="L,T" Offset="4,43" Size="342,1" Color="47,90,85,255" />
+		<Box Anchor="L,T" Offset="4,44" Size="342,1" Color="200,194,160,220" />
+
+		<Label ID="NowLabel" Anchor="L,T" Offset="20,56" Font="TwCenMT18" FontStyle="Shadow" />
+		<Box Anchor="L,T" Offset="46,84" Size="258,18" Color="200,194,160,160">
+			<Image Anchor="C,C" Size="256,16" Texture="dn_sky.dds" />
+			<Box ID="Marker" Anchor="L,C" Offset="0,0" Size="3,26" Color="236,231,216,255" />
+		</Box>
+		<Image Anchor="L,T" Offset="20,85" Size="18,18" Texture="dn_sun.dds" />
+		<Image Anchor="L,T" Offset="312,85" Size="18,18" Texture="dn_moon.dds" />
+
+		<Button ID="ModeButton" Anchor="L,T" Offset="18,116" Size="314,32" ToolTip="What sets the time of day: game turns move the clock, hold keeps one hour, or off">
+			<Grid Anchor="C,C" Size="314,32" @9(dn_btn,5) />
+			<Label ID="ModeLabel" Anchor="C,C" Font="TwCenMT16" FontStyle="Shadow" />
+		</Button>
+
+		<Label ID="SpeedLabel" Anchor="L,T" Offset="20,160" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="SpeedSlider" Anchor="L,T" Offset="20,182" Length="310" Style="Slider" WheelSteps="20" ToolTip="Game turns: how many turns a whole day takes, 4 (left, 6 hours a turn) to 120 (right, 12 minutes a turn); each turn moves the clock evenly, gliding in from the city states' turn. Hold: the hour shown, from 00:00 at the left to 23:00 at the right" />
+		<Label ID="StrengthLabel" Anchor="L,T" Offset="20,206" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="StrengthSlider" Anchor="L,T" Offset="20,228" Length="310" Style="Slider" WheelSteps="20" ToolTip="How strongly every look is applied: low is a hint, high the full grade" />
+		<Label ID="DepthLabel" Anchor="L,T" Offset="20,252" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="DepthSlider" Anchor="L,T" Offset="20,274" Length="310" Style="Slider" WheelSteps="20" ToolTip="How dark and blue night gets: low is a faint dusk, high is deep moonlight" />
+		<Label ID="WarmthLabel" Anchor="L,T" Offset="20,298" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="WarmthSlider" Anchor="L,T" Offset="20,320" Length="310" Style="Slider" WheelSteps="20" ToolTip="How much colour dawn, golden hour and dusk have: low is a plain fade, high full warm colour" />
+
+		<Label ID="BrightnessLabel" Anchor="L,T" Offset="20,344" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="BrightnessSlider" Anchor="L,T" Offset="20,366" Length="310" Style="Slider" WheelSteps="20" ToolTip="How light dawn, golden hour, dusk and night are (noon stays as the game draws it): left is darker, right lighter; the middle is as made" />
+		<Label ID="ColourLabel" Anchor="L,T" Offset="20,390" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="ColourSlider" Anchor="L,T" Offset="20,412" Length="310" Style="Slider" WheelSteps="20" ToolTip="How much colour dawn, golden hour, dusk and night keep (noon stays as the game draws it): left fades toward grey, right is richer; the middle is as made" />
+		<Label ID="ContrastLabel" Anchor="L,T" Offset="20,436" Font="TwCenMT16" FontStyle="Shadow" />
+		<Slider ID="ContrastSlider" Anchor="L,T" Offset="20,458" Length="310" Style="Slider" WheelSteps="20" ToolTip="How far apart light and dark sit at dawn, golden hour, dusk and night (noon stays as the game draws it): left is flatter and softer, right punchier; the middle is as made" />
+
+		<Label ID="PathLabel" Anchor="L,T" Offset="20,496" WrapWidth="310" Font="TwCenMT14" FontStyle="Shadow" />
+	</Grid>
+</Context>
