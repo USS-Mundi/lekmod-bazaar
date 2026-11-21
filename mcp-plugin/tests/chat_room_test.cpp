@@ -330,6 +330,17 @@ static void TestTheHumansOwnAgent()
 	Check(room.Lines("human-ai", s.id, 0, lines) && lines.size() == 3, "it may read the human's chats");
 }
 
+// Who a tool caller reads and speaks as. One that never named itself is no player: it reads nothing,
+// even on the screen's civilization (a status poller kept open since before any seat was taken).
+static void TestReaderOfACaller()
+{
+	Check(McpChatReader(false, true, 0) == "", "a caller that never named itself reads nothing on the screen's civilization");
+	Check(McpChatReader(false, false, 3) == "", "nor on a seat");
+	Check(McpChatReader(true, true, 0) == "human-ai", "a named model on the screen's civilization is the human's own AI");
+	Check(McpChatReader(true, false, 3) == "p3", "a named model on a seat is that seat");
+	Check(McpChatReader(true, false, -1) == "", "no player, no reader");
+}
+
 int main()
 {
 	char tmpl[] = "/tmp/chat_room_test.XXXXXX";
@@ -345,6 +356,7 @@ int main()
 	TestUnreadNamesAndStale();
 	TestLinesAreOneLine();
 	TestTheHumansOwnAgent();
+	TestReaderOfACaller();
 	std::string rm = "rm -rf '" + g_root + "'";
 	if(std::system(rm.c_str()) != 0) std::printf("could not remove %s\n", g_root.c_str());
 	if(g_failed) { std::printf("%d failed\n", g_failed); return 1; }

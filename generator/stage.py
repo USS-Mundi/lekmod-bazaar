@@ -10,8 +10,10 @@ this host instead of Bazaar, and an id and name of its own, so it can sit beside
 
 Nothing here touches the game. build/stage/install.sh does, when run by hand.
 """
+import getpass
 import hashlib
 import os
+import re
 import shutil
 import sys
 import zipfile
@@ -68,6 +70,24 @@ def modinfo(mod_id, version, name, teaser, description, authors, deps, refs, blo
     return "\r\n".join(lines)
 
 
+def builder():
+    """The builder's user name, which no release file may contain."""
+    return getpass.getuser().encode()
+
+
+def scrubbed(src, dst):
+    """A copy of a built DLL with the builder's home folder blanked out of the source paths the compiler wrote into
+    it (assert messages and the like): same length, so nothing in the file moves."""
+    user = builder()
+    data = open(src, "rb").read()
+    data = re.sub(rb"(?i)(users[\\/])" + re.escape(user) + rb"(?=[\\/])", lambda m: m.group(1) + b"x" * len(user), data)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst, "wb") as f:
+        f.write(data)
+    shutil.copystat(src, dst)
+    return dst
+
+
 def stage_mod(folder, sources, mod_id, version, **kw):
     """Copies sources [(src path, rel path, import)] into the mod folder and writes its modinfo. A plugin DLL loads
     only through a DllPlugins row, so a plugin DLL (one not imported, as the game core is) that no staged SQL registers
@@ -101,6 +121,12 @@ def write_zip(path, host_dll, mod_folders):
                 for f in sorted(files):
                     full = os.path.join(root, f)
                     z.write(full, os.path.join("MODS", os.path.relpath(full, os.path.dirname(folder))))
+    # The release must not name whoever built it.
+    with zipfile.ZipFile(path) as z:
+        named = [n for n in z.namelist() if builder().lower() in z.read(n).lower()]
+    if named:
+        os.remove(path)
+        sys.exit("the build user's name is in %s; no release zip written" % ", ".join(named))
     print("wrote", path)
 
 
@@ -110,6 +136,7 @@ def main():
     host_dll = os.path.join(OUT, "CvGameCore_Expansion2.dll")
     if not os.path.isfile(host_dll):
         sys.exit("no host DLL at %s; run build_host.sh first" % host_dll)
+    host_dll = scrubbed(host_dll, os.path.join(STAGE, "dll", "CvGameCore_Expansion2.dll"))
 
     host_name = "LEKMOD for Bazaar"
     host_folder = os.path.join(STAGE, "MODS", "%s (v %d)" % (host_name, HOST_VERSION))
@@ -142,6 +169,7 @@ def main():
 
     plugin_dll = os.path.join(OUT, "plugin", "MCPServer.dll")
     if os.path.isfile(plugin_dll):
+        plugin_dll = scrubbed(plugin_dll, os.path.join(STAGE, "dll", "MCPServer.dll"))
         mcp_name = "MCP Server for LEKMOD"
         mcp_folder = os.path.join(STAGE, "MODS", "%s (v %d)" % (mcp_name, MCP_VERSION))
         mod = os.path.join(MCP_REPO, "MCPServer", "mod")

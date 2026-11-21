@@ -237,6 +237,12 @@ bool McpWakeLetThrough(bool everLetThrough, unsigned long lastMs, unsigned long 
 	return since >= (unsigned int)cooldownMs;
 }
 
+std::string McpChatReader(bool named, bool onScreen, int slot)
+{
+	if(!named || slot < 0) return "";
+	return onScreen ? std::string(HUMAN_AI) : "p" + Str(slot);
+}
+
 McpChatRoom::McpChatRoom() {}
 
 std::string McpChatRoom::IdOf(const std::string& sender, const std::vector<std::string>& members)

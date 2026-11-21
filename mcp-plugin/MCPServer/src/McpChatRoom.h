@@ -89,6 +89,10 @@ struct McpChatDelivery
 // values, so they may wrap.
 bool McpWakeLetThrough(bool everLetThrough, unsigned long lastMs, unsigned long nowMs, unsigned long cooldownMs);
 
+// Who a tool caller is in chat: "human-ai" for a model on the screen's civilization, "p<slot>" for one on a seat,
+// and "" (reads nothing) for a caller that never named itself or plays no one.
+std::string McpChatReader(bool named, bool onScreen, int slot);
+
 class McpChatRoom
 {
 public:

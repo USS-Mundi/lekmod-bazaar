@@ -157,9 +157,8 @@ void McpChatTick()
 
 std::string McpChatToken(int player)
 {
-	if(player < 0) return "";
-	if((PlayerTypes)player == GC.getGame().getActivePlayer()) return "human-ai"; // a tool caller on the screen's civilization is a model
-	return McpFormat("p%d", player);
+	// A tool caller on the screen's civilization is a model.
+	return McpChatReader(true, player >= 0 && (PlayerTypes)player == GC.getGame().getActivePlayer(), player);
 }
 
 picojson::value McpChatSay(int player, const std::string& to, const std::string& words, const std::string& name, std::string& err)
@@ -188,13 +187,18 @@ picojson::value McpChatSay(int player, const std::string& to, const std::string&
 
 void McpChatAddMessages(int player, picojson::object& status)
 {
+	// A caller that never named itself is no player and is handed nothing, such as a status poller kept open since
+	// before any seat was taken, which still counts as the screen's civilization.
+	bool named = !McpBridge::Get().Current().identity.model.empty();
+	std::string reader = McpChatReader(named, player >= 0 && (PlayerTypes)player == GC.getGame().getActivePlayer(), player);
+	if(reader.empty()) return;
 	McpChatTable t = TableNow();
 	std::vector<McpChatDelivery> got;
 	int more = 0;
 	{
 		Lock lock;
 		SameGame();
-		got = s_room.Take(t, McpChatToken(player), MCP_CHAT_MAX_DELIVERED, more);
+		got = s_room.Take(t, reader, MCP_CHAT_MAX_DELIVERED, more);
 	}
 	if(got.empty()) return;
 	JArr messages;
