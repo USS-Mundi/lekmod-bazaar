@@ -4,11 +4,16 @@ local ROWS, LEK = arg[1], arg[2];
 local fails, passes = 0, 0;
 local function check(ok, what) if ok then passes = passes + 1 else fails = fails + 1; print("FAIL " .. what) end end
 
--- a GameInfo table: callable with nil, a table of column values or a condition string; indexed by Type and ID
+-- a GameInfo table: callable with no filter, a table of column values or a condition string; indexed by Type and ID.
+-- Like the game's, it refuses a filter given as nil (in a real game: "Filter must be of type 'string' or 'table'").
 local function gtable(rows)
 	local t = {};
 	for i, r in ipairs(rows) do r.ID = r.ID or (i - 1); if r.Type then t[r.Type] = r end; t[r.ID] = r end
-	return setmetatable(t, { __call = function(_, filter)
+	return setmetatable(t, { __call = function(_, ...)
+		local filter = ...;
+		if select("#", ...) > 0 and type(filter) ~= "string" and type(filter) ~= "table" then
+			error("Filter must be of type 'string' or 'table'", 2);
+		end
 		local i = 0;
 		return function()
 			while true do
@@ -104,6 +109,36 @@ print = function(s) printed[#printed + 1] = s end
 chunk();
 print = realPrint;
 check(printed[2] and printed[2]:find("GameInfo is a number"), "a GameInfo it cannot wrap is reported");
+
+-- 5. a screen's environment as the game gives it: the base library without rawset or rawget (a real game's Bazaar.log:
+--    "SecondLeaderRows:74: attempt to call global 'rawset' (a nil value)"), and a GameInfo the screen cannot write to
+local base = {};
+for k, v in pairs(_G) do if k ~= "rawset" and k ~= "rawget" then base[k] = v end end
+local function sealed(t)
+	return setmetatable({}, { __index = t, __newindex = function(_, k) error("GameInfo." .. tostring(k) .. " cannot be set", 2) end });
+end
+local genv = setmetatable({ GameInfo = sealed(db()), Game = game() }, { __index = base });
+local gchunk = loadfile(ROWS);
+setfenv(gchunk, genv);
+local ok, err = pcall(gchunk);
+check(ok, "the chunk runs in a screen's environment as the game gives it (" .. tostring(err) .. ")");
+if ok then
+	check(#collect(genv.GameInfo.Civilization_UnitClassOverrides()) == 3, "and that screen's GameInfo lists the merged unit");
+	check(genv.GameInfo.Units.UNIT_BERSERKER.Class == "UNITCLASS_LONGSWORDSMAN", "and still reads every other table");
+	local include = loadfile(LEK .. "/UI/TechButtonInclude.lua");
+	setfenv(include, genv);
+	include();
+	genv.GatherInfoAboutUniqueStuff("CIVILIZATION_DENMARK");
+	local gunits;
+	for i = 1, 20 do
+		local name, v = debug.getupvalue(genv.GatherInfoAboutUniqueStuff, i);
+		if not name then break end
+		if name == "validUnitBuilds" then gunits = v end
+	end
+	check(gunits and gunits.UNITCLASS_PRIVATEER == "UNIT_QASIMI_RAIDER", "and its tech tree shows the Qasimi Raider for Denmark");
+	pcall(gchunk);
+	check(#collect(genv.GameInfo.Civilization_UnitClassOverrides()) == 3, "and a second run there lists it once");
+end
 
 print(string.format("%d/%d", passes, passes + fails));
 os.exit(fails == 0 and 0 or 1);

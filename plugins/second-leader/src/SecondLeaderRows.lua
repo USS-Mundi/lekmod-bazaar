@@ -41,8 +41,10 @@ end
 local function wrap(real, kind)
 	return setmetatable({ SecondLeaderRows = true }, {
 		__index = real,
-		__call = function(_, filter, ...)
-			local it, extra, i = real(filter, ...), nil, 0;
+		-- the game's table refuses a filter given as nil, so no filter is passed on as none
+		__call = function(_, filter)
+			local it, extra, i = nil, nil, 0;
+			if filter == nil then it = real(); else it = real(filter); end
 			return function()
 				if it then
 					local row = it();
@@ -62,20 +64,26 @@ local function wrap(real, kind)
 	});
 end
 
+-- The screen gets a GameInfo of its own: the two tables wrapped, every other read passed to the game's GameInfo, which
+-- is never written to. A screen's environment has no rawset.
 local function install(gi)
 	if type(gi) ~= "table" then
 		print("Second Leader: GameInfo is a " .. type(gi) .. " here; uniques of seconds left off this screen");
 		return;
 	end
-	local wrapped = 0;
+	if gi == SecondLeaderGameInfo then return; end
+	local own, wrapped = {}, 0;
 	for _, kind in ipairs(KINDS) do
 		local real = gi[kind.key];
-		if real ~= nil and not (type(real) == "table" and rawget(real, "SecondLeaderRows")) then
-			rawset(gi, kind.key, wrap(real, kind));
+		if real ~= nil then
+			own[kind.key] = wrap(real, kind);
 			wrapped = wrapped + 1;
 		end
 	end
-	if wrapped > 0 then print("Second Leader: screens list the uniques of seconds"); end
+	if wrapped == 0 then return; end
+	SecondLeaderGameInfo = setmetatable(own, { __index = gi });
+	GameInfo = SecondLeaderGameInfo;
+	print("Second Leader: screens list the uniques of seconds");
 end
 
 install(GameInfo);
