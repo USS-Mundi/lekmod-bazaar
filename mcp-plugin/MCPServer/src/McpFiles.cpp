@@ -122,3 +122,38 @@ std::vector<std::string> McpFilesIn(const std::string& dir, const std::string& s
 #endif
 	return out;
 }
+
+std::vector<std::string> McpDirsIn(const std::string& dir, const std::string& prefix)
+{
+	std::vector<std::string> out;
+#ifdef _WIN32
+	WIN32_FIND_DATAW data;
+	HANDLE h = FindFirstFileW(Wide(dir + "\\" + prefix + "*").c_str(), &data);
+	if(h == INVALID_HANDLE_VALUE) return out;
+	do
+	{
+		if(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) out.push_back(Narrow(data.cFileName));
+	} while(FindNextFileW(h, &data));
+	FindClose(h);
+#else
+	DIR* d = opendir(dir.c_str());
+	if(!d) return out;
+	while(dirent* e = readdir(d))
+	{
+		std::string n = e->d_name;
+		struct stat st;
+		if(n.compare(0, prefix.size(), prefix) == 0 && stat((dir + "/" + n).c_str(), &st) == 0 && S_ISDIR(st.st_mode)) out.push_back(n);
+	}
+	closedir(d);
+#endif
+	return out;
+}
+
+bool McpRemoveFile(const std::string& path)
+{
+#ifdef _WIN32
+	return DeleteFileW(Wide(path).c_str()) != 0;
+#else
+	return remove(path.c_str()) == 0;
+#endif
+}

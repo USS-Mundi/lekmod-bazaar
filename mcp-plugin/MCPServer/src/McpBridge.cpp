@@ -5,6 +5,9 @@
 #include "McpBridge.h"
 #include "McpChatRoom.h"
 #include "McpChatGame.h"
+#include "McpAgentDesk.h"
+#include "McpCityStateFiles.h"
+#include "McpFiles.h"
 #include "McpCrash.h"
 #include "McpCrashLog.h"
 #include "McpHttp.h"
@@ -132,6 +135,7 @@ struct McpBridge::Impl
 		bool roundToPlan; // its seat's round has opened and it has yet to be asked for that plan
 		bool autoRun;     // its own wait is running its plan: those orders pass the turn view gate
 		bool planRunning; // run_plan is carrying out its orders: a game message they bring does not stop the next one
+		std::string agent; // the launcher's name for the agent (X-Lekmod-Agent), so a relaunch knows it is running
 		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), nudgeSeq(0), nudgeTold(0), noticeSeq(0), noticeTold(0),
 			noticesSynced(false), lastSeenMs(0), seatBeforeLoad(-1), planDue(false), roundToPlan(false), autoRun(false), planRunning(false) {}
 		bool Idle(DWORD now) const { return now - lastSeenMs > MCP_SESSION_IDLE_MS; }
@@ -162,6 +166,9 @@ struct McpBridge::Impl
 	std::map<int, int> notices;                            // per player: how many times POST /nudge has named it, let through or not
 	std::map<int, DWORD> lastNudgeMs;                      // per player: when the last one was let through
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
+	McpDeskKit kit;          // what a launch needs, as of the game thread's last look; the launcher reads it on the HTTP thread
+	DWORD kitMs;
+	std::string referenceFor; // the game whose rules were last written for the launcher
 	int unreadReplies;
 	int totalReplies;
 
@@ -186,6 +193,7 @@ struct McpBridge::Impl
 	void Append(int player, const std::string& who, const char* category, const std::string& text);
 	void DrainPopups();
 	void DrainChat();
+	void UpdateKit();
 	void DrainCityStateChat(PlayerTypes eMinor, const std::string& text);
 	void ResetForNewGame();
 	Session* CurrentSession(); // under lock
@@ -197,7 +205,7 @@ struct McpBridge::Impl
 		DWORD last = lastTickMs;
 		return last != 0 && GetTickCount() - last < MCP_GAME_IDLE_MS;
 	}
-	void Touch(const std::string& token); // creates the session when new
+	void Touch(const std::string& token, const std::string& agent = ""); // creates the session when new
 	void KeepAlive(const std::string& token); // an ended session stays ended
 	void EndSession(const std::string& token);
 	// The session's flags; false when it no longer exists.
@@ -207,6 +215,7 @@ struct McpBridge::Impl
 	static void HttpHandler(const McpHttpRequest& req, McpHttpResponse& res);
 	void HandleHttp(const McpHttpRequest& req, McpHttpResponse& res);
 	picojson::value HandleRpc(const picojson::value& request, const std::string& token, bool& bIsNotification);
+	void HandleAgents(const McpHttpRequest& req, McpHttpResponse& res);
 	picojson::value CallTool(const std::string& token, const std::string& name, const picojson::object& args, bool& bIsError);
 	picojson::value AdvanceRound(const std::string& token, const picojson::object& args, bool& bIsError);
 	picojson::value RunPlan(const std::string& token, const picojson::object& args, bool& bIsError, bool bAuto = false);
@@ -245,12 +254,13 @@ McpBridge::Impl::Session* McpBridge::Impl::CurrentSession()
 	return (it == sessions.end()) ? NULL : &it->second;
 }
 
-void McpBridge::Impl::Touch(const std::string& token)
+void McpBridge::Impl::Touch(const std::string& token, const std::string& agent)
 {
 	EnterCriticalSection(&lock);
 	Session& s = sessions[token];
 	s.info.token = token;
 	s.lastSeenMs = GetTickCount();
+	if(!agent.empty()) s.agent = agent;
 	LeaveCriticalSection(&lock);
 }
 
@@ -594,7 +604,7 @@ std::vector<McpPopup> McpBridge::GetPopupsSince(int player, int iTurn)
 // ---------------------------------------------------------------- game thread
 
 McpBridge::Impl::Impl()
-	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), gameLoaded(false), unreadReplies(0), totalReplies(0),
+	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), gameLoaded(false), unreadReplies(0), totalReplies(0), kitMs(0),
 	  gameTurn(-1), testingMode(false), shuttingDown(false), screenHumanTurn(false), hiddenPlayers(0), lastTickMs(0)
 {
 	McpInstallCrashHandler();
@@ -733,6 +743,7 @@ void McpBridge::Impl::Tick()
 	if(gameLoaded || CvPreGame::mapRandomSeed() != gameSeed || iTurn < gameTurn) ResetForNewGame();
 	gameTurn = iTurn;
 	McpChatTick();
+	UpdateKit();
 	DrainChat();
 	UpdateSessions();
 	McpCsTick();
@@ -898,6 +909,7 @@ void McpBridge::Impl::ResetForNewGame()
 	chat.clear();
 	csMessages.clear();
 	pendingChat.clear();
+	kitMs = 0;
 	unreadReplies = 0;
 	testingMode = false;
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end(); ++it)
@@ -1098,6 +1110,131 @@ int McpBridge::Impl::GetLog(std::vector<McpLogEntry>& out)
 	return seq;
 }
 
+// ---------------------------------------------------------------- the agent launcher
+
+namespace
+{
+	std::string Rulebook()
+	{
+		static std::string text;
+		if(text.empty())
+		{
+#include "McpRulebookData.inc"
+			for(int i = 0; kRulebook[i]; ++i) text += kRulebook[i];
+		}
+		return text;
+	}
+
+	std::string NewSessionId() { return McpNewUuid(); }
+
+	std::string UrlDecode(const std::string& s)
+	{
+		std::string out;
+		for(size_t i = 0; i < s.size(); ++i)
+		{
+			if(s[i] == '+') out += ' ';
+			else if(s[i] == '%' && i + 2 < s.size() && isxdigit((unsigned char)s[i + 1]) && isxdigit((unsigned char)s[i + 2]))
+			{
+				out += (char)strtol(s.substr(i + 1, 2).c_str(), NULL, 16);
+				i += 2;
+			}
+			else out += s[i];
+		}
+		return out;
+	}
+
+	// The value of name in a form body (a=1&b=2).
+	std::string FormValue(const std::string& body, const std::string& name)
+	{
+		size_t start = 0;
+		while(start <= body.size())
+		{
+			size_t end = body.find('&', start);
+			std::string pair = body.substr(start, end == std::string::npos ? std::string::npos : end - start);
+			size_t eq = pair.find('=');
+			if(eq != std::string::npos && UrlDecode(pair.substr(0, eq)) == name) return UrlDecode(pair.substr(eq + 1));
+			if(end == std::string::npos) break;
+			start = end + 1;
+		}
+		return "";
+	}
+}
+
+// Game thread, about once a second: what a launch needs, so the launcher answers while the game is paused behind a
+// terminal. This game's rules are written for the agents once per game.
+void McpBridge::Impl::UpdateKit()
+{
+	DWORD now = GetTickCount();
+	if(kitMs != 0 && now - kitMs < 1000) return;
+	kitMs = now == 0 ? 1 : now;
+	McpDeskKit k;
+	k.gameId = McpGameId();
+	k.folder = McpGameFolder(k.gameId, "agents");
+	k.hostFolder = McpHostPath(k.folder);
+	k.unixHost = McpRunsUnderWine();
+	k.mcpUrl = McpFormat("http://127.0.0.1:%d/mcp", MCP_PORT);
+	k.rulebook = Rulebook();
+	if(!k.folder.empty())
+	{
+		std::string reference = k.folder + "\\game-reference.md";
+		if(referenceFor != k.gameId)
+		{
+			referenceFor = k.gameId;
+			try
+			{
+				McpWriteFile(reference, McpGameReference(), false);
+			}
+			catch(...)
+			{
+				McpDiagLog("the game reference could not be written for the launcher");
+			}
+		}
+		if(McpFileExists(reference)) k.referencePath = reference;
+	}
+	PlayerTypes eHuman = GC.getGame().getActivePlayer();
+	TeamTypes eTeam = eHuman == NO_PLAYER ? NO_TEAM : GET_PLAYER(eHuman).getTeam();
+	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
+	{
+		PlayerTypes e = (PlayerTypes)i;
+		CvPlayer& p = GET_PLAYER(e);
+		if(e == eHuman || !p.isAlive() || McpIsSeat(e) || CvPreGame::slotStatus(e) != SS_COMPUTER) continue;
+		if(p.getTeam() == eTeam) ++k.freeTeammates;
+		else ++k.freeOpponents;
+	}
+	k.screenFree = !McpBridge::Get().ScreenPlayed();
+	EnterCriticalSection(&lock);
+	kit = k;
+	LeaveCriticalSection(&lock);
+}
+
+// GET /agents: the launcher script for this machine. POST /agents (table=...): starts or brings back agents, and
+// answers the lines the script carries out (McpDeskRun). Both answer from the kit, never waiting on the game.
+void McpBridge::Impl::HandleAgents(const McpHttpRequest& req, McpHttpResponse& res)
+{
+	res.contentType = "text/plain; charset=utf-8";
+	EnterCriticalSection(&lock);
+	McpDeskKit k = kit;
+	DWORD now = GetTickCount();
+	for(std::map<std::string, Session>::const_iterator it = sessions.begin(); it != sessions.end(); ++it)
+		if(!it->second.agent.empty() && !it->second.Idle(now)) k.running.push_back(it->second.agent);
+	LeaveCriticalSection(&lock);
+	std::string url = McpFormat("http://127.0.0.1:%d/agents", MCP_PORT);
+	if(req.method == "GET")
+	{
+		res.status = 200;
+		res.body = McpDeskScript(k, url);
+		return;
+	}
+	if(req.method != "POST")
+	{
+		res.status = 405;
+		res.body = "only GET and POST are supported";
+		return;
+	}
+	res.status = 200;
+	res.body = McpDeskRun(k, FormValue(req.body, "table"), &NewSessionId);
+}
+
 // ---------------------------------------------------------------- HTTP thread
 
 void McpBridge::Impl::HttpHandler(const McpHttpRequest& req, McpHttpResponse& res)
@@ -1159,6 +1296,11 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 		res.body = result.serialize();
 		return;
 	}
+	if(req.path == "/agents" || req.path.compare(0, 8, "/agents?") == 0)
+	{
+		HandleAgents(req, res);
+		return;
+	}
 	if(req.path != "/mcp")
 	{
 		res.status = 404;
@@ -1205,7 +1347,8 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 		token = "civ5-" + McpNewUuid();
 		res.sessionId = token;
 	}
-	Touch(token);
+	std::map<std::string, std::string>::const_iterator itAgent = req.headers.find("x-lekmod-agent");
+	Touch(token, itAgent == req.headers.end() ? std::string() : itAgent->second.substr(0, 32));
 
 	bool bIsNotification = false;
 	picojson::value response = HandleRpc(request, token, bIsNotification);
