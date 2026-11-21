@@ -83,7 +83,7 @@ namespace
 		{
 			if(!list[i].is<JObj>()) { err = McpFormat("order %d: each order is {tool, args, serves}", (int)i + 1); return false; }
 			const JObj& o = list[i].get<JObj>();
-			std::string tool = ArgStr(o, "tool");
+			std::string tool = McpPlainToolName(ArgStr(o, "tool"));
 			const McpToolDef* def = McpFindTool(tool);
 			if(!def) { err = McpFormat("order %d: unknown tool '%s'", (int)i + 1, tool.c_str()); return false; }
 			if(!Plannable(tool)) { err = McpFormat("order %d: %s does not go in a plan", (int)i + 1, tool.c_str()); return false; }

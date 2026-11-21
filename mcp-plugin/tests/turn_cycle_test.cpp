@@ -968,6 +968,10 @@ void TestAtTurnOpenAFromCityOrderCoversTheUnitItWasBoundTo()
 void TestAnOrderAddedWhenTheTurnOpensNeedsNoServes()
 {
 	std::string serves;
+	CHECK(McpPlainToolName("mcp__civ5__unit_action") == "unit_action");      // a client's own prefix on a planned order
+	CHECK(McpPlainToolName("mcp__my_server__move_unit") == "move_unit");
+	CHECK(McpPlainToolName("unit_action") == "unit_action");
+	CHECK(McpPlainToolName("mcp__") == "mcp__");
 	CHECK(!McpOrderServes("move_unit", "", false, serves));
 	CHECK(McpOrderServes("move_unit", "", true, serves) && serves == MCP_SERVES_ADDED);
 	CHECK(McpOrderServes("move_unit", "military: hold the pass", true, serves) && serves == "military: hold the pass");

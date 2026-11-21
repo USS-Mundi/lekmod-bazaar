@@ -920,6 +920,13 @@ std::string McpBindingLine(const McpNewUnitBinding& b)
 
 const char* const MCP_SERVES_ADDED = "added when the turn opened";
 
+std::string McpPlainToolName(const std::string& tool)
+{
+	if(tool.compare(0, 5, "mcp__") != 0) return tool;
+	size_t cut = tool.find("__", 5);
+	return (cut == std::string::npos || cut + 2 >= tool.size()) ? tool : tool.substr(cut + 2);
+}
+
 bool McpOrderServes(const std::string& tool, const std::string& given, bool bAddedAtTurnOpen, std::string& serves)
 {
 	serves = given;

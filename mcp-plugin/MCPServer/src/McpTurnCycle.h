@@ -325,6 +325,9 @@ std::string McpBindingLine(const McpNewUnitBinding& b);
 extern const char* const MCP_SERVES_ADDED;
 bool McpOrderServes(const std::string& tool, const std::string& given, bool bAddedAtTurnOpen, std::string& serves);
 
+// A planned order's tool without the prefix an MCP client puts on its tools' names ("mcp__civ5__unit_action").
+std::string McpPlainToolName(const std::string& tool);
+
 // Why plan_turn refuses a planned build, or "": the unit cannot make it where it will stand (bCan false), unless only
 // a technology is missing (bCanOnceTechKnown) and that technology lands as the turn opens.
 std::string McpPlanBuildFault(bool bCan, bool bCanOnceTechKnown, bool bTechLandsAtOpen, const std::string& techName);

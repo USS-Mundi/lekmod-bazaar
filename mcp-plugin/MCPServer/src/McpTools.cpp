@@ -6,10 +6,12 @@
 #include "McpRules.h"
 #include "McpChronicleGame.h"
 #include "McpSeat.h"
+#include "McpSeatRules.h"
 #include "McpLogText.h"
 #include "McpToolHandlers.h"
 #include "McpCityStates.h"
 #include "McpMapImage.h"
+#include <algorithm>
 #include "McpBridge.h"
 #include "McpDiplomacy.h"
 #include "CvGame.h"
@@ -1325,6 +1327,8 @@ MCP_TOOL(ToolTakeSeat)
 	}
 	else if(e == NO_PLAYER) e = FindPlayer(key);
 	if(e == NO_PLAYER) { err = "unknown civilization '" + key + "'; use a name from civs, or teammate, opponent or human"; return JVal(); }
+	std::vector<PlayerTypes> left = McpUnboundSeats();
+	bool bBack = std::find(left.begin(), left.end(), e) != left.end(); // a seat someone left: no second greeting
 	if(!McpClaimSeat(e, err)) return JVal();
 	JObj o;
 	o["ok"] = J(true);
@@ -1332,20 +1336,16 @@ MCP_TOOL(ToolTakeSeat)
 	// Sitting down between turns, the seat has no plan for its next one yet: its first wait asks for it.
 	bool bTurnNow = McpIsPlayerTurn(GET_PLAYER(e)), bCityState = GET_PLAYER(e).isMinorCiv();
 	if(!bTurnNow && bCityState) McpOwePlan(e);
-	const char* plan = bTurnNow ? "it is your turn: call wait_for_my_turn for the briefing and play it; "
-		: bCityState ? "you have no plan yet: send your next turn with plan_turn now, then call wait_for_my_turn; "
-		: "call wait_for_my_turn: it tells you when to plan your turn; ";
-	if(GET_PLAYER(e).isMinorCiv())
+	o["next"] = J(McpTakeSeatNext(bTurnNow, bCityState, bBack));
+	if(bCityState)
 	{
 		o["city_state"] = McpCsSeatView(e);
-		o["next"] = J(std::string(plan) + "a city-state's turn comes after every major civilization's");
 		return JVal(o);
 	}
 	o["your_civilization"] = CivilizationRules(GET_PLAYER(e).getCivilizationType(), GET_PLAYER(e).getLeaderType());
 	std::string page = McpWhoYouAre(&GET_PLAYER(e));
 	if(!page.empty()) o["who_you_are"] = J(page);
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
-	o["next"] = J(std::string(plan) + "your turn comes after the human's each round");
 	return JVal(o);
 }
 
