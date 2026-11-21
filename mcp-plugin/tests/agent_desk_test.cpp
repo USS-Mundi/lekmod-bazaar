@@ -78,6 +78,9 @@ static void TestTable()
 	Check(!McpDeskParseTable("opus high max", g, err) && Has(err, "max"), "two efforts in one group are refused, naming the word");
 	Check(!McpDeskParseTable("opus sonnet", g, err) && Has(err, "sonnet"), "two models in one group are refused");
 	Check(!McpDeskParseTable("opus;rm -rf", g, err), "a model name with anything but letters, digits, - . [ ] is refused");
+	Check(!McpDeskParseTable("2 hihg", g, err) && Has(err, "hihg"), "a mistyped word is refused, not taken for a model");
+	Check(McpDeskParseTable("opus[1m], Haiku, claude-sonnet-5-5", g, err) && g.size() == 3 && g[0].model == "opus[1m]" && g[1].model == "haiku",
+		"models are Claude's names (sonnet, opus, haiku, fable, with [1m]) or a full claude- id");
 	Check(!McpDeskParseTable("100k opus", g, err) && Has(err, "200k"), "a context below 200k is refused");
 	Check(!McpDeskParseTable("13 opus", g, err), "more than 12 agents at once is refused");
 }
@@ -90,6 +93,7 @@ static void TestNewAgents()
 	Check(Count(reply, "run\t") == 3, "three agents, three windows");
 	Check(Count(reply, "pause\t3\n") == 2, "a pause between windows, so seats are claimed one at a time");
 	Check(Count(reply, "ask\t") == 1 && reply.find("ask\t") < reply.find("run\t"), "the prompt is asked before any agent starts");
+	Check(Has(reply, "say\tIf a window asks whether you trust its folder, answer Yes"), "a new agent's first start asks about trusting its folder, and the player is told");
 	Check(Has(reply, "run\tOpponent 1\t" + k.hostFolder + "/agent-1/start.command\n"), "an opponent's window is titled without its civilization");
 	Check(Has(reply, "run\tTeammate 1\t" + k.hostFolder + "/agent-3/start.command\n"), "a teammate's too");
 	Check(Has(reply, "ask\t" + k.hostFolder + "/agent-3\tTeammate 1\n"), "ask names the folder the prompt goes in");
@@ -106,10 +110,14 @@ static void TestNewAgents()
 		"settings never ask: the game's tools allowed, lookup denied, anything else refused");
 	Check(Has(settings, "NOTES.md"), "an agent may keep its notes");
 	std::string mcp = Read(a1 + "/mcp.json");
-	Check(Has(mcp, "\"url\":\"http://127.0.0.1:7676/mcp\"") && Has(mcp, "\"X-Lekmod-Agent\":\"agent-1\""),
-		"the game's server, with a header that tells the plugin which agent this is");
+	Check(Has(mcp, "\"url\":\"http://127.0.0.1:7676/mcp\"") && Has(mcp, "\"X-Lekmod-Agent\":\"" + k.gameId + "/agent-1\""),
+		"the game's server, with a header that tells the plugin which game's agent this is");
 	Check(McpFileExists(a1 + "/NOTES.md"), "an empty NOTES.md waits for it");
 	Check(McpFileExists(a1 + "/start.command") && !McpFileExists(a1 + "/start.cmd"), "a Mac gets a .command");
+
+	McpDeskKit early = Kit();
+	early.referencePath = "";
+	Check(Has(McpDeskRun(early, "1 opus", &NewSession), "rules are not ready"), "a start before this game's rules are written says so");
 
 	k.freeOpponents = 2;
 	k.freeTeammates = 0;
@@ -127,12 +135,13 @@ static void TestResume()
 	McpDeskKit k = Kit();
 	McpDeskRun(k, "3 sonnet", &NewSession);
 	std::string before = Read(k.folder + "/agent-2/agent.txt");
-	k.running.push_back("agent-3");
+	k.running.push_back(k.gameId + "/agent-3");
+	k.running.push_back("civ5-game-other/agent-1"); // another game's agent-1 is not this game's
 	k.rulebook = "# Rulebook\n\nA newer rulebook.\n";
 	Check(Has(McpDeskQuestion(k), "[Enter: bring back your 2 agents]"), "Enter brings back the idle agents");
 	std::string reply = McpDeskRun(k, "", &NewSession);
 	Check(Count(reply, "run\t") == 2 && Has(reply, "agent-1/start.command") && Has(reply, "agent-2/start.command"),
-		"an empty table brings back the idle agents");
+		"an empty table brings back the idle agents, whatever another game's agents are called");
 	Check(!Has(reply, "agent-3/start.command") && Has(reply, "running"), "and leaves a running one alone, saying so");
 	Check(Read(k.folder + "/agent-2/agent.txt") == before, "a resumed agent keeps its model and session");
 	Check(Has(Read(k.folder + "/agent-2/system-prompt.md"), "A newer rulebook."), "and gets the rulebook as it is now");
@@ -150,7 +159,8 @@ static void TestStartScriptRuns()
 	McpMakeDirs(bin);
 	std::string log = g_root + "/claude-calls.txt";
 	McpWriteFile(bin + "/claude",
-		"#!/bin/sh\n{ printf 'ARGS'; for a in \"$@\"; do printf ' [%s]' \"$a\"; done; printf '\\n';"
+		"#!/bin/sh\ncase \"$*\" in *--resume*) [ -f session-made ] || { echo 'RESUME-FAILED' >> '" + log + "'; exit 1; } ;; *--session-id*) : > session-made ;; esac\n"
+		"{ printf 'ARGS'; for a in \"$@\"; do printf ' [%s]' \"$a\"; done; printf '\\n';"
 		" printf 'ENV %s %s %s %s\\n' \"$CLAUDE_CODE_AUTO_COMPACT_WINDOW\" \"$CLAUDE_CODE_EFFORT_LEVEL\" \"$CLAUDE_CODE_DISABLE_CLAUDE_MDS\" \"$MAX_MCP_OUTPUT_TOKENS\";"
 		" printf 'PWD %s\\n' \"$PWD\"; cat .system-prompt.full.md; } >> '" + log + "'\n", false);
 	std::string chmod = "chmod +x '" + bin + "/claude' && chmod +x \"" + dir + "/start.command\"";
@@ -158,7 +168,8 @@ static void TestStartScriptRuns()
 	std::string run = "PATH='" + bin + "':/usr/bin:/bin \"" + dir + "/start.command\" > /dev/null 2>&1";
 	Check(std::system(run.c_str()) == 0, "the start script runs");
 	std::string first = Read(log);
-	Check(Has(first, "[--model] [opus]") && Has(first, "[--session-id] [00000000-0000-4000-8000-"), "the first start names its session");
+	Check(Has(first, "RESUME-FAILED") && Has(first, "[--model] [opus]") && Has(first, "[--session-id] [00000000-0000-4000-8000-"),
+		"the first start finds no session to resume, and starts its own");
 	Check(Has(first, "[--setting-sources] [project,local]") && Has(first, "[--strict-mcp-config] [--mcp-config] [mcp.json]"),
 		"no user settings and only the game's server");
 	Check(Has(first, "[--append-system-prompt-file] [.system-prompt.full.md]"), "the system prompt goes in from the file");
@@ -166,13 +177,14 @@ static void TestStartScriptRuns()
 	Check(Has(first, "ENV 400000 high 1 100000"), "the compaction window, the effort, no CLAUDE.md, long tool results");
 	Check(Has(first, "PWD " + dir), "it runs in its own folder, whatever the path holds");
 	Check(Has(first, "Play to win.") && Has(first, "Be bold."), "the player's prompt joins the system prompt");
-	Check(!McpFileExists(dir + "/prompt.md"), "the prompt is for that start only");
+	Check(McpFileExists(dir + "/prompt.md"), "the prompt stays for later starts");
 	std::remove(log.c_str());
 	Check(std::system(run.c_str()) == 0, "it runs again");
 	std::string second = Read(log);
-	Check(Has(second, "[--resume] [00000000-0000-4000-8000-") && !Has(second, "--session-id"), "a restart resumes the same session");
+	Check(Has(second, "[--resume] [00000000-0000-4000-8000-") && !Has(second, "--session-id") && !Has(second, "RESUME-FAILED"),
+		"a restart resumes the same session");
 	Check(Has(second, "[/loop you were restarted: take your seat back, then play]"), "and is told it was restarted");
-	Check(!Has(second, "Be bold."), "without the earlier prompt");
+	Check(Has(second, "Be bold."), "with the player's prompt still in its system prompt");
 }
 
 static void TestWindows()
@@ -183,7 +195,7 @@ static void TestWindows()
 	std::string reply = McpDeskRun(k, "1 opus", &NewSession);
 	Check(Has(reply, "run\tOpponent 1\t" + k.hostFolder + "\\agent-1\\start.cmd\n"), "Windows paths in the reply");
 	std::string cmd = Read(k.folder + "/agent-1/start.cmd");
-	Check(Has(cmd, "cd /d \"%~dp0\"") && Has(cmd, "--session-id") && Has(cmd, "--resume") && Has(cmd, "\r\n"),
+	Check(Has(cmd, "cd /d \"%~dp0\"") && Has(cmd, "--session-id") && Has(cmd, "--resume") && Has(cmd, "if errorlevel 1") && Has(cmd, "\r\n"),
 		"a cmd script that runs from its own folder, with Windows line ends");
 	Check(Has(cmd, "set \"CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000\""), "and the same settings");
 	std::string script = McpDeskScript(k, "http://127.0.0.1:7676/agents");

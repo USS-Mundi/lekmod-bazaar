@@ -132,6 +132,8 @@ end
 
 local function Label(token)
 	if token == "human" then return "You"; end
+	-- a model playing your own civilization speaks in your chats as itself
+	if token == "human-ai" then return "Your AI"; end
 	local person = g_People[token];
 	return person and person.Leader or token;
 end
@@ -149,7 +151,7 @@ end
 -- scales), a city-state's emblem always. "human" is the active player.
 local function Portrait(token, image, size, iconBG, icon, iconShadow)
 	local person = g_People[token];
-	local id = (token == "human") and Game.GetActivePlayer() or (person and person.Player);
+	local id = (token == "human" or token == "human-ai") and Game.GetActivePlayer() or (person and person.Player);
 	if iconBG then iconBG:SetHide(true); end
 	image:SetHide(true);
 	if id == nil then return; end
@@ -662,7 +664,17 @@ local function Send()
 	end
 	local id, err = Game.MCSend(g_Sel.Members, text);
 	if id == nil then
+		-- the words stay in the box; why they were not sent shows under the chat until it next changes
 		print("MessageCenter: not sent: " .. tostring(err));
+		local note = Build("TurnInstance", Controls.ChatStack);
+		note.Root:SetSizeX(ChatWidth() - 16);
+		note.Text:SetText(DIM .. "Not sent: " .. tostring(err) .. END);
+		note.LeftLine:SetHide(true);
+		note.RightLine:SetHide(true);
+		Controls.ChatStack:CalculateSize();
+		Controls.ChatStack:ReprocessAnchoring();
+		Controls.ChatScroll:CalculateInternalSize();
+		Controls.ChatScroll:SetScrollValue(1);
 		return;
 	end
 	Controls.ChatEntry:ClearString();

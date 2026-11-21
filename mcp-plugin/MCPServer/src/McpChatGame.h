@@ -14,7 +14,8 @@
 // Game thread, every frame: opens this game's chats after a start or load, and refreshes the table the window uses.
 void McpChatTick();
 
-// Game thread. The member a civilization is in chat: "human" for the one on screen, else "p<slot>".
+// Game thread. Who a tool caller (or the window's LLMChat target) is in chat: "human-ai" for a model on the screen's
+// civilization, else "p<slot>".
 std::string McpChatToken(int player);
 
 // Game thread. A player speaks: delivered to the chat's members and waking them. The reply as say returns it, or the

@@ -5,7 +5,7 @@
 
 struct McpToolDef;
 
-// Categories the AI Log window filters on; mod/LLMLog.lua lists the same names.
+// Categories of the in-game log (the AI Log window that showed it is gone; Game.GetLLMLog still serves it).
 #define MCP_LOG_ALWAYS "always"
 #define MCP_LOG_REASONING "reasoning"
 #define MCP_LOG_TURN "turn"

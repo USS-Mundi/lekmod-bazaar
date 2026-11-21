@@ -45,7 +45,7 @@ It works in single player only.
 
    Groups are separated by commas. Each player opens in its own window, gets the game's rules and a guide to playing, takes its seat and plays its turns on its own. After a reload, run the same command and press Enter to bring them back to their seats.
 
-Each player keeps its own folder in `Documents\My Games\Sid Meier's Civilization 5\MCP\<game>\agents`. Its `start` script starts it again on its own.
+Each player keeps its own folder in `Documents\My Games\Sid Meier's Civilization 5\MCP\<game>\agents`. Its `start` script starts it again on its own. The first time a player starts, Claude Code asks whether you trust its folder: answer Yes. To be asked only once for every game, start `claude` once in the `MCP` folder and answer Yes there.
 
 ## The Message Center
 

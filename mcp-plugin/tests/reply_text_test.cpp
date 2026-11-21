@@ -27,7 +27,7 @@ int main()
 	// A plain-text reply stays as it is.
 	CHECK(McpReplyText(picojson::value(std::string("it is not your turn right now"))) == "it is not your turn right now");
 
-	// A message for the seat leads whatever the reply already asked for, and stands alone when it asked for nothing.
+	// A message for the seat follows whatever the reply already asked for, and stands alone when it asked for nothing.
 	picojson::object woke;
 	woke["turn"] = picojson::value(30.0);
 	McpAddMessageNotice(woke);
@@ -36,7 +36,7 @@ int main()
 	picojson::object round;
 	round[MCP_DO_NOW] = picojson::value(std::string("call turn_view, then send this turn's orders with plan_turn."));
 	McpAddMessageNotice(round);
-	CHECK(round[MCP_DO_NOW].to_str() == "a player wrote to you: the lines are in messages. Answer with say if you choose. Then call turn_view, then send this turn's orders with plan_turn.");
+	CHECK(round[MCP_DO_NOW].to_str() == "call turn_view, then send this turn's orders with plan_turn. A player wrote to you as well: the lines are in messages; answer with say if you choose.");
 
 	if(s_failures) { std::printf("%d failure(s)\n", s_failures); return 1; }
 	std::printf("reply text: all passed\n");

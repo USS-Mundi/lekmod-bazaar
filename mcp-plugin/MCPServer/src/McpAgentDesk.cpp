@@ -75,9 +75,16 @@ namespace
 		return atoi(n.c_str()) * (unit == 'k' ? 1000 : 1000000);
 	}
 
-	bool ModelName(const std::string& w)
+	// Claude's model names: an alias (sonnet, opus, haiku, fable, opusplan), with [1m] or not, or a full claude- id.
+	bool ModelName(const std::string& word)
 	{
+		std::string w = Lower(word);
 		if(w.empty() || w.size() > 64) return false;
+		const char* aliases[] = { "sonnet", "opus", "haiku", "fable", "opusplan" };
+		std::string base = w.size() > 4 && w.compare(w.size() - 4, 4, "[1m]") == 0 ? w.substr(0, w.size() - 4) : w;
+		bool known = w.compare(0, 7, "claude-") == 0;
+		for(size_t a = 0; !known && a < sizeof(aliases) / sizeof(aliases[0]); ++a) known = base == aliases[a];
+		if(!known) return false;
 		for(size_t i = 0; i < w.size(); ++i)
 		{
 			char c = w[i];
@@ -128,7 +135,7 @@ namespace
 
 	bool Running(const McpDeskKit& k, const std::string& name)
 	{
-		return std::find(k.running.begin(), k.running.end(), name) != k.running.end();
+		return std::find(k.running.begin(), k.running.end(), k.gameId + "/" + name) != k.running.end();
 	}
 
 	std::string RoleParagraph(const std::string& role, const std::string& name)
@@ -160,9 +167,12 @@ namespace
 			"}\n";
 	}
 
+	// The header names the game too: every game numbers its agents from agent-1.
+	std::string AgentHeader(const McpDeskKit& k, const std::string& name) { return k.gameId + "/" + name; }
+
 	std::string McpConfig(const McpDeskKit& k, const std::string& name)
 	{
-		return "{\"mcpServers\":{\"civ5\":{\"type\":\"http\",\"url\":\"" + k.mcpUrl + "\",\"headers\":{\"X-Lekmod-Agent\":\"" + name + "\"}}}}\n";
+		return "{\"mcpServers\":{\"civ5\":{\"type\":\"http\",\"url\":\"" + k.mcpUrl + "\",\"headers\":{\"X-Lekmod-Agent\":\"" + AgentHeader(k, name) + "\"}}}}\n";
 	}
 
 	struct Env
@@ -206,18 +216,15 @@ namespace
 			"if command -v lekmod-agents-hook >/dev/null 2>&1; then lekmod-agents-hook prepare \"$PWD\"; fi\n"
 			"cat system-prompt.md > .system-prompt.full.md\n"
 			"if [ -f prompt.md ]; then printf '\\n\\n# From the person who started you\\n\\n' >> .system-prompt.full.md; "
-			"cat prompt.md >> .system-prompt.full.md; rm -f prompt.md; fi\n"
+			"cat prompt.md >> .system-prompt.full.md; fi\n"
 			"if [ -f extra-prompt.md ]; then printf '\\n\\n' >> .system-prompt.full.md; cat extra-prompt.md >> .system-prompt.full.md; fi\n";
 		std::vector<Env> env = Environment(a.info);
 		s += "export";
 		for(size_t e = 0; e < env.size(); ++e) s += std::string(" ") + env[e].name + "=" + env[e].value;
+		// Its own session when there is one; the first start (or one that never got going) finds none and makes it.
 		s += "\nunset MAX_THINKING_TOKENS\n"
-			"if [ -f .started ]; then\n"
-			"  claude " + ClaudeArgs(a.info) + " --resume " + i["session"] + " '" + RESTART_PROMPT + "'\n"
-			"else\n"
-			"  : > .started\n"
+			"claude " + ClaudeArgs(a.info) + " --resume " + i["session"] + " '" + RESTART_PROMPT + "' ||\n"
 			"  claude " + ClaudeArgs(a.info) + " --session-id " + i["session"] + " '" + FIRST_PROMPT + "'\n"
-			"fi\n"
 			"if command -v lekmod-agents-hook >/dev/null 2>&1; then lekmod-agents-hook exited \"$PWD\"; fi\n";
 		return s;
 	}
@@ -237,7 +244,6 @@ namespace
 			"  >>.system-prompt.full.md echo # From the person who started you\n"
 			"  >>.system-prompt.full.md echo.\n"
 			"  type prompt.md >>.system-prompt.full.md\n"
-			"  del prompt.md\n"
 			")\n"
 			"if exist extra-prompt.md (\n"
 			"  >>.system-prompt.full.md echo.\n"
@@ -246,12 +252,8 @@ namespace
 		std::vector<Env> env = Environment(a.info);
 		for(size_t e = 0; e < env.size(); ++e) s += std::string("set \"") + env[e].name + "=" + env[e].value + "\"\n";
 		s += "set MAX_THINKING_TOKENS=\n"
-			"if exist .started (\n"
-			"  claude " + ClaudeArgs(a.info) + " --resume " + i["session"] + " \"" + RESTART_PROMPT + "\"\n"
-			") else (\n"
-			"  type nul > .started\n"
-			"  claude " + ClaudeArgs(a.info) + " --session-id " + i["session"] + " \"" + FIRST_PROMPT + "\"\n"
-			")\n"
+			"call claude " + ClaudeArgs(a.info) + " --resume " + i["session"] + " \"" + RESTART_PROMPT + "\"\n"
+			"if errorlevel 1 call claude " + ClaudeArgs(a.info) + " --session-id " + i["session"] + " \"" + FIRST_PROMPT + "\"\n"
 			"where lekmod-agents-hook >nul 2>nul && call lekmod-agents-hook exited \"%CD%\"\n";
 		std::string crlf;
 		for(size_t c = 0; c < s.size(); ++c) crlf += s[c] == '\n' ? std::string("\r\n") : std::string(1, s[c]);
@@ -355,11 +357,12 @@ bool McpDeskParseTable(const std::string& table, std::vector<McpDeskGroup>& out,
 			{
 				if(model) seen = "model";
 				model = true;
-				group.model = word;
+				group.model = lower.compare(0, 7, "claude-") == 0 ? word : lower;
 			}
 			else
 			{
-				err = "'" + word + "' is not a model name: use letters, digits and - . _ [ ] only.";
+				err = "'" + word + "' is not a count, a model (sonnet, opus, haiku, fable, or a full claude- name), an effort "
+					"(medium, high, xhigh, max), a seat (opponent, teammate, human), a context (300k to 1m) or prompt.";
 				return false;
 			}
 			if(!seen.empty())
@@ -396,6 +399,9 @@ std::string McpDeskRun(const McpDeskKit& k, const std::string& table, std::strin
 	std::vector<McpDeskGroup> groups;
 	std::string err;
 	if(!McpDeskParseTable(table, groups, err)) return Say(err);
+	if(k.referencePath.empty())
+		return Say("This game's rules are not ready yet: the plugin writes them a few seconds after the game loads. Run this "
+			"again in a moment. If it keeps saying so, Logs\\Bazaar.log says why.");
 	std::vector<Agent> agents = Agents(k);
 	std::string reply;
 	std::vector<Agent> start;
@@ -404,7 +410,9 @@ std::string McpDeskRun(const McpDeskKit& k, const std::string& table, std::strin
 	{
 		for(size_t i = 0; i < agents.size(); ++i)
 		{
-			if(Running(k, agents[i].name)) reply += Say(agents[i].info["title"] + " (" + agents[i].name + ") is running already.");
+			if(Running(k, agents[i].name))
+				reply += Say(agents[i].info["title"] + " (" + agents[i].name + ") seems to be running: it was at the game in the last "
+					"ten minutes. If its window is closed, run its start script.");
 			else start.push_back(agents[i]);
 		}
 		if(start.empty() && !agents.empty()) return reply;
@@ -444,6 +452,7 @@ std::string McpDeskRun(const McpDeskKit& k, const std::string& table, std::strin
 			}
 		}
 		reply += Say("Starting " + Plural((int)start.size(), "agent", "agents") + " for this game.");
+		reply += Say("If a window asks whether you trust its folder, answer Yes: it is the agent's own folder.");
 	}
 
 	std::string runs;

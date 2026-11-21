@@ -158,7 +158,7 @@ void McpChatTick()
 std::string McpChatToken(int player)
 {
 	if(player < 0) return "";
-	if((PlayerTypes)player == GC.getGame().getActivePlayer()) return "human";
+	if((PlayerTypes)player == GC.getGame().getActivePlayer()) return "human-ai"; // a tool caller on the screen's civilization is a model
 	return McpFormat("p%d", player);
 }
 

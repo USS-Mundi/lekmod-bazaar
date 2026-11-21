@@ -305,6 +305,31 @@ static void TestLinesAreOneLine()
 	Check(reopened.Lines("p2", s.id, 1, lines) && lines.empty(), "Lines starts where it is asked to");
 }
 
+// A model playing the human's own civilization (the launcher's "human" seat) reads the human's chats and speaks in them
+// as itself, so the human sees what it said and it sees what the human said.
+static void TestTheHumansOwnAgent()
+{
+	McpChatRoom room;
+	room.Open(NewFolder());
+	McpChatTable t = Table();
+	McpChatSent s = room.Send(t, "human-ai", "Greece", "Rome will hold the river.");
+	Check(s.ok && s.id == "human+p1", "it speaks in the human's chats");
+	Check(s.wake.size() == 1 && s.wake[0] == "p1", "and wakes the others, not itself");
+	McpChatInfo c = Find(room.ChatsOf(t, "human"), s.id);
+	Check(c.id == s.id && c.unread == 1 && c.last.from == "human-ai", "the human sees its line as unread, marked as the AI's");
+	int more = 0;
+	std::vector<McpChatDelivery> greece = room.Take(t, "p1", MCP_CHAT_MAX_DELIVERED, more);
+	Check(greece.size() == 1 && greece[0].from == "Rome (AI)" && greece[0].replyTo == "human", "the others see who spoke, and answer the human");
+	room.Send(t, "human", "Greece", "And I agree.");
+	room.Send(t, "p1", "human", "Good.");
+	std::vector<McpChatDelivery> mine = room.Take(t, "human-ai", MCP_CHAT_MAX_DELIVERED, more);
+	Check(mine.size() == 2 && mine[0].from == "the human" && mine[1].from == "Greece", "it is handed the human's lines and the others', never its own");
+	Check(mine.size() == 2 && mine[1].replyTo == "Greece", "and answers in the same chat");
+	Check(room.Take(t, "human-ai", MCP_CHAT_MAX_DELIVERED, more).empty(), "once");
+	std::vector<McpChatLine> lines;
+	Check(room.Lines("human-ai", s.id, 0, lines) && lines.size() == 3, "it may read the human's chats");
+}
+
 int main()
 {
 	char tmpl[] = "/tmp/chat_room_test.XXXXXX";
@@ -319,6 +344,7 @@ int main()
 	TestDeliveryOrderAcrossChats();
 	TestUnreadNamesAndStale();
 	TestLinesAreOneLine();
+	TestTheHumansOwnAgent();
 	std::string rm = "rm -rf '" + g_root + "'";
 	if(std::system(rm.c_str()) != 0) std::printf("could not remove %s\n", g_root.c_str());
 	if(g_failed) { std::printf("%d failed\n", g_failed); return 1; }

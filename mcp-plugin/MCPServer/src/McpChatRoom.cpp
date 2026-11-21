@@ -11,6 +11,7 @@
 namespace
 {
 	const char* HUMAN = "human";
+	const char* HUMAN_AI = "human-ai"; // a model playing the human's own civilization: a member as the human, speaking as itself
 	const char* ALL = "all";
 
 	std::vector<std::string> SplitLines(const std::string& s)
@@ -72,6 +73,12 @@ namespace
 	}
 
 	bool IsMember(const std::string& t) { return t == HUMAN || IsSlotToken(t); }
+
+	// Who may read and write: the members, and the model on the human's own civilization.
+	bool IsReader(const std::string& t) { return IsMember(t) || t == HUMAN_AI; }
+
+	// The member a reader or sender is in chats: the model on the human's civilization sits as the human.
+	std::string Seat(const std::string& who) { return who == HUMAN_AI ? std::string(HUMAN) : who; }
 
 	std::vector<std::string> Split(const std::string& s, char sep)
 	{
@@ -179,6 +186,7 @@ namespace
 	std::string Display(const McpChatTable& t, const std::string& token)
 	{
 		if(token == HUMAN) return "the human";
+		if(token == HUMAN_AI) return t.humanName.empty() ? std::string("the human's AI") : t.humanName + " (AI)";
 		const McpChatSeat* s = SeatOf(t, token);
 		return s ? s->name : token;
 	}
@@ -186,7 +194,7 @@ namespace
 	// What `to` says to reach a member.
 	std::string Address(const McpChatTable& t, const std::string& token)
 	{
-		if(token == HUMAN) return HUMAN;
+		if(token == HUMAN || token == HUMAN_AI) return HUMAN;
 		const McpChatSeat* s = SeatOf(t, token);
 		return s ? s->name : token;
 	}
@@ -200,7 +208,7 @@ namespace
 			const McpChatSeat& s = t.seats[i];
 			if(s.alive && s.readable && TokenOf(s) != from && (!s.cityState || t.cityStateSeatsOn)) names.push_back(s.name);
 		}
-		if(from != HUMAN) names.push_back(HUMAN);
+		if(Seat(from) != HUMAN) names.push_back(HUMAN);
 		names.push_back(ALL);
 		return Join(names, ", ");
 	}
@@ -282,7 +290,7 @@ void McpChatRoom::Open(const std::string& folder)
 			for(size_t i = 0; i < lines.size(); ++i)
 			{
 				std::vector<std::string> w = Split(lines[i], ' ');
-				if(w.size() != 3 || !IsMember(w[1])) continue;
+				if(w.size() != 3 || !IsReader(w[1])) continue;
 				int n = ToInt(w[2], -1);
 				if(n < 0) continue;
 				if(w[0] == "seen") c.seen[w[1]] = n;
@@ -316,10 +324,12 @@ McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from
 	std::string words = OneLine(text);
 	if(words.empty()) { r.reason = "There is nothing to say: words is empty."; return r; }
 	if(words.size() > MCP_CHAT_MAX_TEXT) { r.reason = "Say it in shorter lines: 2000 characters at most."; return r; }
-	bool fromCityState = IsCityState(table, from);
+	std::string me = Seat(from);
+	if(!IsMember(me)) { r.reason = "Only a player at the table can speak."; return r; }
+	bool fromCityState = IsCityState(table, me);
 
 	std::vector<std::string> parts = Split(to, ',');
-	std::vector<std::string> members(1, from);
+	std::vector<std::string> members(1, me);
 	bool all = false;
 	size_t named = 0;
 	for(size_t i = 0; i < parts.size(); ++i)
@@ -409,12 +419,12 @@ McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from
 	c.members = MembersOf(id);
 	if(isNew && c.startedBy.empty())
 	{
-		c.startedBy = from;
+		c.startedBy = me;
 		c.startedTurn = table.turn;
-		if(!m_folder.empty()) McpWriteFile(m_folder + McpPathSep() + id + ".started", from + " " + Str(table.turn) + "\n", false);
+		if(!m_folder.empty()) McpWriteFile(m_folder + McpPathSep() + id + ".started", me + " " + Str(table.turn) + "\n", false);
 	}
 	c.lines.push_back(line);
-	if(!name.empty()) Name(from, id, name);
+	if(!name.empty()) Name(me, id, name);
 
 	r.ok = true;
 	r.id = id;
@@ -422,31 +432,33 @@ McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from
 	r.replyTo = ReplyTo(table, id, c, from);
 	if(id == ALL)
 	{
-		if(from != HUMAN) r.wake.push_back(HUMAN);
+		if(me != HUMAN) r.wake.push_back(HUMAN);
 		for(size_t i = 0; i < table.seats.size(); ++i)
 		{
 			const McpChatSeat& s = table.seats[i];
-			if(s.alive && s.readable && !s.cityState && TokenOf(s) != from) r.wake.push_back(TokenOf(s));
+			if(s.alive && s.readable && !s.cityState && TokenOf(s) != me) r.wake.push_back(TokenOf(s));
 		}
 	}
 	else
 	{
-		for(size_t i = 0; i < c.members.size(); ++i) if(c.members[i] != from) r.wake.push_back(c.members[i]);
+		for(size_t i = 0; i < c.members.size(); ++i) if(c.members[i] != me) r.wake.push_back(c.members[i]);
 	}
 	return r;
 }
 
-bool McpChatRoom::MayRead(const std::string& reader, const std::string& id, const McpChatTable* table) const
+bool McpChatRoom::MayRead(const std::string& who, const std::string& id, const McpChatTable* table) const
 {
+	std::string reader = Seat(who);
 	if(!IsMember(reader)) return false;
 	if(id == ALL) return reader == HUMAN || !table || !IsCityState(*table, reader);
 	std::vector<std::string> m = MembersOf(id);
 	return std::find(m.begin(), m.end(), reader) != m.end();
 }
 
-std::string McpChatRoom::Label(const McpChatTable& table, const std::string& id, const Chat& chat, const std::string& reader) const
+std::string McpChatRoom::Label(const McpChatTable& table, const std::string& id, const Chat& chat, const std::string& who) const
 {
 	if(id == ALL) return "the whole table";
+	std::string reader = Seat(who);
 	std::vector<std::string> others;
 	for(size_t i = 0; i < chat.members.size(); ++i) if(chat.members[i] != reader) others.push_back(Display(table, chat.members[i]));
 	if(!chat.name.empty()) return chat.name + " (you, " + Join(others, ", ") + ")";
@@ -454,9 +466,10 @@ std::string McpChatRoom::Label(const McpChatTable& table, const std::string& id,
 	return "you, " + Join(others, ", ");
 }
 
-std::string McpChatRoom::ReplyTo(const McpChatTable& table, const std::string& id, const Chat& chat, const std::string& reader) const
+std::string McpChatRoom::ReplyTo(const McpChatTable& table, const std::string& id, const Chat& chat, const std::string& who) const
 {
 	if(id == ALL) return ALL;
+	std::string reader = Seat(who);
 	std::vector<std::string> others;
 	for(size_t i = 0; i < chat.members.size(); ++i) if(chat.members[i] != reader) others.push_back(Address(table, chat.members[i]));
 	return Join(others, ", ");
@@ -506,7 +519,9 @@ bool McpChatRoom::Name(const std::string& viewer, const std::string& id, const s
 	Chat& c = m_chats[id];
 	c.members = members;
 	if(!c.name.empty()) return false;
-	c.name = n.substr(0, 60);
+	size_t cut = n.size() <= 60 ? n.size() : 60;
+	while(cut > 0 && cut < n.size() && ((unsigned char)n[cut] & 0xC0) == 0x80) --cut; // not inside a UTF-8 character
+	c.name = n.substr(0, cut);
 	if(!m_folder.empty())
 	{
 		McpMakeDirs(m_folder);

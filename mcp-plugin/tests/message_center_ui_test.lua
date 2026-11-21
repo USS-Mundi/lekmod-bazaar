@@ -248,6 +248,14 @@ handlers.update(1)
 local heads = {}
 for _, ch in ipairs(Controls.HeadPortraits._children) do if ch.name == "HeadInstance" then table.insert(heads, ch.inst) end end
 check(#heads == 3, "the header shows you and both members")
+table.insert(LINES["human+p1+p2"], { Time = "3", Turn = 74, From = "human-ai", Text = "Rome holds the river." })
+click(ef.Root)
+handlers.update(1)
+local aiLine = find(Controls.ChatStack, "TheirsInstance", function(m) return m.Who:GetText():find("Your AI") end)
+check(aiLine ~= nil, "a line from the model on your own civilization shows as Your AI, among the others' lines")
+table.remove(LINES["human+p1+p2"])
+click(ef.Root)
+handlers.update(1)
 local function headText(i) return heads[i] and heads[i].Name:GetText() or "" end
 check(headText(1):find("You") and headText(2):find("Ashoka") and headText(3):find("Ataturk"), "each with its name, you first")
 check(heads[3] and not headText(3):find("Claude"), "a leader goes by the leader's name, not the seat")

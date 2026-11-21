@@ -66,11 +66,12 @@ namespace
 
 	bool Major(const CvPlayer* me) { return (int)me->GetID() < MAX_MAJOR_CIVS; }
 
-	// Waiting, planning and the seat's own housekeeping are not orders.
+	// Waiting, planning, the seat's own housekeeping and status (it hands over chat lines, which a plan's results cut) are
+	// not orders.
 	bool Plannable(const std::string& tool)
 	{
 		const char* const never[] = { "wait_for_my_turn", MCP_TOOL_PLAN_TURN, MCP_TOOL_RUN_PLAN, "advance_round", "skip_human_turn",
-			"take_seat", "release_seat", "set_identity", "testing_mode" };
+			"take_seat", "release_seat", "set_identity", "testing_mode", "status" };
 		for(size_t i = 0; i < sizeof(never) / sizeof(never[0]); ++i) if(tool == never[i]) return false;
 		return true;
 	}
@@ -787,7 +788,7 @@ MCP_TOOL(ToolPlanTurn)
 	if(bReplaced) o["replaced"] = J("your earlier plan");
 	if(bPlanChanged) o["game_plan"] = J("saved: each turn view shows each part beside the state it is about");
 	if(chronicle.chapterClosed) o["chapter"] = J("closed and kept; a new chapter opens this turn, and its direction is your plan's direction now");
-	if(!chronicle.say.empty()) o["said"] = J(McpFormat("%d of the chapter's lines sent", (int)chronicle.say.size()));
+	if(!chronicle.say.empty()) o["said"] = J(McpFormat("%d of the chapter's lines go out when it is kept; a refused line goes to your log file", (int)chronicle.say.size()));
 	if(!warnings.empty()) o["warnings"] = JVal(Lines(warnings));
 	std::vector<std::string> damaged = McpDamagedInLand(me);
 	if(!damaged.empty()) o["damaged_in_your_land"] = JVal(Lines(damaged));

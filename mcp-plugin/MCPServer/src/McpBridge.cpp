@@ -157,7 +157,7 @@ struct McpBridge::Impl
 	int pendingDropped;
 	std::vector<McpPopup> popups;
 	int popupSeq;
-	std::string dialogsToClose; // newline-joined; LLMLog.lua looks each name up under /InGame/
+	std::string dialogsToClose; // newline-joined; MCPServerUI.lua looks each name up under /InGame/
 	unsigned int gameSeed;
 	volatile bool gameLoaded;
 	std::map<int, std::vector<std::string> > chat;         // per seat: the human's messages no status has delivered yet
@@ -1218,7 +1218,9 @@ void McpBridge::Impl::HandleAgents(const McpHttpRequest& req, McpHttpResponse& r
 	McpDeskKit k = kit;
 	DWORD now = GetTickCount();
 	for(std::map<std::string, Session>::const_iterator it = sessions.begin(); it != sessions.end(); ++it)
-		if(!it->second.agent.empty() && !it->second.Idle(now)) k.running.push_back(it->second.agent);
+		// Any session the server still keeps (seen in the last ten minutes): a live agent can be quiet for minutes while it
+		// compacts or thinks, and two copies of one agent would share its session and seat.
+		if(!it->second.agent.empty() && now - it->second.lastSeenMs < MCP_SESSION_EXPIRE_MS) k.running.push_back(it->second.agent);
 	LeaveCriticalSection(&lock);
 	std::string url = McpFormat("http://127.0.0.1:%d/agents", MCP_PORT);
 	if(req.method == "GET")
@@ -1769,8 +1771,10 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		}
 		else o[MCP_DO_NOW] = picojson::value("call turn_view. Your turn is open and your plan is waiting on you: " + why + ".");
 	}
-	// Last, so it leads whatever the reply asks for: a message is told once, whether it woke the wait or not.
-	if(pTool->waitsForTurn && result.is<picojson::object>() && TakeMessageNotice(token)) McpAddMessageNotice(result.get<picojson::object>());
+	// A message is told once, whether it woke the wait or not, and only with its lines: an earlier status may have handed
+	// them over already.
+	if(pTool->waitsForTurn && result.is<picojson::object>() && TakeMessageNotice(token) && result.get<picojson::object>().count("messages"))
+		McpAddMessageNotice(result.get<picojson::object>());
 	return result;
 }
 
@@ -1909,7 +1913,9 @@ picojson::value McpBridge::Impl::RunPlan(const std::string& token, const picojso
 				continue;
 			}
 			results.push_back(Outcome(tool, r, bErr));
-			if(bErr) bFailed = true;
+			// A line the Message Center refused (no model reads that civilization, say) is reported, not a failed order:
+			// the turn still ends by itself.
+			if(bErr && tool != "say" && tool != "chat") bFailed = true;
 			else if(tool == MCP_TOOL_END_TURN)
 			{
 				bEnded = true;

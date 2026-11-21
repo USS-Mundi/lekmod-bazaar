@@ -1426,7 +1426,7 @@ MCP_TOOL(ToolChat)
 	if(text.empty()) { err = "text is required"; return JVal(); }
 	if(me->isMinorCiv())
 	{
-		// A city-state talks to its ally only: the human on screen reads it in the log window, a seat in its status.
+		// A city-state talks to its ally only: the human on screen reads it in the Message Center, a seat in its status.
 		PlayerTypes eAlly = McpCsPatron(me->GetID());
 		if(eAlly == NO_PLAYER) { err = "you have no ally to talk to now"; return JVal(); }
 		std::string line = McpFormat("turn %d, %s: ", GC.getGame().getGameTurn(), CivName(me->GetID()).c_str()) + text;
@@ -1484,7 +1484,7 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view, unless the reply already carries it: it does when your plan is waiting on you. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
+		  "Blocks until it is your turn, a new request from another leader arrives, or a player writes to you (25 seconds by default; timeout_seconds sets another limit, up to 3600), then returns status. Call it again if is_my_turn is still false. When your turn has started, call turn_view, unless the reply already carries it: it does when your plan is waiting on you. For a civilization it also returns when the round opens, so the turn can be planned before it comes; when the turn then opens inside the wait, the plan runs and ends the turn by itself and the wait goes on to the next round, unless something that matters changed: then it returns with the turn yours.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolWaitForMyTurn, LOG_NONE, true },
 		{ "turn_view",
 		  "Your turn as it stands: the question to start from, your plan, what changed since your last turn (marked + new, ~ changed with the old value, - gone), what stops the turn from ending, what other players are waiting on, what is available, and everything you can see, with one picture of the map. It is a starting point, not everything; the other tools show more of anything. The same view on any later call that turn. Call it when your turn starts, before run_plan; opening it on your turn reads the game messages it shows, so they need no acknowledge_messages. A civilization also opens it once its round has opened, before its turn, to plan the turn from.",
@@ -1595,7 +1595,7 @@ namespace
 		  "Declare war on a civilization or city-state (by name from civs). Irreversible for many turns; be sure.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}},\"required\":[\"civ\"]}", ToolDeclareWar, LOG_DIPLOMACY, false },
 		{ MCP_TOOL_END_TURN,
-		  "End your turn, after reading the briefing and giving orders. summary is a sentence or two on what you did this turn, for the human reading the log. Refused while a decision is pending (research, production, policy...). If units still await orders it is refused too, unless force=true, which makes them skip this turn.",
+		  "End your turn, after reading the briefing and giving orders. summary is a sentence or two on what you did this turn. Refused while a decision is pending (research, production, policy...). If units still await orders it is refused too, unless force=true, which makes them skip this turn.",
 		  "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"}},\"required\":[\"summary\"]}", ToolEndTurn, LOG_TURN, false },
 		{ "acknowledge_messages",
 		  "Confirm you have read game messages (briefing.game_messages entries with unread=true). Actions are refused while any are unread. ids lists specific message ids; omit it to acknowledge all. Informational dialogs close in the game once acknowledged.",

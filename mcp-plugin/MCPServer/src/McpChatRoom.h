@@ -1,9 +1,11 @@
 // The Message Center's chats: who may write to whom, who reads what, and the files under MCP\<game>\chat\.
-// No game headers, so it is tested natively (tests/run_chat_room_test.sh). Game thread only: the tools, the window's
-// Lua calls and the tick all run there, so it has no lock. Names and paths are UTF-8.
+// No game headers, so it is tested natively (tests/run_chat_room_test.sh). It has no lock of its own: McpChatGame locks
+// around every call, since the window calls in from the UI thread. Names and paths are UTF-8.
 //
 // A member is "human" (the civilization on screen) or "p<slot>" (another player). A chat is its member set: its id is
 // the tokens sorted and joined by "+", so the same members always share one chat. "all" is the whole table.
+// "human-ai", a model playing the human's own civilization, reads and writes as the human's member but speaks as
+// itself: its lines show as its own, and it is handed the human's.
 #pragma once
 
 #include <map>
