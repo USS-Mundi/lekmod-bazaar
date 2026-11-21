@@ -28,6 +28,8 @@
 #include "CvTreasury.h"
 #include "CvInfos.h"
 #include "CvPreGame.h"
+#include "McpChatGame.h"
+#include "McpCityStateFiles.h"
 
 using namespace McpTool;
 
@@ -205,12 +207,13 @@ MCP_TOOL(ToolStatus)
 	o["ai_processing"] = J(AiProcessing());
 	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["units_needing_orders"] = J(me->GetCountReadyUnits());
-	std::vector<std::string> chat = McpBridge::Get().TakeChat((int)me->GetID());
-	if(!chat.empty())
+	McpChatAddMessages((int)me->GetID(), o);
+	std::vector<std::string> fromAlly = me->isMinorCiv() ? McpBridge::Get().TakeChat((int)me->GetID()) : std::vector<std::string>();
+	if(!fromAlly.empty())
 	{
 		JArr messages;
-		for(size_t i = 0; i < chat.size(); ++i) messages.push_back(J(chat[i]));
-		o[me->isMinorCiv() ? "messages_from_your_ally" : "messages_from_your_teammate"] = JVal(messages);
+		for(size_t i = 0; i < fromAlly.size(); ++i) messages.push_back(J(fromAlly[i]));
+		o["messages_from_your_ally"] = JVal(messages);
 	}
 	std::vector<std::string> fromCityStates = McpBridge::Get().TakeCityStateMessages((int)me->GetID());
 	if(!fromCityStates.empty())
@@ -1353,11 +1356,7 @@ MCP_TOOL(ToolSay)
 	if(!me) return JVal();
 	std::string to = ArgStr(args, "to"), words = ArgStr(args, "words");
 	if(to.empty() || words.empty()) { err = "to and words are required: to is a civilization, several joined by commas, human, or all"; return JVal(); }
-	McpSayQueue(me, to, words);
-	JObj o;
-	o["ok"] = J(true);
-	o["said_to"] = J(to);
-	return JVal(o);
+	return McpChatSay((int)me->GetID(), to, words, ArgStr(args, "name"), err);
 }
 
 MCP_TOOL(ToolChronicle)
@@ -1411,7 +1410,8 @@ MCP_TOOL(ToolLog)
 	if(!me) return JVal();
 	std::string text = ArgStr(args, "text");
 	if(text.empty()) { err = "text is required"; return JVal(); }
-	McpBridge::Get().LogLine(MCP_LOG_REASONING, text);
+	McpGameFileAppend(McpGameId(), "log", std::string(me->getCivilizationShortDescription()) + ".log", "",
+		McpFormat("turn %d: ", GC.getGame().getGameTurn()) + text + "\n");
 	JObj o;
 	o["ok"] = J(true);
 	return JVal(o);
@@ -1438,11 +1438,8 @@ MCP_TOOL(ToolChat)
 		o["to"] = J(CivName(eAlly));
 		return JVal(o);
 	}
-	if(McpSeatOnScreen() || !McpOnScreenTeam(me->GetID())) { err = "chat is for a seat with a human teammate; you have none"; return JVal(); }
-	McpBridge::Get().ReplyChat(text);
-	JObj o;
-	o["ok"] = J(true);
-	return JVal(o);
+	if(McpSeatOnScreen()) { err = "you play the human's own civilization: speak to the others with say"; return JVal(); }
+	return McpChatSay((int)me->GetID(), "human", text, "", err);
 }
 
 MCP_TOOL(ToolMapImage)
@@ -1687,14 +1684,14 @@ namespace
 		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (right after a capture, give the city back to the civilization that founded it, if you took it from someone else).",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"task\":{\"type\":\"string\"}},\"required\":[\"city_id\",\"task\"]}", ToolCityTask, LOG_CITY, false },
 		{ "set_identity",
-		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
+		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5).",
 		  "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"provider\",\"model\",\"version\"]}", ToolSetIdentity, LOG_TURN, false },
 		{ "take_seat",
 		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back your own seat from status.seats_waiting_for_a_player; an opponent seat another model left waits for that model only. civ=human plays the civilization on screen instead. A city-state can be taken by name while its ally has switched it on (status.seats_waiting_for_a_player lists them); you then play it for that ally.",
 		  "{\"type\":\"object\",\"properties\":{\"civ\":{\"type\":\"string\"}},\"required\":[\"civ\"]}", ToolTakeSeat, LOG_TURN, false },
 		{ "say",
-		  "Record something said to other players: to is a civilization's name, several joined by commas for a group, human, or all for the whole table. In this release the line is only written to the game's files (My Games\\Sid Meier's Civilization 5\\MCP\\<game>\\say), and nothing delivers it to anyone: to reach the human use log, or chat on the human's team; to reach another civilization use the game's diplomacy.",
-		  "{\"type\":\"object\",\"properties\":{\"to\":{\"type\":\"string\"},\"words\":{\"type\":\"string\"}},\"required\":[\"to\",\"words\"]}", ToolSay, LOG_TURN, false },
+		  "Speak to other players in the game's Message Center: to is a civilization (or its leader), several joined by commas for a group chat, human, or all for the whole table. The same members always share one chat; name gives a new group a name. Every member reads it in messages on their next status or wait, and a waiting player is woken. Only civilizations a model plays read chat: speak to the game's own AI through diplomacy.",
+		  "{\"type\":\"object\",\"properties\":{\"to\":{\"type\":\"string\"},\"words\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}},\"required\":[\"to\",\"words\"]}", ToolSay, LOG_TURN, false },
 		{ "chronicle",
 		  "Your chronicle in full: what was done by and to each player you know (the ledger), your entries on them, every thread with its vow and how it ended, and every chapter you closed. The turn view shows only what is open.",
 		  SCHEMA_EMPTY, ToolChronicle, LOG_NONE, false },
@@ -1708,10 +1705,10 @@ namespace
 		  "TESTING ONLY. enabled=true unlocks skip_human_turn and advance_round and closes the idle human's own popups and leader screens unread, so an unattended test game does not stall. Off by default, and off again whenever a game is started or loaded. Never enable it in a real shared game.",
 		  "{\"type\":\"object\",\"properties\":{\"enabled\":{\"type\":\"boolean\"}}}", ToolTestingMode, LOG_TURN, false },
 		{ "log",
-		  "Write a line to the in-game log the human can read. Use it for your reasoning and plans each turn: what you see, what you decided and why.",
+		  "Write a line to your debug file (My Games\\Sid Meier's Civilization 5\\MCP\\<game>\\log\\<civilization>.log). Nobody in the game reads it; to speak to a player use say.",
 		  "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}", ToolLog, LOG_NONE, false },
 		{ "chat",
-		  "Send a message to your human teammate. It appears in their in-game log window, where they also write to you. Only a seat on the human's team can use it.",
+		  "Send a message to the human, as say with to=human. A city-state played by a model talks to its ally with it.",
 		  "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}", ToolChat, LOG_NONE, false },
 		{ "economic_overview",
 		  "The Economic Overview screen: where gold comes from and where it goes each turn (cities, trade routes, diplomacy; unit upkeep and supply, building and improvement upkeep), and your strategic and luxury resources with totals, amounts in use and amounts available.",

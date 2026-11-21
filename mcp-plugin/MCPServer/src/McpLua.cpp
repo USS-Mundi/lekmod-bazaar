@@ -11,6 +11,8 @@
 #include "McpCityStates.h"
 #include "McpCityStateRules.h"
 #include "CvGlobals.h"
+#include "McpChatGame.h"
+#include "McpCityStateFiles.h"
 
 namespace
 {
@@ -152,7 +154,7 @@ namespace
 	{
 		PlayerTypes eHuman = GC.getGame().getActivePlayer();
 		lua_createtable(L, 0, 0);
-		if(eHuman == NO_PLAYER) return 1;
+		if(eHuman == NO_PLAYER || !McpCityStatesOnAtStart()) return 1;
 		CvTeam& team = GET_TEAM(GET_PLAYER(eHuman).getTeam());
 		int n = 0;
 		for(int m = MAX_MAJOR_CIVS; m < MAX_CIV_PLAYERS; ++m)
@@ -229,6 +231,148 @@ namespace
 	{
 		host->PushLuaFunction(host->pluginIndex, L, fn);
 		lua_setfield(L, -2, name);
+	}
+
+	// The Message Center window (MessageCenter.lua). Every call is the human's; McpChatGame keeps the rules.
+	void SetString(lua_State* L, const char* key, const std::string& v)
+	{
+		lua_pushlstring(L, v.data(), v.size());
+		lua_setfield(L, -2, key);
+	}
+
+	void SetInt(lua_State* L, const char* key, int v)
+	{
+		lua_pushinteger(L, v);
+		lua_setfield(L, -2, key);
+	}
+
+	void PushLine(lua_State* L, const McpChatLine& l)
+	{
+		lua_createtable(L, 0, 4);
+		SetString(L, "Time", l.time);
+		SetInt(L, "Turn", l.turn);
+		SetString(L, "From", l.from);
+		SetString(L, "Text", l.text);
+	}
+
+	std::vector<std::string> Strings(lua_State* L, int index)
+	{
+		std::vector<std::string> out;
+		if(!lua_istable(L, index)) return out;
+		for(int i = 1; ; ++i)
+		{
+			lua_rawgeti(L, index, i);
+			if(lua_isnil(L, -1)) { lua_pop(L, 1); break; }
+			const char* s = lua_tostring(L, -1);
+			if(s) out.push_back(s);
+			lua_pop(L, 1);
+		}
+		return out;
+	}
+
+	//table MCChats(); the chats the human is in, and the whole table: { Id, Members = {tokens}, Name, StartedBy,
+	// StartedTurn, Lines, Unread, LastTurn, Stale, Last = { Time, Turn, From, Text } }.
+	int lMCChats(lua_State* L)
+	{
+		std::vector<McpChatInfo> chats = McpChatHumanChats();
+		lua_createtable(L, (int)chats.size(), 0);
+		for(size_t i = 0; i < chats.size(); ++i)
+		{
+			const McpChatInfo& c = chats[i];
+			lua_createtable(L, 0, 10);
+			SetString(L, "Id", c.id);
+			lua_createtable(L, (int)c.members.size(), 0);
+			for(size_t k = 0; k < c.members.size(); ++k)
+			{
+				lua_pushlstring(L, c.members[k].data(), c.members[k].size());
+				lua_rawseti(L, -2, (int)k + 1);
+			}
+			lua_setfield(L, -2, "Members");
+			SetString(L, "Name", c.name);
+			SetString(L, "StartedBy", c.startedBy);
+			SetInt(L, "StartedTurn", c.startedTurn);
+			SetInt(L, "Lines", c.lines);
+			SetInt(L, "Unread", c.unread);
+			SetInt(L, "LastTurn", c.lastTurn);
+			lua_pushboolean(L, c.stale);
+			lua_setfield(L, -2, "Stale");
+			PushLine(L, c.last);
+			lua_setfield(L, -2, "Last");
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
+	//table MCLines(string id, int from); lines from.. of a chat the human is in, { Time, Turn, From, Text }; nil for
+	// any other chat.
+	int lMCLines(lua_State* L)
+	{
+		const char* id = lua_tostring(L, 1);
+		std::vector<McpChatLine> lines;
+		if(!id || !McpChatHumanLines(id, (int)lua_tointeger(L, 2), lines)) { lua_pushnil(L); return 1; }
+		lua_createtable(L, (int)lines.size(), 0);
+		for(size_t i = 0; i < lines.size(); ++i)
+		{
+			PushLine(L, lines[i]);
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
+	//string MCSend(table members, string text); the human's line to the chat of these members (tokens, or { "all" }),
+	// made on its first line. Returns its id, or nil and why not.
+	int lMCSend(lua_State* L)
+	{
+		const char* text = lua_tostring(L, 2);
+		std::string id, err;
+		if(!McpChatHumanSend(Strings(L, 1), text ? text : "", id, err))
+		{
+			lua_pushnil(L);
+			lua_pushlstring(L, err.data(), err.size());
+			return 2;
+		}
+		lua_pushlstring(L, id.data(), id.size());
+		return 1;
+	}
+
+	//bool MCName(string id, string name); names a group that has no name yet.
+	int lMCName(lua_State* L)
+	{
+		const char* id = lua_tostring(L, 1);
+		const char* name = lua_tostring(L, 2);
+		lua_pushboolean(L, id && name && McpChatHumanName(id, name));
+		return 1;
+	}
+
+	//bool MCSeen(string id); marks the chat's lines seen.
+	int lMCSeen(lua_State* L)
+	{
+		const char* id = lua_tostring(L, 1);
+		lua_pushboolean(L, id && McpChatHumanSeen(id));
+		return 1;
+	}
+
+	//table MCSeats(); every civilization and city-state a model plays or will take back: { Token, Civ }.
+	int lMCSeats(lua_State* L)
+	{
+		std::vector<std::pair<std::string, std::string> > seats = McpChatSeats();
+		lua_createtable(L, (int)seats.size(), 0);
+		for(size_t i = 0; i < seats.size(); ++i)
+		{
+			lua_createtable(L, 0, 2);
+			SetString(L, "Token", seats[i].first);
+			SetString(L, "Civ", seats[i].second);
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
+	//string MCChatId(table members); the id of the chat of the human and these members.
+	int lMCChatId(lua_State* L)
+	{
+		std::string id = McpChatRoom::IdOf("human", Strings(L, 1));
+		lua_pushlstring(L, id.data(), id.size());
+		return 1;
 	}
 }
 
@@ -310,4 +454,11 @@ void McpAddGameMethods(const CivHostInfo* host, lua_State* L)
 	AddMethod(host, L, "LLMChat", &lLLMChat);
 	AddMethod(host, L, "LLMChatUnread", &lLLMChatUnread);
 	AddMethod(host, L, "LLMChatSeen", &lLLMChatSeen);
+	AddMethod(host, L, "MCChats", &lMCChats);
+	AddMethod(host, L, "MCLines", &lMCLines);
+	AddMethod(host, L, "MCSend", &lMCSend);
+	AddMethod(host, L, "MCName", &lMCName);
+	AddMethod(host, L, "MCSeen", &lMCSeen);
+	AddMethod(host, L, "MCSeats", &lMCSeats);
+	AddMethod(host, L, "MCChatId", &lMCChatId);
 }

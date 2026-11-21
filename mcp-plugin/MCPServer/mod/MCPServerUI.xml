@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No controls: MCPServerUI.lua only relays popups, leader screens, the mod list, the seats' turn banner and tile coordinates. -->
+<Context ID="MCPServerUI" />

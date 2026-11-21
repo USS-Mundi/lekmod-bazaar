@@ -145,24 +145,31 @@ def main():
         mcp_name = "MCP Server for LEKMOD"
         mcp_folder = os.path.join(STAGE, "MODS", "%s (v %d)" % (mcp_name, MCP_VERSION))
         mod = os.path.join(MCP_REPO, "MCPServer", "mod")
+        # The UI: the Message Center window (its textures go into the game's file system) and MCPServerUI, which has no
+        # window of its own.
+        ui = [(os.path.join(mod, f), f, 1 if f.endswith(".dds") else 0)
+              for f in sorted(os.listdir(mod)) if f.endswith((".lua", ".xml", ".dds"))]
         mcp_files = stage_mod(
             mcp_folder,
-            [(plugin_dll, "MCPServer.dll", 0), (os.path.join(mod, "MCPServer.sql"), "MCPServer.sql", 0),
-             (os.path.join(mod, "LLMLog.lua"), "LLMLog.lua", 0), (os.path.join(mod, "LLMLog.xml"), "LLMLog.xml", 0),
-             (os.path.join(MCP_REPO, "LICENSE"), "LICENSE.txt", 0), (os.path.join(MCP_REPO, "NOTICE"), "NOTICE.txt", 0)],
+            [(plugin_dll, "MCPServer.dll", 0), (os.path.join(mod, "MCPServer.sql"), "MCPServer.sql", 0)] + ui
+            + [(os.path.join(MCP_REPO, "LICENSE"), "LICENSE.txt", 0), (os.path.join(MCP_REPO, "NOTICE"), "NOTICE.txt", 0)],
             MCP_ID, MCP_VERSION,
             name=mcp_name,
             teaser="Runs a local MCP server so an AI model can play Civilization V.",
             description="Runs an MCP server on this PC at http://127.0.0.1:7676/mcp. An AI model connected through an MCP "
-                        "client on the same PC can play your civilization, a teammate or an opponent. Adds an AI Log "
-                        "button. Single player only. This build is a plugin for LEKMOD for Bazaar.",
+                        "client on the same PC can play your civilization, a teammate or an opponent. Adds the "
+                        "Message Center, where you write to the AI players one to one or in groups. Single player only. "
+                        "This build is a plugin for LEKMOD for Bazaar.",
             authors="maddachshund (spradlin-dev); rebuilt for LEKMOD for Bazaar",
             deps=[("Dlc", BNW_DLC_ID, 0, 999, ""), ("Mod", HOST_ID, 0, 999, host_name)],
             refs=[],
             blocks=[("Mod", OLD_MCP_ID, 0, 999, "Local MCP Server DLL")],
             actions=["    <OnModActivated>", "      <UpdateDatabase>MCPServer.sql</UpdateDatabase>", "    </OnModActivated>"],
-            entry_points=['    <EntryPoint type="InGameUIAddin" file="LLMLog.xml">', "      <Name>AI Log</Name>",
-                          "      <Description>Shows what the AI player is doing</Description>", "    </EntryPoint>"])
+            entry_points=['    <EntryPoint type="InGameUIAddin" file="MessageCenter.xml">', "      <Name>Message Center</Name>",
+                          "      <Description>Write to the AI players, one to one or in groups.</Description>", "    </EntryPoint>",
+                          '    <EntryPoint type="InGameUIAddin" file="MCPServerUI.xml">', "      <Name>MCP Server UI</Name>",
+                          "      <Description>Relays the game's popups and leader screens to the AI players.</Description>",
+                          "    </EntryPoint>"])
         print("staged %s: %d files" % (mcp_folder, len(mcp_files)))
         write_zip(os.path.join(STAGE, "lekmod-bazaar.zip"), host_dll, [host_folder, mcp_folder])
     else:

@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Message Center window (board 5a). Generated into mod/ by tools/ui_xml.py, which expands each @9(texture,corner). -->
+<Context ID="MessageCenter" ColorSet="Beige_Black" Font="TwCenMT18" FontStyle="Shadow">
+
+	<Instance Name="SectionInstance">
+		<Box ID="Root" Anchor="L,T" Size="300,26" Color="40,78,73,235">
+			<Box Anchor="L,T" Size="300,1" Color="200,194,160,215" ID="TopLine" />
+			<Box Anchor="L,B" Size="300,1" Color="200,194,160,215" ID="BottomLine" />
+			<Label ID="Text" Anchor="L,C" Offset="12,0" Font="TwCenMT14" FontStyle="Shadow" />
+			<Button ID="NewButton" Anchor="R,C" Offset="8,0" Size="22,22" Hidden="1" ToolTip="New group">
+				<Grid Anchor="C,C" Size="22,22" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+				<Image Anchor="C,C" Size="16,16" Texture="mc_plus.dds" />
+			</Button>
+		</Box>
+	</Instance>
+
+	<Instance Name="RowInstance">
+		<Button ID="Root" Anchor="L,T" Size="300,64">
+			<Box ID="Fresh" Anchor="L,T" Size="300,64" Color="205,176,106,46" Hidden="1">
+				<Box Anchor="L,T" Size="300,1" Color="205,176,106,150" />
+				<Box Anchor="L,B" Size="300,1" Color="205,176,106,150" />
+				<Box Anchor="L,T" Size="3,64" Color="205,176,106,255" />
+			</Box>
+			<Box ID="Selected" Anchor="L,T" Size="300,64" Color="90,140,128,90" Hidden="1">
+				<Box Anchor="L,T" Size="2,64" Color="205,176,106,255" />
+			</Box>
+			<Image ID="Portrait" Anchor="L,C" Offset="6,0" Size="64,64" Hidden="1" />
+			<Image ID="IconBG" Anchor="L,C" Offset="10,0" Size="64,64" Texture="CivIconBGSizes.dds" Hidden="1">
+				<Image ID="IconShadow" Anchor="C,C" Offset="1,1" Size="48,48" Color="Black.128" />
+				<Image ID="Icon" Anchor="C,C" Size="48,48" />
+			</Image>
+			<Image ID="Portrait1" Anchor="L,T" Offset="4,2" Size="45,45" Hidden="1" />
+			<Image ID="Portrait2" Anchor="L,T" Offset="26,18" Size="45,45" Hidden="1" />
+			<Label ID="Name" Anchor="L,T" Offset="78,10" Font="TwCenMT20" FontStyle="Shadow" />
+			<Image ID="Ally" Anchor="L,T" Offset="0,13" Size="16,16" Texture="mc_shield.dds" Hidden="1" ToolTip="Ally" />
+			<Label ID="Sub" Anchor="L,T" Offset="78,34" Font="TwCenMT16" FontStyle="Shadow" />
+			<Grid ID="Pill" Anchor="R,C" Offset="10,0" Size="26,22" Texture="mc_pill.dds" ULSize="10,10" ULTexStart="0,0" UCSize="1,10" UCTexStart="10,0" URSize="10,10" URTexStart="22,0" LSize="10,1" LTexStart="0,10" CSize="1,1" CTexStart="10,10" RSize="10,1" RTexStart="22,10" LLSize="10,10" LLTexStart="0,22" LCSize="1,10" LCTexStart="10,22" LRSize="10,10" LRTexStart="22,22" Hidden="1">
+				<Label ID="Count" Anchor="C,C" Font="TwCenMT14" FontStyle="Shadow" />
+			</Grid>
+			<Box ID="Line" Anchor="L,B" Size="300,1" Color="160,175,165,36" />
+		</Button>
+	</Instance>
+
+	<Instance Name="HeadInstance">
+		<Button ID="Root" Anchor="L,C" Size="64,64">
+			<Image ID="Portrait" Anchor="L,C" Size="64,64" Hidden="1" />
+			<Label ID="Name" Anchor="L,C" Offset="72,0" Font="TwCenMT18" FontStyle="Shadow" />
+			<Image ID="IconBG" Anchor="L,C" Size="64,64" Texture="CivIconBGSizes.dds" Hidden="1">
+				<Image ID="IconShadow" Anchor="C,C" Offset="1,1" Size="48,48" Color="Black.128" />
+				<Image ID="Icon" Anchor="C,C" Size="48,48" />
+			</Image>
+		</Button>
+	</Instance>
+
+	<!-- A leader's hover: a row for each civilization it is, filled by FillLeaderTip. -->
+	<ToolTipType Name="MCLeaderTip">
+		<Grid ID="TipFrame" Size="260,90" Offset="8,0" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" NoClip="1">
+		<Stack ID="TipStack" Anchor="L,T" Offset="14,12" StackGrowth="Bottom" Padding="8">
+			<Box ID="TipRow1" Anchor="L,T" Size="220,64" Color="0,0,0,0">
+				<Image ID="TipPortrait1" Anchor="L,C" Size="64,64" />
+				<Label ID="TipLeader1" Anchor="L,T" Offset="74,9" Font="TwCenMT22" FontStyle="Shadow" />
+				<Image ID="TipEmblem1" Anchor="L,T" Offset="74,35" Size="24,24" Color="205,176,106,255" />
+				<Label ID="TipCiv1" Anchor="L,T" Offset="102,38" Font="TwCenMT16" FontStyle="Shadow" />
+			</Box>
+			<Box ID="TipRow2" Anchor="L,T" Size="220,64" Color="0,0,0,0">
+				<Box ID="TipLine" Anchor="L,T" Offset="0,-5" Size="220,1" Color="160,175,165,60" />
+				<Image ID="TipPortrait2" Anchor="L,C" Size="64,64" />
+				<Label ID="TipLeader2" Anchor="L,T" Offset="74,9" Font="TwCenMT22" FontStyle="Shadow" />
+				<Image ID="TipEmblem2" Anchor="L,T" Offset="74,35" Size="24,24" Color="205,176,106,255" />
+				<Label ID="TipCiv2" Anchor="L,T" Offset="102,38" Font="TwCenMT16" FontStyle="Shadow" />
+			</Box>
+			<Label ID="TipClick" Anchor="L,T" Font="TwCenMT14" FontStyle="Shadow" Color="160,175,165,255" String="Click to show more." />
+		</Stack>
+		</Grid>
+	</ToolTipType>
+
+	<Instance Name="CardCivInstance">
+		<Box ID="Root" Anchor="L,T" Size="470,120" Color="0,0,0,0">
+			<Image ID="Portrait" Anchor="L,T" Size="64,64" Hidden="1" />
+			<Label ID="Name" Anchor="L,T" Offset="76,6" Font="TwCenMT20" FontStyle="Shadow" />
+			<Label ID="Ability" Anchor="L,T" Offset="76,36" WrapWidth="380" Font="TwCenMT14" FontStyle="Shadow" />
+			<Stack ID="Uniques" Anchor="L,T" Offset="76,80" StackGrowth="Right" Padding="6" />
+			<Box Anchor="L,B" Size="470,1" Color="160,175,165,36" />
+		</Box>
+	</Instance>
+
+	<Instance Name="CardUniqueInstance">
+		<Button ID="Root" Anchor="L,T" Size="45,45">
+			<Image ID="Icon" Anchor="C,C" Size="45,45" />
+		</Button>
+	</Instance>
+
+	<Instance Name="TurnInstance">
+		<Box ID="Root" Anchor="L,T" Size="600,22" Color="0,0,0,0">
+			<Box ID="LeftLine" Anchor="L,C" Size="250,1" Color="200,194,160,100" />
+			<Label ID="Text" Anchor="C,C" Font="TwCenMT14" FontStyle="Shadow" />
+			<Box ID="RightLine" Anchor="R,C" Size="250,1" Color="200,194,160,100" />
+		</Box>
+	</Instance>
+
+	<Instance Name="TheirsInstance">
+		<Box ID="Root" Anchor="L,T" Size="600,60" Color="0,0,0,0">
+			<Image ID="Portrait" Anchor="L,T" Offset="0,2" Size="45,45" />
+			<Label ID="Who" Anchor="L,T" Offset="56,0" Font="TwCenMT16" FontStyle="Shadow" />
+			<Grid ID="Bubble" Anchor="L,T" Offset="56,20" Size="200,36" Texture="mc_bub.dds" ULSize="7,7" ULTexStart="0,0" UCSize="1,7" UCTexStart="7,0" URSize="7,7" URTexStart="25,0" LSize="7,1" LTexStart="0,7" CSize="1,1" CTexStart="7,7" RSize="7,1" RTexStart="25,7" LLSize="7,7" LLTexStart="0,25" LCSize="1,7" LCTexStart="7,25" LRSize="7,7" LRTexStart="25,25">
+				<Label ID="Text" Anchor="L,T" Offset="14,8" WrapWidth="480" LeadingOffset="-2" Font="TwCenMT20" FontStyle="Shadow" />
+			</Grid>
+		</Box>
+	</Instance>
+
+	<Instance Name="MineInstance">
+		<Box ID="Root" Anchor="L,T" Size="600,60" Color="0,0,0,0">
+			<Label ID="Who" Anchor="R,T" Offset="2,0" Font="TwCenMT16" FontStyle="Shadow" />
+			<Grid ID="Bubble" Anchor="R,T" Offset="0,20" Size="200,36" Texture="mc_mine.dds" ULSize="7,7" ULTexStart="0,0" UCSize="1,7" UCTexStart="7,0" URSize="7,7" URTexStart="25,0" LSize="7,1" LTexStart="0,7" CSize="1,1" CTexStart="7,7" RSize="7,1" RTexStart="25,7" LLSize="7,7" LLTexStart="0,25" LCSize="1,7" LCTexStart="7,25" LRSize="7,7" LRTexStart="25,25">
+				<Label ID="Text" Anchor="L,T" Offset="14,8" WrapWidth="480" LeadingOffset="-2" Font="TwCenMT20" FontStyle="Shadow" />
+			</Grid>
+		</Box>
+	</Instance>
+
+	<Instance Name="MemberInstance">
+		<Button ID="Root" Anchor="L,T" Size="500,54">
+			<Box ID="Selected" Anchor="L,T" Size="500,54" Color="90,140,128,90" Hidden="1">
+				<Box Anchor="L,T" Size="2,54" Color="205,176,106,255" />
+			</Box>
+			<Grid ID="Check" Anchor="L,C" Offset="12,0" Size="20,20" Texture="mc_check.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Grid ID="CheckOn" Anchor="L,C" Offset="12,0" Size="20,20" Texture="mc_check_on.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" Hidden="1">
+				<Image Anchor="C,C" Size="16,16" Texture="mc_tick.dds" />
+			</Grid>
+			<Image ID="Portrait" Anchor="L,C" Offset="40,0" Size="45,45" Hidden="1" />
+			<Image ID="IconBG" Anchor="L,C" Offset="40,0" Size="45,45" Texture="CivIconBGSizes.dds" Hidden="1">
+				<Image ID="IconShadow" Anchor="C,C" Offset="1,1" Size="32,32" Color="Black.128" />
+				<Image ID="Icon" Anchor="C,C" Size="32,32" />
+			</Image>
+			<Label ID="Name" Anchor="L,C" Offset="96,0" Font="TwCenMT20" FontStyle="Shadow" />
+			<Image ID="Ally" Anchor="R,C" Offset="100,0" Size="16,16" Texture="mc_shield.dds" Hidden="1" />
+			<Label ID="Sub" Anchor="R,C" Offset="12,0" Font="TwCenMT14" FontStyle="Shadow" />
+			<Box Anchor="L,B" Size="500,1" Color="160,175,165,36" />
+		</Button>
+	</Instance>
+
+	<Instance Name="PopMemberInstance">
+		<Box ID="Root" Anchor="L,T" Size="310,52" Color="0,0,0,0">
+			<Image ID="Portrait" Anchor="L,C" Offset="8,0" Size="45,45" />
+			<Label ID="Name" Anchor="L,C" Offset="62,0" Font="TwCenMT18" FontStyle="Shadow" />
+			<Label ID="Note" Anchor="R,C" Offset="10,0" Font="TwCenMT14" FontStyle="Shadow" />
+			<Box Anchor="L,B" Size="310,1" Color="160,175,165,36" />
+		</Box>
+	</Instance>
+
+	<Instance Name="SettingInstance">
+		<Button ID="Root" Anchor="L,T" Size="370,44">
+			<Grid ID="Check" Anchor="L,C" Offset="12,0" Size="20,20" Texture="mc_check.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Grid ID="CheckOn" Anchor="L,C" Offset="12,0" Size="20,20" Texture="mc_check_on.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" Hidden="1">
+				<Image Anchor="C,C" Size="16,16" Texture="mc_tick.dds" />
+			</Grid>
+			<Label ID="Name" Anchor="L,C" Offset="44,0" Font="TwCenMT18" FontStyle="Shadow" />
+			<Box Anchor="L,B" Size="370,1" Color="160,175,165,36" />
+		</Button>
+	</Instance>
+
+	<!-- the opener, beside the AI Log button -->
+	<Button ID="OpenButton" Anchor="L,T" Offset="650,40" Size="150,30" ToolTip="Message Center">
+		<Grid ID="OpenBack" Anchor="C,C" Size="150,30" Texture="mc_btn.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+		<AlphaAnim ID="OpenGlow" Anchor="C,C" Size="150,30" Pause="0" Cycle="Bounce" Speed="1.2" AlphaStart="1" AlphaEnd="0.35" Hidden="1">
+			<Grid Anchor="C,C" Size="150,30" Texture="mc_glow.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+		</AlphaAnim>
+		<Image Anchor="L,C" Offset="10,0" Size="16,16" Texture="mc_chat.dds" />
+		<Label Anchor="L,C" Offset="32,0" String="MESSAGES" Font="TwCenMT14" FontStyle="Shadow" />
+		<Grid ID="OpenPill" Anchor="R,C" Offset="8,0" Size="26,20" Texture="mc_pill.dds" ULSize="10,10" ULTexStart="0,0" UCSize="1,10" UCTexStart="10,0" URSize="10,10" URTexStart="22,0" LSize="10,1" LTexStart="0,10" CSize="1,1" CTexStart="10,10" RSize="10,1" RTexStart="22,10" LLSize="10,10" LLTexStart="0,22" LCSize="1,10" LCTexStart="10,22" LRSize="10,10" LRTexStart="22,22" Hidden="1">
+			<Label ID="OpenCount" Anchor="C,C" Font="TwCenMT14" FontStyle="Shadow" />
+		</Grid>
+	</Button>
+
+	<!-- the window -->
+	<Grid ID="Window" Anchor="C,C" Size="1080,720" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+		<Button ID="DragBar" Anchor="L,T" Offset="4,4" Size="1030,42" />
+		<Box ID="RuleLeft" Anchor="L,T" Offset="20,24" Size="400,1" Color="205,176,106,170" />
+		<Label ID="Title" Anchor="C,T" Offset="0,17" String="MESSAGE CENTER" Font="TwCenMT16" FontStyle="Shadow" />
+		<Box ID="RuleRight" Anchor="R,T" Offset="84,24" Size="400,1" Color="205,176,106,170" />
+		<Button ID="SettingsButton" Anchor="R,T" Offset="46,11" Size="26,26" ToolTip="Settings: switches other mods offer">
+			<Grid Anchor="C,C" Size="26,26" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_cog.dds" />
+		</Button>
+		<Button ID="CloseButton" Anchor="R,T" Offset="14,11" Size="26,26" ToolTip="Close">
+			<Grid Anchor="C,C" Size="26,26" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_close.dds" />
+		</Button>
+		<Box ID="BandTop" Anchor="L,T" Offset="4,46" Size="1072,1" Color="200,194,160,220" />
+		<Box ID="BandMid" Anchor="L,T" Offset="4,47" Size="1072,1" Color="47,90,85,255" />
+		<Box ID="BandBottom" Anchor="L,T" Offset="4,48" Size="1072,1" Color="200,194,160,220" />
+
+		<Grid ID="ListPane" Anchor="L,T" Offset="12,60" Size="320,648" Texture="mc_pane.dds" ULSize="6,6" ULTexStart="0,0" UCSize="1,6" UCTexStart="6,0" URSize="6,6" URTexStart="26,0" LSize="6,1" LTexStart="0,6" CSize="1,1" CTexStart="6,6" RSize="6,1" RTexStart="26,6" LLSize="6,6" LLTexStart="0,26" LCSize="1,6" LCTexStart="6,26" LRSize="6,6" LRTexStart="26,26">
+			<ScrollPanel ID="ListScroll" Anchor="L,T" Offset="4,4" Size="312,640" Vertical="1" AutoScrollBar="1">
+				<Stack ID="ListStack" Anchor="L,T" StackGrowth="Bottom" Padding="0" />
+				<ScrollBar ID="ListBar" Style="VertSlider" Anchor="R,T" AnchorSide="I,I" Length="640" />
+			</ScrollPanel>
+		</Grid>
+
+		<Grid ID="ChatPane" Anchor="L,T" Offset="342,60" Size="726,648" Texture="mc_pane.dds" ULSize="6,6" ULTexStart="0,0" UCSize="1,6" UCTexStart="6,0" URSize="6,6" URTexStart="26,0" LSize="6,1" LTexStart="0,6" CSize="1,1" CTexStart="6,6" RSize="6,1" RTexStart="26,6" LLSize="6,6" LLTexStart="0,26" LCSize="1,6" LCTexStart="6,26" LRSize="6,6" LRTexStart="26,26">
+			<Box ID="ChatHeader" Anchor="L,T" Offset="4,4" Size="718,80" Color="0,0,0,0">
+				<Stack ID="HeadPortraits" Anchor="L,C" Offset="8,0" StackGrowth="Right" Padding="6" />
+				<Button ID="MembersButton" Anchor="R,C" Offset="10,0" Size="96,28" ToolTip="Who is in this chat">
+					<Grid Anchor="C,C" Size="96,28" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+					<Label Anchor="C,C" String="MEMBERS" Font="TwCenMT14" FontStyle="Shadow" />
+				</Button>
+			</Box>
+			<Box ID="ChatRule" Anchor="L,T" Offset="4,84" Size="718,4" Color="40,78,73,235">
+				<Box Anchor="L,T" Size="718,1" Color="200,194,160,215" ID="ChatRuleTop" />
+				<Box Anchor="L,B" Size="718,1" Color="200,194,160,215" ID="ChatRuleBottom" />
+			</Box>
+			<ScrollPanel ID="ChatScroll" Anchor="L,T" Offset="18,98" Size="684,474" Vertical="1" AutoScrollBar="1">
+				<Stack ID="ChatStack" Anchor="L,T" StackGrowth="Bottom" Padding="12" />
+				<ScrollBar ID="ChatBar" Style="VertSlider" Anchor="R,T" AnchorSide="O,I" Length="474" />
+			</ScrollPanel>
+			<Box ID="InputRule" Anchor="L,B" Offset="4,62" Size="718,1" Color="200,194,160,76" />
+			<Grid ID="Field" Anchor="L,B" Offset="14,12" Size="560,40" Texture="mc_field.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27">
+				<EditBox ID="ChatEntry" Anchor="L,C" Offset="12,0" Size="536,24" MaxLength="500" KeepFocus="1" Font="TwCenMT20" />
+			</Grid>
+			<Button ID="SendButton" Anchor="R,B" Offset="14,12" Size="120,40">
+				<Grid ID="SendBack" Anchor="C,C" Size="120,40" Texture="mc_btn.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+				<Label Anchor="C,C" String="SEND" Font="TwCenMT16" FontStyle="Shadow" />
+			</Button>
+			<Label ID="Empty" Anchor="C,C" Font="TwCenMT18" FontStyle="Shadow" Hidden="1" />
+			<Label ID="ReadOnly" Anchor="L,B" Offset="24,24" Font="TwCenMT18" FontStyle="Shadow" Hidden="1" />
+		</Grid>
+
+		<Button ID="Grip" Anchor="R,B" Offset="3,3" Size="18,18" ToolTip="Drag to resize">
+			<Image Anchor="C,C" Size="16,16" Texture="mc_grip.dds" />
+		</Button>
+	</Grid>
+
+	<!-- New group -->
+	<Grid ID="NewGroup" Anchor="C,C" Size="540,640" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+		<Box Anchor="L,T" Offset="20,24" Size="160,1" Color="205,176,106,170" />
+		<Label Anchor="C,T" Offset="0,17" String="NEW GROUP" Font="TwCenMT16" FontStyle="Shadow" />
+		<Box Anchor="R,T" Offset="54,24" Size="160,1" Color="205,176,106,170" />
+		<Button ID="NewGroupClose" Anchor="R,T" Offset="14,11" Size="26,26">
+			<Grid Anchor="C,C" Size="26,26" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_close.dds" />
+		</Button>
+		<Box Anchor="L,T" Offset="4,46" Size="532,1" Color="200,194,160,220" />
+		<Box Anchor="L,T" Offset="4,47" Size="532,1" Color="47,90,85,255" />
+		<Box Anchor="L,T" Offset="4,48" Size="532,1" Color="200,194,160,220" />
+		<Label Anchor="L,T" Offset="16,62" String="NAME" Font="TwCenMT14" FontStyle="Shadow" />
+		<Grid Anchor="L,T" Offset="14,82" Size="512,40" Texture="mc_field.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27">
+			<EditBox ID="GroupName" Anchor="L,C" Offset="12,0" Size="488,24" MaxLength="40" Font="TwCenMT20" />
+		</Grid>
+		<Grid Anchor="L,T" Offset="14,134" Size="512,330" Texture="mc_pane.dds" ULSize="6,6" ULTexStart="0,0" UCSize="1,6" UCTexStart="6,0" URSize="6,6" URTexStart="26,0" LSize="6,1" LTexStart="0,6" CSize="1,1" CTexStart="6,6" RSize="6,1" RTexStart="26,6" LLSize="6,6" LLTexStart="0,26" LCSize="1,6" LCTexStart="6,26" LRSize="6,6" LRTexStart="26,26">
+			<Box Anchor="L,T" Offset="4,4" Size="504,26" Color="40,78,73,235">
+				<Box Anchor="L,T" Size="504,1" Color="200,194,160,215" />
+				<Box Anchor="L,B" Size="504,1" Color="200,194,160,215" />
+				<Label Anchor="L,C" Offset="12,0" String="MEMBERS" Font="TwCenMT14" FontStyle="Shadow" />
+				<Label ID="ChosenCount" Anchor="R,C" Offset="12,0" Font="TwCenMT14" FontStyle="Shadow" />
+			</Box>
+			<ScrollPanel ID="MemberScroll" Anchor="L,T" Offset="4,30" Size="504,296" Vertical="1" AutoScrollBar="1">
+				<Stack ID="MemberStack" Anchor="L,T" StackGrowth="Bottom" Padding="0" />
+				<ScrollBar Style="VertSlider" Anchor="R,T" AnchorSide="I,I" Length="296" />
+			</ScrollPanel>
+		</Grid>
+		<Grid ID="ExistsNote" Anchor="L,T" Offset="14,476" Size="512,70" Texture="mc_note.dds" ULSize="7,7" ULTexStart="0,0" UCSize="1,7" UCTexStart="7,0" URSize="7,7" URTexStart="25,0" LSize="7,1" LTexStart="0,7" CSize="1,1" CTexStart="7,7" RSize="7,1" RTexStart="25,7" LLSize="7,7" LLTexStart="0,25" LCSize="1,7" LCTexStart="7,25" LRSize="7,7" LRTexStart="25,25" Hidden="1">
+			<Label ID="ExistsText" Anchor="L,T" Offset="14,10" WrapWidth="484" Font="TwCenMT16" FontStyle="Shadow" />
+		</Grid>
+		<Button ID="CancelGroup" Anchor="R,B" Offset="190,16" Size="120,40">
+			<Grid Anchor="C,C" Size="120,40" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Label Anchor="C,C" String="CANCEL" Font="TwCenMT16" FontStyle="Shadow" />
+		</Button>
+		<Button ID="StartGroup" Anchor="R,B" Offset="14,16" Size="170,40">
+			<Grid ID="StartBack" Anchor="C,C" Size="170,40" Texture="mc_btn.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Label ID="StartLabel" Anchor="C,C" String="START GROUP" Font="TwCenMT16" FontStyle="Shadow" />
+		</Button>
+	</Grid>
+
+	<!-- Members of the open chat -->
+	<Grid ID="MembersPop" Anchor="C,C" Size="330,300" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+		<Label ID="PopTitle" Anchor="C,T" Offset="0,15" Font="TwCenMT14" FontStyle="Shadow" />
+		<Button ID="PopClose" Anchor="R,T" Offset="10,9" Size="24,24">
+			<Grid Anchor="C,C" Size="24,24" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_close.dds" />
+		</Button>
+		<Box Anchor="L,T" Offset="4,40" Size="322,1" Color="200,194,160,220" />
+		<Box Anchor="L,T" Offset="4,41" Size="322,1" Color="47,90,85,255" />
+		<Box Anchor="L,T" Offset="4,42" Size="322,1" Color="200,194,160,220" />
+		<Stack ID="PopStack" Anchor="L,T" Offset="10,50" StackGrowth="Bottom" Padding="0" />
+		<Label ID="PopNote" Anchor="L,B" Offset="14,12" WrapWidth="300" Font="TwCenMT14" FontStyle="Shadow" />
+	</Grid>
+
+	<!-- Settings: switches other mods offer -->
+	<Grid ID="SettingsPop" Anchor="C,C" Size="390,200" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+		<Label Anchor="C,T" Offset="0,15" String="SETTINGS" Font="TwCenMT14" FontStyle="Shadow" />
+		<Button ID="SettingsClose" Anchor="R,T" Offset="10,9" Size="24,24">
+			<Grid Anchor="C,C" Size="24,24" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_close.dds" />
+		</Button>
+		<Box Anchor="L,T" Offset="4,40" Size="382,1" Color="200,194,160,220" />
+		<Box Anchor="L,T" Offset="4,41" Size="382,1" Color="47,90,85,255" />
+		<Box Anchor="L,T" Offset="4,42" Size="382,1" Color="200,194,160,220" />
+		<Stack ID="SettingsStack" Anchor="L,T" Offset="10,50" StackGrowth="Bottom" Padding="0" />
+		<Label ID="SettingsNote" Anchor="L,B" Offset="14,12" WrapWidth="360" Font="TwCenMT14" FontStyle="Shadow" />
+	</Grid>
+
+	<!-- A leader's card: each civilization it is, abilities and uniques -->
+	<Grid ID="LeaderCard" Anchor="C,C" Size="500,300" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+		<Label ID="CardTitle" Anchor="C,T" Offset="0,15" Font="TwCenMT14" FontStyle="Shadow" />
+		<Button ID="CardClose" Anchor="R,T" Offset="10,9" Size="24,24">
+			<Grid Anchor="C,C" Size="24,24" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+			<Image Anchor="C,C" Size="16,16" Texture="mc_close.dds" />
+		</Button>
+		<Box Anchor="L,T" Offset="4,40" Size="492,1" Color="200,194,160,220" />
+		<Box Anchor="L,T" Offset="4,41" Size="492,1" Color="47,90,85,255" />
+		<Box Anchor="L,T" Offset="4,42" Size="492,1" Color="200,194,160,220" />
+		<Stack ID="CardStack" Anchor="L,T" Offset="14,52" StackGrowth="Bottom" Padding="4" />
+		<Label ID="CardNote" Anchor="L,B" Offset="14,12" WrapWidth="470" Font="TwCenMT14" FontStyle="Shadow" />
+	</Grid>
+
+</Context>

@@ -6,122 +6,12 @@
 #include <set>
 #include <sstream>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
-#include <sys/stat.h>
-#endif
+#include "McpFiles.h"
 
 namespace
 {
 	const char* HUMAN = "human";
 	const char* ALL = "all";
-
-#ifdef _WIN32
-	const char* SEP = "\\";
-
-	std::wstring Wide(const std::string& s)
-	{
-		int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
-		if(n <= 1) return std::wstring();
-		std::wstring w(n - 1, L'\0');
-		MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
-		return w;
-	}
-
-	std::string Narrow(const wchar_t* w)
-	{
-		int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
-		if(n <= 1) return std::string();
-		std::string s(n - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, w, -1, &s[0], n, NULL, NULL);
-		return s;
-	}
-
-	FILE* OpenFile(const std::string& path, const char* mode)
-	{
-		return _wfopen(Wide(path).c_str(), Wide(mode).c_str());
-	}
-
-	void MakeDir(const std::string& path)
-	{
-		CreateDirectoryW(Wide(path).c_str(), NULL);
-	}
-
-	// Names of the files in dir ending in suffix, without it.
-	std::vector<std::string> Files(const std::string& dir, const std::string& suffix)
-	{
-		std::vector<std::string> out;
-		WIN32_FIND_DATAW data;
-		HANDLE h = FindFirstFileW(Wide(dir + SEP + "*" + suffix).c_str(), &data);
-		if(h == INVALID_HANDLE_VALUE) return out;
-		do
-		{
-			std::string n = Narrow(data.cFileName);
-			if(n.size() > suffix.size() && n.compare(n.size() - suffix.size(), suffix.size(), suffix) == 0)
-				out.push_back(n.substr(0, n.size() - suffix.size()));
-		} while(FindNextFileW(h, &data));
-		FindClose(h);
-		return out;
-	}
-#else
-	const char* SEP = "/";
-
-	FILE* OpenFile(const std::string& path, const char* mode)
-	{
-		return fopen(path.c_str(), mode);
-	}
-
-	void MakeDir(const std::string& path)
-	{
-		mkdir(path.c_str(), 0755);
-	}
-
-	std::vector<std::string> Files(const std::string& dir, const std::string& suffix)
-	{
-		std::vector<std::string> out;
-		DIR* d = opendir(dir.c_str());
-		if(!d) return out;
-		while(dirent* e = readdir(d))
-		{
-			std::string n = e->d_name;
-			if(n.size() > suffix.size() && n.compare(n.size() - suffix.size(), suffix.size(), suffix) == 0)
-				out.push_back(n.substr(0, n.size() - suffix.size()));
-		}
-		closedir(d);
-		return out;
-	}
-#endif
-
-	// Every folder along the path, so the first line of a game makes MCP\<game>\chat.
-	void MakeDirs(const std::string& path)
-	{
-		for(size_t i = 1; i <= path.size(); ++i)
-		{
-			if(i == path.size() || path[i] == '/' || path[i] == '\\') MakeDir(path.substr(0, i));
-		}
-	}
-
-	bool ReadFile(const std::string& path, std::string& out)
-	{
-		FILE* f = OpenFile(path, "rb");
-		if(!f) return false;
-		out.clear();
-		char buf[4096];
-		size_t n;
-		while((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
-		fclose(f);
-		return true;
-	}
-
-	bool WriteFile(const std::string& path, const std::string& text, bool append)
-	{
-		FILE* f = OpenFile(path, append ? "ab" : "wb");
-		if(!f) return false;
-		bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
-		return fclose(f) == 0 && ok;
-	}
 
 	std::vector<std::string> SplitLines(const std::string& s)
 	{
@@ -356,7 +246,7 @@ void McpChatRoom::Open(const std::string& folder)
 	m_chats.clear();
 	if(folder.empty()) return;
 	std::set<std::string> ids;
-	std::vector<std::string> logs = Files(folder, ".log"), names = Files(folder, ".name");
+	std::vector<std::string> logs = McpFilesIn(folder, ".log"), names = McpFilesIn(folder, ".name");
 	ids.insert(logs.begin(), logs.end());
 	ids.insert(names.begin(), names.end());
 	for(std::set<std::string>::const_iterator it = ids.begin(); it != ids.end(); ++it)
@@ -366,7 +256,7 @@ void McpChatRoom::Open(const std::string& folder)
 		Chat& c = m_chats[id];
 		c.members = MembersOf(id);
 		std::string s;
-		if(ReadFile(folder + SEP + id + ".log", s))
+		if(McpReadFile(folder + McpPathSep() + id + ".log", s))
 		{
 			std::vector<std::string> raw = SplitLines(s);
 			for(size_t i = 0; i < raw.size(); ++i)
@@ -375,18 +265,18 @@ void McpChatRoom::Open(const std::string& folder)
 				if(ParseLine(raw[i], l)) c.lines.push_back(l); // a torn last line is skipped
 			}
 		}
-		if(ReadFile(folder + SEP + id + ".name", s))
+		if(McpReadFile(folder + McpPathSep() + id + ".name", s))
 		{
 			std::vector<std::string> lines = SplitLines(s);
 			if(!lines.empty()) c.name = Trim(lines[0]);
 		}
-		if(ReadFile(folder + SEP + id + ".started", s))
+		if(McpReadFile(folder + McpPathSep() + id + ".started", s))
 		{
 			std::vector<std::string> w = Split(Trim(s), ' ');
 			if(!w.empty()) c.startedBy = w[0];
 			if(w.size() > 1) c.startedTurn = ToInt(w[1], -1);
 		}
-		if(ReadFile(folder + SEP + id + ".cursors", s))
+		if(McpReadFile(folder + McpPathSep() + id + ".cursors", s))
 		{
 			std::vector<std::string> lines = SplitLines(s);
 			for(size_t i = 0; i < lines.size(); ++i)
@@ -415,8 +305,8 @@ bool McpChatRoom::SaveCursor(const char* kind, const std::string& who, const std
 		text += "seen " + s->first + " " + Str(s->second) + "\n";
 	for(std::map<std::string, int>::const_iterator d = it->second.delivered.begin(); d != it->second.delivered.end(); ++d)
 		text += "delivered " + d->first + " " + Str(d->second) + "\n";
-	MakeDirs(m_folder);
-	return WriteFile(m_folder + SEP + id + ".cursors", text, false);
+	McpMakeDirs(m_folder);
+	return McpWriteFile(m_folder + McpPathSep() + id + ".cursors", text, false);
 }
 
 McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from, const std::string& to, const std::string& text,
@@ -508,8 +398,8 @@ McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from
 	bool isNew = m_chats.find(id) == m_chats.end() || m_chats[id].lines.empty();
 	if(!m_folder.empty())
 	{
-		MakeDirs(m_folder);
-		if(!WriteFile(m_folder + SEP + id + ".log", FormatLine(line), true))
+		McpMakeDirs(m_folder);
+		if(!McpWriteFile(m_folder + McpPathSep() + id + ".log", FormatLine(line), true))
 		{
 			r.reason = "The chat could not be written to " + m_folder + ".";
 			return r;
@@ -521,7 +411,7 @@ McpChatSent McpChatRoom::Send(const McpChatTable& table, const std::string& from
 	{
 		c.startedBy = from;
 		c.startedTurn = table.turn;
-		if(!m_folder.empty()) WriteFile(m_folder + SEP + id + ".started", from + " " + Str(table.turn) + "\n", false);
+		if(!m_folder.empty()) McpWriteFile(m_folder + McpPathSep() + id + ".started", from + " " + Str(table.turn) + "\n", false);
 	}
 	c.lines.push_back(line);
 	if(!name.empty()) Name(from, id, name);
@@ -619,8 +509,8 @@ bool McpChatRoom::Name(const std::string& viewer, const std::string& id, const s
 	c.name = n.substr(0, 60);
 	if(!m_folder.empty())
 	{
-		MakeDirs(m_folder);
-		WriteFile(m_folder + SEP + id + ".name", c.name + "\n", false);
+		McpMakeDirs(m_folder);
+		McpWriteFile(m_folder + McpPathSep() + id + ".name", c.name + "\n", false);
 	}
 	return true;
 }

@@ -38,7 +38,7 @@ std::string McpChronicleViewBlock(CvPlayer* me);
 // After a plan's orders ran: which entries and threads no order and no say served. serves: each order's serves text;
 // said: who each say order went to.
 std::vector<std::string> McpChronicleMirrorFor(CvPlayer* me, const std::vector<std::string>& serves, const std::vector<std::string>& said);
-// Queues one line for the seat's messenger (say/<civ>.jsonl in the game's files; civ5-say-outbox delivers it).
+// Says one line for the seat in the Message Center, as the say tool does; a refused line goes to its log file.
 void McpSayQueue(CvPlayer* me, const std::string& to, const std::string& words);
 // A war notification the game raised: who declared on which team. The chronicle's deeds name the declarer from it.
 void McpChronicleNoteWar(int declaringPlayer, int onTeam);

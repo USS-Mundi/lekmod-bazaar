@@ -1,5 +1,6 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpChronicleGame.h"
+#include "McpChatGame.h"
 #include "McpChronicle.h"
 #include "McpWorldDeeds.h"
 #include "McpSeedCompose.h"
@@ -519,11 +520,9 @@ std::vector<std::string> McpChronicleMirrorFor(CvPlayer* me, const std::vector<s
 void McpSayQueue(CvPlayer* me, const std::string& to, const std::string& words)
 {
 	SameGame();
-	JObj o;
-	o["turn"] = J(GC.getGame().getGameTurn());
-	o["to"] = J(to);
-	o["words"] = J(words);
-	McpGameFileAppend(s_game, "say", CivFile(me, ".jsonl"), "", JVal(o).serialize() + "\n");
+	std::string err;
+	McpChatSay((int)me->GetID(), to, words, "", err);
+	if(!err.empty()) McpGameFileAppend(s_game, "log", CivFile(me, ".log"), "", McpFormat("turn %d: not said to %s (%s): ", GC.getGame().getGameTurn(), to.c_str(), err.c_str()) + words + "\n");
 }
 
 void McpChronicleNoteWar(int declaringPlayer, int onTeam)

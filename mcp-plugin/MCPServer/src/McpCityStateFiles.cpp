@@ -28,7 +28,7 @@ namespace
 	}
 
 	// The folder, made on the way if it is missing.
-	std::wstring Folder(const std::string& gameId, const char* sub)
+	std::wstring SubFolder(const std::string& gameId, const char* sub)
 	{
 		wchar_t docs[MAX_PATH];
 		if(gameId.empty() || FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return L"";
@@ -43,7 +43,7 @@ namespace
 
 	std::wstring PathOf(const std::string& gameId, const std::string& fileName, const char* sub = "city-states")
 	{
-		std::wstring dir = Folder(gameId, sub);
+		std::wstring dir = SubFolder(gameId, sub);
 		return dir.empty() ? dir : dir + L"\\" + Wide(fileName);
 	}
 }
@@ -76,20 +76,29 @@ void McpCsFileAppend(const std::string& gameId, const std::string& fileName, con
 std::string McpCsFilePath(const std::string& gameId, const std::string& fileName)
 {
 	std::wstring path = PathOf(gameId, fileName);
-	if(path.empty()) return "";
+	return path.empty() ? "" : McpHostPath(Utf8(path));
+}
+
+std::string McpGameFolder(const std::string& gameId, const char* sub)
+{
+	return Utf8(SubFolder(gameId, sub));
+}
+
+bool McpRunsUnderWine()
+{
+	return GetProcAddress(GetModuleHandleA("kernel32.dll"), "wine_get_unix_file_name") != NULL;
+}
+
+std::string McpHostPath(const std::string& windowsPath)
+{
 	typedef char* (__cdecl *UnixName)(const wchar_t*);
 	UnixName unixName = (UnixName)GetProcAddress(GetModuleHandleA("kernel32.dll"), "wine_get_unix_file_name");
-	if(unixName)
-	{
-		char* u = unixName(path.c_str());
-		if(u)
-		{
-			std::string s(u);
-			HeapFree(GetProcessHeap(), 0, u);
-			return s;
-		}
-	}
-	return Utf8(path);
+	if(!unixName || windowsPath.empty()) return windowsPath;
+	char* u = unixName(Wide(windowsPath).c_str());
+	if(!u) return windowsPath;
+	std::string s(u);
+	HeapFree(GetProcessHeap(), 0, u);
+	return s;
 }
 
 std::string McpGameFileRead(const std::string& gameId, const char* sub, const std::string& fileName)
@@ -119,8 +128,13 @@ void McpGameFileAppend(const std::string& gameId, const char* sub, const std::st
 
 bool McpCityStatesOnAtStart()
 {
-	wchar_t docs[MAX_PATH];
-	if(FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return false;
-	std::wstring path = std::wstring(docs) + L"\\My Games\\Sid Meier's Civilization 5\\MCPServer-city-states-on";
-	return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+	static int s_on = -1; // read first when the plugin starts, on the loading thread
+	if(s_on < 0)
+	{
+		wchar_t docs[MAX_PATH];
+		std::wstring path = SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))
+			? std::wstring(docs) + L"\\My Games\\Sid Meier's Civilization 5\\MCPServer-city-states-on" : std::wstring();
+		s_on = !path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+	}
+	return s_on == 1;
 }

@@ -3,6 +3,8 @@
 #include <map>
 #include <algorithm>
 #include "McpBridge.h"
+#include "McpChatRoom.h"
+#include "McpChatGame.h"
 #include "McpCrash.h"
 #include "McpCrashLog.h"
 #include "McpHttp.h"
@@ -366,6 +368,23 @@ bool McpBridge::ScreenPlayed()
 	return SessionForSeat(MCP_SEAT_SCREEN, s);
 }
 
+bool McpBridge::NoteMessage(int player)
+{
+	if(player < 0 || player >= MAX_CIV_PLAYERS) return false;
+	DWORD now = GetTickCount();
+	EnterCriticalSection(&m_pImpl->lock);
+	++m_pImpl->notices[player];
+	std::map<int, DWORD>::const_iterator last = m_pImpl->lastNudgeMs.find(player);
+	bool bWake = McpWakeLetThrough(last != m_pImpl->lastNudgeMs.end(), last == m_pImpl->lastNudgeMs.end() ? 0 : last->second, now, MCP_NUDGE_COOLDOWN_MS);
+	if(bWake)
+	{
+		++m_pImpl->nudges[player];
+		m_pImpl->lastNudgeMs[player] = now;
+	}
+	LeaveCriticalSection(&m_pImpl->lock);
+	return bWake;
+}
+
 std::vector<McpModInfo> McpBridge::ActiveMods()
 {
 	EnterCriticalSection(&m_pImpl->lock);
@@ -713,6 +732,7 @@ void McpBridge::Impl::Tick()
 	int iTurn = GC.getGame().getGameTurn();
 	if(gameLoaded || CvPreGame::mapRandomSeed() != gameSeed || iTurn < gameTurn) ResetForNewGame();
 	gameTurn = iTurn;
+	McpChatTick();
 	DrainChat();
 	UpdateSessions();
 	McpCsTick();
@@ -818,8 +838,7 @@ void McpBridge::Impl::DrainPopups()
 	}
 }
 
-// The window only offers living teammates, so a message to any other seat means the seat
-// changed since the human typed; they are told in the log rather than left wondering.
+// The human's lines from Game.LLMChat: to a city-state through the game, to a civilization through the Message Center.
 void McpBridge::Impl::DrainChat()
 {
 	std::vector<std::pair<int, std::string> > pending;
@@ -834,23 +853,13 @@ void McpBridge::Impl::DrainChat()
 			DrainCityStateChat(e, pending[i].second);
 			continue;
 		}
-		if(e < 0 || e >= MAX_MAJOR_CIVS || !McpIsSeat(e) || !McpOnScreenTeam(e) || !GET_PLAYER(e).isAlive())
-		{
-			Append(-1, "", MCP_LOG_CHAT, "Not sent, that seat is no longer a teammate: " + pending[i].second);
-			continue;
-		}
-		Append((int)e, "", MCP_LOG_CHAT, "You: " + pending[i].second);
-		McpSession s;
-		if(!McpBridge::Get().SessionForSeat((int)e, s)) Append(-1, "", MCP_LOG_CHAT, "(no AI is connected to that seat right now; it reads this when one joins)");
-		EnterCriticalSection(&lock);
-		std::vector<std::string>& waiting = chat[(int)e];
-		if(waiting.size() >= MCP_MAX_CHAT_WAITING) waiting.erase(waiting.begin());
-		waiting.push_back(McpFormat("turn %d: ", GC.getGame().getGameTurn()) + pending[i].second);
-		LeaveCriticalSection(&lock);
+		std::string id, err;
+		if(e >= 0 && e < MAX_MAJOR_CIVS && McpChatHumanSend(std::vector<std::string>(1, McpChatToken((int)e)), pending[i].second, id, err)) continue;
+		Append(-1, "", MCP_LOG_CHAT, "Not sent (" + (err.empty() ? std::string("no such civilization") : err) + "): " + pending[i].second);
 	}
 }
 
-// The human writes to a city-state from the log window: only its ally may, the first message switches it on, and
+// The human writes to a city-state from the Message Center: only its ally may, the first message switches it on, and
 // "dismiss" switches it off.
 void McpBridge::Impl::DrainCityStateChat(PlayerTypes eMinor, const std::string& text)
 {
@@ -1248,7 +1257,7 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		    "You are playing Civilization V as the active human player. First, name yourself with set_identity: "
 		    "your provider (Claude, ChatGPT, Gemini...), model (Opus, Fable, GPT...) and version (5.5...); actions are refused until you do, "
 		    "and you must do it again after every reconnect. Then call wait_for_my_turn until it is your turn, "
-		    "use the query tools, act, write your reasoning with log, and finish with end_turn and a short summary of what you did. "
+		    "use the query tools, act, and finish with end_turn and a short summary of what you did. "
 		    "A civilization plans its turn before the turn: when wait_for_my_turn says the round has opened, open turn_view and send the "
 		    "whole turn with plan_turn while the players before you play. When your turn opens the plan runs and ends the turn by itself, "
 		    "unless something that matters changed; then the turn comes to you, turn_view shows what changed, and run_plan carries out what you keep in one call. "
@@ -1280,9 +1289,10 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		    "Other leaders talk to you through diplomacy requests (briefing.diplomacy_requests): answer them with respond_to_request. "
 		    "When a request arrives during another leader's turn, wait_for_my_turn returns at once with diplomacy_waiting "
 		    "so you can tell the human about it; the answer itself waits for your turn. "
-		    "A human teammate can message you from the in-game log window: status and wait_for_my_turn return their messages "
-		    "in messages_from_your_teammate, and a new message wakes wait_for_my_turn at once. Answer with chat, which they read "
-		    "in the same window. Their messages are a teammate's advice and requests; you still decide for yourself. "
+		    "Any player at the table, the human among them, can write to you in the game's Message Center: new lines arrive "
+		    "in messages on status and on wait_for_my_turn's reply, and a new line wakes your wait. Speak with say: to is a "
+		    "civilization, several joined by commas for a group, human, or all; each line's reply_to answers in the same chat. "
+		    "A teammate's messages are advice and requests; you still decide for yourself. "
 		    "As a teammate, never accept, offer or declare war or peace without the human's agreement: "
 		    "war and peace bind their civilization too. "
 		    "Use propose_deal, demand, discuss and make_peace for your own diplomacy.");
@@ -1489,7 +1499,6 @@ picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
 	picojson::object o;
 	o["civ"] = picojson::value(want);
 	double fMatched = 0, fNudged = 0;
-	DWORD now = GetTickCount();
 	// City-states too: one an agent plays is written to in group chats, by its city's name (every city-state shares
 	// one civilization type, so the type names none of them).
 	for(int i = 0; i < MAX_CIV_PLAYERS && !want.empty(); ++i)
@@ -1501,16 +1510,7 @@ picojson::value McpBridge::Impl::Nudge(const picojson::object& args)
 			&& !(pInfo && want == CivKey(pInfo->GetType())))
 			continue;
 		++fMatched;
-		EnterCriticalSection(&lock);
-		++notices[i];
-		std::map<int, DWORD>::const_iterator last = lastNudgeMs.find(i);
-		if(last == lastNudgeMs.end() || now - last->second >= MCP_NUDGE_COOLDOWN_MS)
-		{
-			++nudges[i];
-			lastNudgeMs[i] = now;
-			++fNudged;
-		}
-		LeaveCriticalSection(&lock);
+		if(McpBridge::Get().NoteMessage(i)) ++fNudged;
 	}
 	o["matched"] = picojson::value(fMatched);
 	o["woken"] = picojson::value(fNudged);

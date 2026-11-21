@@ -16,7 +16,15 @@ std::string McpCsFilePath(const std::string& gameId, const std::string& fileName
 std::string McpGameFileRead(const std::string& gameId, const char* sub, const std::string& fileName);
 void McpGameFileAppend(const std::string& gameId, const char* sub, const std::string& fileName, const std::string& headerIfNew, const std::string& line);
 
+// The folder My Games\Sid Meier's Civilization 5\MCP\<game id>\<sub>, made when missing, as a UTF-8 Windows path;
+// "" when there is no game id or no Documents folder.
+std::string McpGameFolder(const std::string& gameId, const char* sub);
+// A path as this machine's own programs name it: under Wine (CrossOver on a Mac) the Unix path, otherwise unchanged.
+std::string McpHostPath(const std::string& windowsPath);
+// True when the game runs under Wine (CrossOver on a Mac).
+bool McpRunsUnderWine();
+
 // The city-state switch-on file, My Games\Sid Meier's Civilization 5\MCPServer-city-states-on: only while it exists
 // does the plugin register its city-state hooks at start (city-state seats and what city-states remember). Without it
-// the game runs city-states exactly as it would without the plugin.
+// the game runs city-states exactly as it would without the plugin. Read once, when the plugin starts.
 bool McpCityStatesOnAtStart();

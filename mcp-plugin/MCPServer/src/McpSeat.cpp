@@ -155,7 +155,7 @@ bool McpClaimSeat(PlayerTypes ePlayer, std::string& err)
 	bool bCityState = ePlayer >= MAX_MAJOR_CIVS;
 	if(bCityState && (!p.isMinorCiv() || !McpCsIsSwitchedOn(ePlayer)))
 	{
-		err = "a city-state can be played only while its ally has switched it on (city_state_action switch_on, or writing to it in the in-game log window)";
+		err = "a city-state can be played only while its ally has switched it on (city_state_action switch_on, or writing to it in the Message Center)";
 		return false;
 	}
 	std::string label = McpCurrentLabel();

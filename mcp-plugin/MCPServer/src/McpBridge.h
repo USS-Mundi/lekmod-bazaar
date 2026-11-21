@@ -102,6 +102,9 @@ public:
 	void UnbindSeat(int seat);
 	// Any thread. True when a live session plays the civilization on screen.
 	bool ScreenPlayed();
+	// Any thread. A message came for a player: its wait is told on the next reply, and a waiting session of it is woken
+	// unless an early wake was let through for it in the last two minutes. True when this one woke it.
+	bool NoteMessage(int player);
 
 	// Any thread. The mods loaded in this game; the in-game UI script reports them when a
 	// game loads, since only the UI's Modding API can list them.

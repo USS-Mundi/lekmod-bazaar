@@ -5,5 +5,5 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 clang++ -std=c++03 -Wall -Wextra -Werror -I "$ROOT/MCPServer/src" \
-	"$ROOT/tests/chat_room_test.cpp" "$ROOT/MCPServer/src/McpChatRoom.cpp" -o "$OUT/chat_room_test"
+	"$ROOT/tests/chat_room_test.cpp" "$ROOT/MCPServer/src/McpChatRoom.cpp" "$ROOT/MCPServer/src/McpFiles.cpp" -o "$OUT/chat_room_test"
 "$OUT/chat_room_test"
