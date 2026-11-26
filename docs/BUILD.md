@@ -67,8 +67,8 @@ false, and the few reads LEKMOD has no public form for. Links
 plugin's tests, then compile it against the host the same way: `C:\lek\out\sl\SecondLeader.dll`
 and `C:\lek\out\cg\ColorGrade.dll`. Both ship inside LEKMOD for Bazaar. Under a minute each.
 
-**3c. `maps/lekmap-fusion/build.sh`** — builds the Lekmap Fusion map script from the LEKMOD clone's Lekmap v6.3 into
-`build/lekmap-fusion/LekmapFusion.lua` and runs its tests. It ships inside LEKMOD for Bazaar too.
+**3c. `maps/mundi-fusion/build.sh`** — builds the Mundi Fusion map script from the LEKMOD clone's Lekmap v6.3 into
+`build/mundi-fusion/MundiFusion.lua` and runs its tests. It ships inside LEKMOD for Bazaar too.
 
 **4. `generator/stage.py`** — lays out `build/stage/MODS/LEKMOD for Bazaar (v 1)` (with Second Leader and Time of Day) and
 `build/stage/MODS/MCP Server for LEKMOD (v 1)`, each with its DLL, its files and

@@ -10,12 +10,12 @@ static int s_failures = 0;
 int main()
 {
 	// A map script with a page in docs/agent/maps gets that page, named as game_settings.map_type names it.
-	const char* fusion = McpMapPage("LekmapFusion");
+	const char* fusion = McpMapPage("MundiFusion");
 	CHECK(fusion != NULL);
-	CHECK(fusion && std::strstr(fusion, "Lekmap Fusion") != NULL);
+	CHECK(fusion && std::strstr(fusion, "Mundi Fusion") != NULL);
 	CHECK(fusion && std::strstr(fusion, "Astronomy") != NULL);
 	// The script's file name may come in any case.
-	CHECK(McpMapPage("lekmapfusion") == fusion);
+	CHECK(McpMapPage("mundifusion") == fusion);
 	// Any other map has none.
 	CHECK(McpMapPage("LekmapPangaeaFractalv6.3") == NULL);
 	CHECK(McpMapPage("") == NULL);

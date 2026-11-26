@@ -1,4 +1,4 @@
--- Run from the lekmap-fusion folder: luajit tests/test_block.lua [seed] [show|map]
+-- Run from the mundi-fusion folder: luajit tests/test_block.lua [seed] [show|map]
 BLOCK = "src/pulled_apart_block.lua"
 -- Stand-ins for Civ's map API, enough to run the Pulled Apart block outside the game.
 math.randomseed(tonumber(arg[1] or "7"))
@@ -50,7 +50,7 @@ dofile(BLOCK)
 
 -- The setup screen's view of the options.
 local info = GetMapScriptInfo()
-assert(info.Name == "Lekmap Fusion")
+assert(info.Name == "Mundi Fusion")
 for k = LEKMAP_OPTIONS + 1, #info.CustomOptions do
   local o = info.CustomOptions[k]
   CHOICES[k] = o.DefaultValue
@@ -411,12 +411,12 @@ do
 end
 print("deep sea: ok")
 
--- Defaults: canal spots on, at least two continents, deep sea on; the operator's style of 2026-11-23 (four weak, wide
--- rifts on a bigger, lower-sea map, middle-sea islands of medium size).
+-- Defaults: canal spots on, continents as the rifts fall, deep sea on; the operator's style of 2026-11-23 (four wide
+-- rifts on a bigger, lower-sea map, middle-sea islands of medium size), at full strength since 2026-11-26.
 do
   local info = GetMapScriptInfo()
-  local want = { ["Connect all continents"] = "On, with a canal spot on each bridge", ["Continents"] = "At least two", ["Deep sea"] = "On",
-    ["Rifts"] = "4", ["Rift Strength"] = "40", ["Rift Width"] = "6.5 tiles", ["Rift Raggedness"] = "5.5 tiles",
+  local want = { ["Connect all continents"] = "On, with a canal spot on each bridge", ["Continents"] = "As the rifts fall", ["Deep sea"] = "On",
+    ["Rifts"] = "4", ["Rift Strength"] = "100", ["Rift Width"] = "6.5 tiles", ["Rift Raggedness"] = "5.5 tiles",
     ["Middle-Sea Island Size"] = "Medium (4-7 tiles)", ["TXT_KEY_MAP_OPTION_SEA_LEVEL"] = "TXT_KEY_MAP_OPTION_LOW",
     ["Land Size X"] = "Default +10 tiles", ["Land Size Y"] = "Default +10 tiles" }
   for _, o in ipairs(info.CustomOptions) do

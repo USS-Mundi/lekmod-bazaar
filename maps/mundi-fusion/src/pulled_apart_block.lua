@@ -1,9 +1,9 @@
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
--- LEKMAP FUSION (the Pangaea, pulled apart)
+-- MUNDI FUSION (the Pangaea, pulled apart)
 -- Everything above is Lekmap v6.3 (Pangaea - Fractal), unchanged except seven lines, each marked
--- "Lekmap Fusion": six in its start picker and its mountain cut-off. This block, added at the end, replaces:
+-- "Mundi Fusion": six in its start picker and its mountain cut-off. This block, added at the end, replaces:
 --   GetMapScriptInfo                            the map's name and the Pulled Apart options
 --   GeneratePlotTypes                           tears the Pangaea along rifts, joins any landmass big enough
 --                                               for a civ to the rest and pulls specks of land onto nearby
@@ -28,12 +28,13 @@ local function PA_Steps(first, last, step)
 end
 
 -- Defaults are the operator's settings from the preview (2026-11-20); islands: fewer and larger (2026-11-20); his style
--- from the generator (2026-11-23): four weak, wide rifts, middle-sea islands of medium size.
+-- from the generator (2026-11-23): four wide rifts, middle-sea islands of medium size; since 2026-11-26 the rifts at
+-- full strength (100) and the continents as the rifts fall.
 PA_OPTIONS = {
 	{ key = "on",        name = "Pull Apart",                values = {1, 2}, labels = {"On", "Off (plain Lekmap Pangaea, made once)"}, default = 1 },
 	{ key = "rifts",     name = "Rifts",                     values = {1, 2, 3, 4}, default = 4 },
 	{ key = "spread",    name = "Rift Angle Spread",         values = {0, 30, 60, 90, 120, 150, 180}, suffix = " degrees", default = 180 },
-	{ key = "strength",  name = "Rift Strength",             values = {40, 50, 60, 70, 80, 85, 89, 95, 100}, default = 40 },
+	{ key = "strength",  name = "Rift Strength",             values = {40, 50, 60, 70, 80, 85, 89, 95, 100}, default = 100 },
 	{ key = "vary",      name = "Rift Strength Spread",      values = {0, 25, 50, 75, 100}, suffix = "%", default = 100 },
 	{ key = "width",     name = "Rift Width",                values = PA_Steps(2, 10.5, 0.5), suffix = " tiles", default = 6.5 },
 	{ key = "rag",       name = "Rift Raggedness",           values = PA_Steps(0, 8, 0.5), suffix = " tiles", default = 5.5 },
@@ -47,7 +48,7 @@ PA_OPTIONS = {
 	{ key = "outersize", name = "Outer Island Size",         values = {1, 2, 3}, labels = {"Small (4-5 tiles)", "Medium (4-6 tiles)", "Large (4-9 tiles)"}, default = 3 },
 	{ key = "connect",   name = "Connect all continents",    values = {1, 2, 3}, labels = {"On", "On, with a canal spot on each bridge", "Off"}, default = 2, show = 1.5 },
 	{ key = "mountains", name = "Mountains",                 values = {1, 2}, labels = {"Like Lekmap Continents", "Like Lekmap Pangaea"}, default = 1, show = 1.7 },
-	{ key = "continents", name = "Continents",               values = {1, 2}, labels = {"At least two", "As the rifts fall"}, default = 1, show = 1.2 },
+	{ key = "continents", name = "Continents",               values = {1, 2}, labels = {"At least two", "As the rifts fall"}, default = 2, show = 1.2 },
 	{ key = "deep",      name = "Deep sea",                  values = {1, 2}, labels = {"On", "Off (Lekmap's coasts)"}, default = 1, show = 1.6 },
 }
 -- No island under 4 tiles (operator, 2026-11-21).
@@ -60,7 +61,7 @@ local function PA_DefaultIndex(opt)
 	for v = 1, #opt.values do
 		if opt.values[v] == opt.default then return v end
 	end
-	error("Lekmap Fusion: the default of " .. opt.name .. " is not one of its values")
+	error("Mundi Fusion: the default of " .. opt.name .. " is not one of its values")
 end
 
 local function PA_Label(opt, v)
@@ -85,13 +86,13 @@ function GetMapScriptInfo()
 		local want = PA_LEKMAP_DEFAULTS[o.Name]
 		if want then
 			for v, label in ipairs(o.Values) do if label == want then o.DefaultValue = v end end
-			if o.Values[o.DefaultValue] ~= want then error("Lekmap Fusion: Lekmap's " .. o.Name .. " has no choice " .. want) end
+			if o.Values[o.DefaultValue] ~= want then error("Mundi Fusion: Lekmap's " .. o.Name .. " has no choice " .. want) end
 			pending[o.Name] = nil
 		end
 	end
-	if next(pending) then error("Lekmap Fusion: Lekmap has no option " .. next(pending)) end
-	info.Name = "Lekmap Fusion"
-	info.Description = "Lekmap Fusion: Lekmap v6.3's Pangaea, torn by rifts at their own angles and strengths. The sea seeps in along them, high ground survives as necks and peninsulas, and islands rise in the sea between. Each map is made once."
+	if next(pending) then error("Mundi Fusion: Lekmap has no option " .. next(pending)) end
+	info.Name = "Mundi Fusion"
+	info.Description = "Mundi Fusion: Lekmap v6.3's Pangaea, torn by rifts at their own angles and strengths. The sea seeps in along them, high ground survives as necks and peninsulas, and islands rise in the sea between. Each map is made once."
 	for k, opt in ipairs(PA_OPTIONS) do
 		local values = {}
 		for v = 1, #opt.values do values[v] = PA_Label(opt, v) end
@@ -108,7 +109,7 @@ function PA_Settings()
 	for k, opt in ipairs(PA_OPTIONS) do
 		local choice = Map.GetCustomOption(base + k)
 		if choice == nil or choice < 1 or choice > #opt.values then
-			print("Lekmap Fusion: WARNING option '" .. opt.name .. "' read as " .. tostring(choice) .. ", outside its " .. #opt.values .. " values; using its default")
+			print("Mundi Fusion: WARNING option '" .. opt.name .. "' read as " .. tostring(choice) .. ", outside its " .. #opt.values .. " values; using its default")
 			choice = PA_DefaultIndex(opt)
 		end
 		s[opt.key] = opt.values[choice]
@@ -232,7 +233,7 @@ function PA_PullApart(plotTypes)
 	PA_DEEP = false
 	local S = PA_Settings()
 	if S.on ~= 1 then
-		print("Lekmap Fusion: off; plain Lekmap Pangaea")
+		print("Mundi Fusion: off; plain Lekmap Pangaea")
 		return
 	end
 	local W, H = Map.GetGridSize()
@@ -260,7 +261,7 @@ function PA_PullApart(plotTypes)
 		end
 	end
 	if #land == 0 then
-		print("Lekmap Fusion: WARNING no land to pull apart")
+		print("Mundi Fusion: WARNING no land to pull apart")
 		return
 	end
 	local cenX = (math.atan2(sumS, sumC) / (2 * math.pi) * W) % W
@@ -395,7 +396,7 @@ function PA_PullApart(plotTypes)
 	PA_DEEP = (S.deep == 1)
 	local shares = {}
 	for k = 1, math.min(4, #sizes) do shares[k] = math.floor(100 * sizes[k] / total + 0.5) .. "%" end
-	print("Lekmap Fusion: " .. S.rifts .. " rifts, " .. carved .. " tiles of land became sea, " ..
+	print("Mundi Fusion: " .. S.rifts .. " rifts, " .. carved .. " tiles of land became sea, " ..
 		midMade .. " of " .. S.mid .. " middle-sea islands, " .. outerMade .. " of " .. S.outer .. " outer islands; " ..
 		#sizes .. " landmasses, biggest shares " .. table.concat(shares, " ") .. splitNote .. "; start placement method " .. PA_METHOD)
 end
@@ -719,7 +720,7 @@ function PA_ConnectLandmasses()
 		local x = (i - 1) % W
 		spots[#spots + 1] = x .. "," .. ((i - 1 - x) / W)
 	end
-	print("Lekmap Fusion: connect all continents: " .. bridges .. " bridges (" .. raised .. " tiles raised)" ..
+	print("Mundi Fusion: connect all continents: " .. bridges .. " bridges (" .. raised .. " tiles raised)" ..
 		(PA_CANAL and ("; canal spots at " .. ((#spots > 0) and table.concat(spots, " ") or "none")) or "") .. "; every civ starts on the joined land")
 end
 
@@ -867,7 +868,7 @@ function PA_Magnetize(types, W, H, wrap, canals)
 								if not set[a] and isLand(a) and not touch[id[a]] then touch[id[a]] = true; count = count + 1 end
 							end
 						end
-						if count == 1 then spots[#spots + 1] = { len = len, tie = Map.Rand(1000, "Lekmap Fusion speck"), spot = spot, set = set } end
+						if count == 1 then spots[#spots + 1] = { len = len, tie = Map.Rand(1000, "Mundi Fusion speck"), spot = spot, set = set } end
 					end
 				end
 			end
@@ -905,7 +906,7 @@ function PA_PullInSpecks()
 		end
 	end
 	if moved + sunk > 0 then Map.RecalculateAreas() end
-	print("Lekmap Fusion: specks under " .. PA_MIN_ISLAND .. " tiles: " .. moved .. " pulled onto nearby land, " .. sunk .. " sunk")
+	print("Mundi Fusion: specks under " .. PA_MIN_ISLAND .. " tiles: " .. moved .. " pulled onto nearby land, " .. sunk .. " sunk")
 end
 
 ------------------------------------------------------------------------------
@@ -993,12 +994,12 @@ function PA_DeepSea()
 			end
 		end
 	end
-	print("Lekmap Fusion: deep sea: " .. deepened .. " shallow tiles made deep; water beside land stays shallow, and islands within " ..
+	print("Mundi Fusion: deep sea: " .. deepened .. " shallow tiles made deep; water beside land stays shallow, and islands within " ..
 		PA_ISLAND_REACH .. " tiles of other land keep a shallow way to it")
 end
 
 function GeneratePlotTypes()
-	print("Generating Plot Types (Lua Pangaea, Lekmap Fusion) ...");
+	print("Generating Plot Types (Lua Pangaea, Mundi Fusion) ...");
 	local fractal_world = PangaeaFractalWorld.Create();
 	local plotTypes = fractal_world:GeneratePlotTypes();
 	PA_PullApart(plotTypes);
@@ -1120,7 +1121,7 @@ function PA_PickStart(iBest, scoreBest, region, iWestX, iSouthY, iWidth, iHeight
 	end
 	local x, y = PA_XY(pick)
 	local nearest = PA_NearestStart(pick, region, starts)
-	print(string.format("Lekmap Fusion: no spot in region %d met every start rule; it starts at %d,%d with %d land tiles within 3, nearest civ %s tiles",
+	print(string.format("Mundi Fusion: no spot in region %d met every start rule; it starts at %d,%d with %d land tiles within 3, nearest civ %s tiles",
 		region, x, y, PA_Land3(pick), (nearest == math.huge) and "none" or tostring(nearest)))
 	return pick
 end
@@ -1177,7 +1178,7 @@ function PA_SetStartRules(regions)
 	end
 	PA_LAND3 = {}
 	PA_START_GAP = PA_StartGap(#regions, usable)
-	print("Lekmap Fusion starts: " .. #regions .. " civs on " .. usable .. " usable tiles; at least " .. PA_START_GAP ..
+	print("Mundi Fusion starts: " .. #regions .. " civs on " .. usable .. " usable tiles; at least " .. PA_START_GAP ..
 		" tiles apart, with " .. PA_START_MIN_LAND .. "+ land tiles within 3 of each start")
 end
 
@@ -1210,7 +1211,7 @@ function PA_DumpMap()
 			end
 		end
 	end
-	print("Lekmap Fusion map: " .. W .. "x" .. H .. ", north first; ~ ocean, - coast, o lake, # land, n hills, ^ mountains, A-V civ starts by player number, * city-state starts")
+	print("Mundi Fusion map: " .. W .. "x" .. H .. ", north first; ~ ocean, - coast, o lake, # land, n hills, ^ mountains, A-V civ starts by player number, * city-state starts")
 	for y = H - 1, 0, -1 do
 		local row = {}
 		for x = 0, W - 1 do
@@ -1225,12 +1226,12 @@ function PA_DumpMap()
 			end
 			row[#row + 1] = c
 		end
-		print(string.format("Lekmap Fusion map %02d: %s", y, table.concat(row)))
+		print(string.format("Mundi Fusion map %02d: %s", y, table.concat(row)))
 	end
 end
 
 -- Mountains. Lekmap's Pangaea makes peaks of the top 15% of its ridge field, Lekmap Continents of the
--- top 30%: ranges where Pangaea leaves specks. Called from Lekmap's mountain line, marked "Lekmap Fusion".
+-- top 30%: ranges where Pangaea leaves specks. Called from Lekmap's mountain line, marked "Mundi Fusion".
 function PA_MountainPercentile(p)
 	local S = PA_Settings()
 	if S.on == 1 and S.mountains == 1 then return p - 15 end
@@ -1268,7 +1269,7 @@ function PA_CheckBridges()
 			if plot ~= nil and id[plot:GetY() * W + plot:GetX() + 1] ~= main then apart[#apart + 1] = string.sub("ABCDEFGHIJKLMNOPQRSTUV", p + 1, p + 1) end
 		end
 	end
-	print("Lekmap Fusion: bridges checked: " .. fixed .. " mountains on bridges made hills; " ..
+	print("Mundi Fusion: bridges checked: " .. fixed .. " mountains on bridges made hills; " ..
 		((#apart == 0) and "every civ can walk to every other" or ("WARNING civs " .. table.concat(apart, " ") .. " cannot walk to the rest")))
 end
 
@@ -1276,7 +1277,7 @@ local PA_LekmapGenerateMap = GenerateMap
 function GenerateMap()
 	PA_LekmapGenerateMap()
 	local checked, why = pcall(PA_CheckBridges)
-	if not checked then print("Lekmap Fusion: WARNING could not check the bridges: " .. tostring(why)) end
+	if not checked then print("Mundi Fusion: WARNING could not check the bridges: " .. tostring(why)) end
 	local ok, err = pcall(PA_DumpMap)
-	if not ok then print("Lekmap Fusion: WARNING could not write the map to the log: " .. tostring(err)) end
+	if not ok then print("Mundi Fusion: WARNING could not write the map to the log: " .. tostring(err)) end
 end
