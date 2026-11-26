@@ -296,24 +296,14 @@ for _, e in ipairs(emblems) do if e.player == 0 and e.size == 45 then mine = tru
 check(mine, "you show as your civilization's emblem")
 for _, size in ipairs(hooked) do check(size >= 64, "no leader portrait is asked for at a size the game lacks (" .. size .. ")") end
 
--- resizing from the grip: the window grows by the mouse's move, its top-left corner stays put
-check(Controls.Window._sy == 900, "the window opens a quarter taller than before (900, was 720)")
-local w0, h0 = Controls.Window._sx, Controls.Window._sy
-local ox0, oy0 = Controls.Window:GetOffsetX(), Controls.Window:GetOffsetY()
-UIManager._x, UIManager._y = 0, 0
-click(Controls.Grip, "down")
-UIManager._x, UIManager._y = 100, 60
-handlers.input(MouseEvents.MouseMove, 0, 0)
-check(Controls.Window._sx == w0 + 100 and Controls.Window._sy == h0 + 60, "the window grows by as much as the mouse moves")
-check(Controls.Window:GetOffsetX() == ox0 + 50 and Controls.Window:GetOffsetY() == oy0 + 30, "its top-left corner stays where it was")
-handlers.input(MouseEvents.LButtonUp, 0, 0)
--- resize within limits
-UIManager._x, UIManager._y = 0, 0
-click(Controls.Grip, "down")
-UIManager._x, UIManager._y = 5000, 5000
-handlers.input(MouseEvents.MouseMove, 0, 0)
-handlers.input(MouseEvents.LButtonUp, 0, 0)
-check(Controls.Window._sx == 1400 and Controls.Window._sy == 1125, "resizing stops at 1400x1125")
+-- one size, no resizing: 1080 by 900, smaller only on a screen that cannot hold it
+check(Controls.Window._sx == 1080 and Controls.Window._sy == 900, "the window opens at 1080x900")
+check(next(Controls.Grip._cb) == nil, "there is no resize grip to drag")
+local xmlPath = ((arg and arg[1]) or "mod/MessageCenter.lua"):gsub("%.lua$", ".xml")
+local xf = io.open(xmlPath)
+local xml = xf and xf:read("*a") or ""
+if xf then xf:close() end
+check(xml ~= "" and not xml:find('ID="Grip"'), "nor one in the window's layout")
 local function headNames()
 	local shown, all = 0, 0
 	for _, ch in ipairs(Controls.HeadPortraits._children) do
@@ -322,21 +312,17 @@ local function headNames()
 	return shown, all
 end
 local shownWide, allWide = headNames()
-check(allWide == 4 and shownWide == 4, "wide: the new group's four, each named")
-click(Controls.Grip, "down")
-UIManager._x, UIManager._y = -5000, -5000
-handlers.input(MouseEvents.MouseMove, 0, 0)
-handlers.input(MouseEvents.LButtonUp, 0, 0)
+check(allWide == 4 and shownWide == 0, "at 1080 the new group's four names would not fit on one row: four icons")
+UIManager.GetScreenSizeVal = function() return 800, 600 end
+click(Controls.CloseButton); click(Controls.OpenButton)
+check(Controls.Window._sx == 760 and Controls.Window._sy == 560, "on a small screen it fits the screen, down to 760 wide")
 local shownNarrow, allNarrow = headNames()
-check(allNarrow == 4 and shownNarrow == 0, "narrow: names that would not fit on one row go, icons stay")
-UIManager._x, UIManager._y = 0, 0
+check(allNarrow == 4 and shownNarrow == 0, "and at 760 the same")
 UIManager.GetScreenSizeVal = function() return 1280, 800 end
-click(Controls.Grip, "down")
-UIManager._x, UIManager._y = 5000, 5000
-handlers.input(MouseEvents.MouseMove, 0, 0)
-handlers.input(MouseEvents.LButtonUp, 0, 0)
-check(Controls.Window._sx == 1240 and Controls.Window._sy == 760, "and never past the screen")
+click(Controls.CloseButton); click(Controls.OpenButton)
+check(Controls.Window._sx == 1080 and Controls.Window._sy == 760, "and never past the screen")
 UIManager.GetScreenSizeVal = nil
+click(Controls.CloseButton); click(Controls.OpenButton)
 
 -- moving: a click drops the window where it is, even when the button-up never arrives
 UIManager._x, UIManager._y = 0, 0

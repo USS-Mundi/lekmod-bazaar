@@ -8,7 +8,7 @@ if Game.MCChats == nil then
 	return;
 end
 
-local MIN_W, MIN_H, MAX_W, MAX_H = 760, 480, 1400, 1125;
+local WIN_W, WIN_H, MIN_W, MIN_H = 1080, 900, 760, 480;
 local LIST_W = 320;
 local MAX_LINES_SHOWN = 200;
 local GOLD = "[COLOR:226:201:138:255]";
@@ -16,7 +16,6 @@ local DIM = "[COLOR:169:179:172:255]";
 local LIGHT = "[COLOR:236:231:216:255]";
 local END = "[ENDCOLOR]";
 
-local g_Settings = Modding.OpenUserData("MessageCenter", 1);
 -- Lists are rebuilt from fresh instances, so a stack shows its children in the order they are made.
 local function Build(name, parent)
 	local inst = {};
@@ -25,7 +24,7 @@ local function Build(name, parent)
 end
 local g_ListKey = nil;
 
-local g_W, g_H = 1080, 900;
+local g_W, g_H = WIN_W, WIN_H;
 local g_Chats = {};        -- id -> chat from Game.MCChats()
 local g_People = {};       -- token -> { Player, Leader, Civ, Ally, Minor, CityState, Speakable }
 local g_CsSeen = {};       -- city-state player -> the last line of its conversation the human has seen
@@ -33,7 +32,7 @@ local g_Sel = nil;         -- { Id, Members = {tokens} }
 local g_Rendered = { Id = nil, Count = -1, Width = -1 };
 local g_LastUnread = nil;
 local g_Chosen = {};       -- New group: token -> true
-local g_Drag = nil;        -- { Kind = "move"|"size", X, Y, W, H, OffX, OffY }
+local g_Drag = nil;        -- { X, Y, OffX, OffY } while the window is being moved
 
 -- ===== who is who =====
 
@@ -711,27 +710,20 @@ Controls.DismissButton:RegisterCallback(Mouse.eLClick, function()
 	RenderChat(true);
 end);
 
--- ===== layout and resizing =====
+-- ===== layout =====
 
--- The largest size the window may take: its limits, and never past the screen.
-local function MaxSize()
-	local mw, mh = MAX_W, MAX_H;
+-- The window's one size, smaller only on a screen that cannot hold it.
+local function WindowSize()
+	local w, h = WIN_W, WIN_H;
 	if UIManager.GetScreenSizeVal then
 		local sw, sh = UIManager:GetScreenSizeVal();
-		if sw and sh and sw > 0 and sh > 0 then mw, mh = math.min(mw, sw - 40), math.min(mh, sh - 40); end
+		if sw and sh and sw > 0 and sh > 0 then w, h = math.min(w, sw - 40), math.min(h, sh - 40); end
 	end
-	return math.max(MIN_W, mw), math.max(MIN_H, mh);
-end
-
-local function SaveSize()
-	g_Settings.SetValue("W", g_W);
-	g_Settings.SetValue("H2", g_H);
+	return math.max(MIN_W, w), math.max(MIN_H, h);
 end
 
 local function Layout()
-	local mw, mh = MaxSize();
-	g_W = math.max(MIN_W, math.min(mw, g_W));
-	g_H = math.max(MIN_H, math.min(mh, g_H));
+	g_W, g_H = WindowSize();
 	local w, h = g_W, g_H;
 	Controls.Window:SetSizeVal(w, h);
 	Controls.DragBar:SetSizeVal(w - 50, 42);
@@ -761,24 +753,17 @@ local function Layout()
 	Controls.Window:ReprocessAnchoring();
 end
 
-Controls.Grip:RegisterCallback(Mouse.eLDown, function()
-	local x, y = UIManager:GetMousePos();
-	g_Drag = { Kind = "size", X = x, Y = y, W = g_W, H = g_H, OffX = Controls.Window:GetOffsetX(), OffY = Controls.Window:GetOffsetY() };
-end);
 Controls.DragBar:RegisterCallback(Mouse.eLDown, function()
 	local x, y = UIManager:GetMousePos();
-	g_Drag = { Kind = "move", X = x, Y = y, OffX = Controls.Window:GetOffsetX(), OffY = Controls.Window:GetOffsetY() };
+	g_Drag = { X = x, Y = y, OffX = Controls.Window:GetOffsetX(), OffY = Controls.Window:GetOffsetY() };
 end);
 
--- Ends a move or a resize where the mouse is. The button-up can go astray (it lands on a control, or off the window),
--- so letting go on the bar or the grip, or a click anywhere, drops it.
+-- Ends a move where the mouse is. The button-up can go astray (it lands on a control, or off the window), so letting
+-- go on the bar, or a click anywhere, drops it.
 local function EndDrag()
-	if g_Drag == nil then return; end
-	if g_Drag.Kind == "size" then SaveSize(); BuildList(); RenderChat(true); end
 	g_Drag = nil;
 end
 Controls.DragBar:RegisterCallback(Mouse.eLUp, EndDrag);
-Controls.Grip:RegisterCallback(Mouse.eLUp, EndDrag);
 
 -- ===== New group =====
 
@@ -1006,16 +991,7 @@ ContextPtr:SetInputHandler(function(uiMsg, wParam, lParam)
 	if g_Drag ~= nil then
 		if uiMsg == MouseEvents.MouseMove then
 			local x, y = UIManager:GetMousePos();
-			if g_Drag.Kind == "size" then
-				-- The window is centred on its offset, so it grows by the mouse's move and shifts by half of what it
-				-- grew: its top-left corner stays put and the grip stays under the mouse. The chat redraws on letting go.
-				g_W = g_Drag.W + (x - g_Drag.X);
-				g_H = g_Drag.H + (y - g_Drag.Y);
-				Layout();
-				Controls.Window:SetOffsetVal(g_Drag.OffX + (g_W - g_Drag.W) / 2, g_Drag.OffY + (g_H - g_Drag.H) / 2);
-			else
-				Controls.Window:SetOffsetVal(g_Drag.OffX + (x - g_Drag.X), g_Drag.OffY + (y - g_Drag.Y));
-			end
+			Controls.Window:SetOffsetVal(g_Drag.OffX + (x - g_Drag.X), g_Drag.OffY + (y - g_Drag.Y));
 			return true;
 		elseif uiMsg == MouseEvents.LButtonUp or uiMsg == MouseEvents.LButtonDown then
 			EndDrag();
@@ -1042,7 +1018,4 @@ ContextPtr:SetUpdate(function(dt)
 	end
 end);
 
-g_W = tonumber(g_Settings.GetValue("W")) or 1080;
--- H2 replaced H when the window grew a quarter taller; a height saved before that grows by the same quarter.
-g_H = tonumber(g_Settings.GetValue("H2")) or math.floor((tonumber(g_Settings.GetValue("H")) or 720) * 1.25);
 RefreshAll();

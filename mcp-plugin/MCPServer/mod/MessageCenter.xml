@@ -228,9 +228,6 @@
 			<Label ID="ReadOnly" Anchor="L,B" Offset="24,24" Font="TwCenMT18" FontStyle="Shadow" Hidden="1" />
 		</Grid>
 
-		<Button ID="Grip" Anchor="R,B" Offset="3,3" Size="18,18" ToolTip="Drag to resize">
-			<Image Anchor="C,C" Size="16,16" Texture="mc_grip.dds" />
-		</Button>
 	</Grid>
 
 	<!-- New group -->
