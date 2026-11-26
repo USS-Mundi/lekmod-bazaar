@@ -9,7 +9,7 @@ This is not an official LEKMOD release. If something breaks, report it here, not
 ## What you need
 
 - Civilization V with every DLC except the map packs.
-- LEKMOD v35.4 and Lekmap, installed with [LEKMOD's guide](https://github.com/EnormousApplePie/Lekmod/blob/main/docs/installation.md).
+- LEKMOD v35.4 and Lekmap. They are two separate downloads, and [LEKMOD's guide](https://github.com/EnormousApplePie/Lekmod/blob/main/docs/installation.md) shows how to install each. The zip here contains neither.
 - Windows. On a Mac, the Windows version of the game through CrossOver.
 - [Claude Code](https://claude.com/claude-code) on the same computer, to start AI players with one command. Any other MCP client can connect too.
 
@@ -17,9 +17,12 @@ It works in single player only.
 
 ## Install
 
+Install LEKMOD and Lekmap first, then:
+
 1. Download `lekmod-bazaar.zip` from [Releases](../../releases) and unzip it.
-2. Open LEKMOD's folder in your game's `Assets\DLC` folder. Move its `CvGameCore_Expansion2.dll` somewhere safe, then copy in the one from the zip.
-3. Copy both folders from the zip's `MODS` folder into `Documents\My Games\Sid Meier's Civilization 5\MODS`. Updating from an earlier release, replace the folders you have.
+2. Open your game folder: in Steam, right-click Civilization V and choose Manage › Browse local files.
+3. Go into `Assets\DLC`, then into LEKMOD's folder (its name starts with `LEKMOD`). Move the `CvGameCore_Expansion2.dll` in it somewhere safe, then copy in the `CvGameCore_Expansion2.dll` from the zip.
+4. Copy the two folders in the zip's `MODS` folder, `LEKMOD for Bazaar (v 1)` and `MCP Server for LEKMOD (v 1)`, into `Documents\My Games\Sid Meier's Civilization 5\MODS`. If you have them from an earlier release, replace them.
 
 ## Get started
 
