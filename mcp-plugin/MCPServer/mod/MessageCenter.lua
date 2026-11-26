@@ -8,7 +8,7 @@ if Game.MCChats == nil then
 	return;
 end
 
-local MIN_W, MIN_H, MAX_W, MAX_H = 760, 480, 1400, 900;
+local MIN_W, MIN_H, MAX_W, MAX_H = 760, 480, 1400, 1125;
 local LIST_W = 320;
 local MAX_LINES_SHOWN = 200;
 local GOLD = "[COLOR:226:201:138:255]";
@@ -25,7 +25,7 @@ local function Build(name, parent)
 end
 local g_ListKey = nil;
 
-local g_W, g_H = 1080, 720;
+local g_W, g_H = 1080, 900;
 local g_Chats = {};        -- id -> chat from Game.MCChats()
 local g_People = {};       -- token -> { Player, Leader, Civ, Ally, Minor, CityState, Speakable }
 local g_CsSeen = {};       -- city-state player -> the last line of its conversation the human has seen
@@ -181,21 +181,22 @@ end
 
 local function TextOf(key) return key and Locale.ConvertTextKey(key) or "" end
 
--- A civilization's uniques: { Kind, Info (its row), Replaces (the standard row it replaces) }.
+-- A civilization's uniques: { Kind, Info (its row), Replaces (the standard row it replaces) }. Rows Second Leader adds
+-- for a merged second (SecondLeaderFrom) are the second's, shown under it.
 local function Uniques(civType)
 	local out = {};
 	for row in GameInfo.Civilization_UnitClassOverrides{ CivilizationType = civType } do
-		local unit = row.UnitType and GameInfo.Units[row.UnitType];
+		local unit = not row.SecondLeaderFrom and row.UnitType and GameInfo.Units[row.UnitType];
 		local cls = GameInfo.UnitClasses[row.UnitClassType];
 		if unit then table.insert(out, { Kind = "unit", Info = unit, Replaces = cls and GameInfo.Units[cls.DefaultUnit] }); end
 	end
 	for row in GameInfo.Civilization_BuildingClassOverrides{ CivilizationType = civType } do
-		local b = row.BuildingType and GameInfo.Buildings[row.BuildingType];
+		local b = not row.SecondLeaderFrom and row.BuildingType and GameInfo.Buildings[row.BuildingType];
 		local cls = GameInfo.BuildingClasses[row.BuildingClassType];
 		if b then table.insert(out, { Kind = "building", Info = b, Replaces = cls and GameInfo.Buildings[cls.DefaultBuilding] }); end
 	end
 	for imp in GameInfo.Improvements{ CivilizationType = civType } do
-		table.insert(out, { Kind = "improvement", Info = imp });
+		if not imp.SecondLeaderFrom then table.insert(out, { Kind = "improvement", Info = imp }); end
 	end
 	return out;
 end
@@ -228,6 +229,17 @@ function LeaderParts(playerID)
 			for _, u in ipairs(l[1]) do
 				local info = l[3][u.Type];
 				if info then table.insert(second.Uniques, { Kind = l[2], Info = info, Replaces = u.Replaces and l[3][u.Replaces], Merged = u.Merged }); end
+			end
+		end
+		if s.Improvements then
+			for _, u in ipairs(s.Improvements) do
+				local info = GameInfo.Improvements[u.Type];
+				if info then table.insert(second.Uniques, { Kind = "improvement", Info = info, Merged = u.Merged, Why = u.Clash }); end
+			end
+		else
+			-- a Second Leader from before its improvements merged
+			for imp in GameInfo.Improvements{ CivilizationType = s.Civ } do
+				table.insert(second.Uniques, { Kind = "improvement", Info = imp, Merged = false, Why = "a unique improvement stays with its own civilization." });
 			end
 		end
 		if second.Civ and second.Leader then table.insert(parts, second); end
@@ -498,6 +510,7 @@ local function SetHeader()
 	Controls.HeadPortraits:DestroyAllChildren();
 	if g_Sel == nil then
 		Controls.MembersButton:SetHide(true);
+		Controls.DismissButton:SetHide(true);
 		return;
 	end
 	local tokens = { "human" };
@@ -533,6 +546,9 @@ local function SetHeader()
 	Controls.HeadPortraits:CalculateSize();
 	Controls.HeadPortraits:ReprocessAnchoring();
 	Controls.MembersButton:SetHide(g_Sel.Id == "all" or CityState(g_Sel.Id) ~= nil);
+	-- a city-state a model plays for you: Dismiss hands it back to the game's AI
+	local cs = CityState(g_Sel.Id);
+	Controls.DismissButton:SetHide(not (cs and cs.Speakable and cs.Seat ~= nil and Game.LLMChat ~= nil));
 end
 
 local function ChatWidth()
@@ -686,11 +702,36 @@ end
 Controls.ChatEntry:RegisterCallback(function() Send(); end);
 Controls.SendButton:RegisterCallback(Mouse.eLClick, Send);
 
+-- Dismiss: the same as writing "dismiss" to it, which the plugin reads as switching it off.
+Controls.DismissButton:RegisterCallback(Mouse.eLClick, function()
+	local cs = g_Sel and CityState(g_Sel.Id);
+	if not (cs and cs.Speakable and Game.LLMChat) then return; end
+	Game.LLMChat(cs.Player, "dismiss");
+	RefreshAll();
+	RenderChat(true);
+end);
+
 -- ===== layout and resizing =====
 
+-- The largest size the window may take: its limits, and never past the screen.
+local function MaxSize()
+	local mw, mh = MAX_W, MAX_H;
+	if UIManager.GetScreenSizeVal then
+		local sw, sh = UIManager:GetScreenSizeVal();
+		if sw and sh and sw > 0 and sh > 0 then mw, mh = math.min(mw, sw - 40), math.min(mh, sh - 40); end
+	end
+	return math.max(MIN_W, mw), math.max(MIN_H, mh);
+end
+
+local function SaveSize()
+	g_Settings.SetValue("W", g_W);
+	g_Settings.SetValue("H2", g_H);
+end
+
 local function Layout()
-	g_W = math.max(MIN_W, math.min(MAX_W, g_W));
-	g_H = math.max(MIN_H, math.min(MAX_H, g_H));
+	local mw, mh = MaxSize();
+	g_W = math.max(MIN_W, math.min(mw, g_W));
+	g_H = math.max(MIN_H, math.min(mh, g_H));
 	local w, h = g_W, g_H;
 	Controls.Window:SetSizeVal(w, h);
 	Controls.DragBar:SetSizeVal(w - 50, 42);
@@ -718,13 +759,11 @@ local function Layout()
 	Controls.ChatEntry:SetSizeX(cw - 28 - 120 - 10 - 24);
 	SetHeader();   -- its names come and go with the width
 	Controls.Window:ReprocessAnchoring();
-	g_Settings.SetValue("W", w);
-	g_Settings.SetValue("H", h);
 end
 
 Controls.Grip:RegisterCallback(Mouse.eLDown, function()
 	local x, y = UIManager:GetMousePos();
-	g_Drag = { Kind = "size", X = x, Y = y, W = g_W, H = g_H };
+	g_Drag = { Kind = "size", X = x, Y = y, W = g_W, H = g_H, OffX = Controls.Window:GetOffsetX(), OffY = Controls.Window:GetOffsetY() };
 end);
 Controls.DragBar:RegisterCallback(Mouse.eLDown, function()
 	local x, y = UIManager:GetMousePos();
@@ -735,7 +774,7 @@ end);
 -- so letting go on the bar or the grip, or a click anywhere, drops it.
 local function EndDrag()
 	if g_Drag == nil then return; end
-	if g_Drag.Kind == "size" then BuildList(); RenderChat(true); end
+	if g_Drag.Kind == "size" then SaveSize(); BuildList(); RenderChat(true); end
 	g_Drag = nil;
 end
 Controls.DragBar:RegisterCallback(Mouse.eLUp, EndDrag);
@@ -887,7 +926,7 @@ function OpenLeaderCard(playerID)
 			local icon = Build("CardUniqueInstance", c.Uniques);
 			icon.Icon:SetHide(not IconHookup(u.Info.PortraitIndex, 45, u.Info.IconAtlas, icon.Icon));
 			icon.Root:SetAlpha(u.Merged and 1 or 0.35);
-			icon.Root:SetToolTipString((KIND_LABEL[u.Kind] or "") .. ": " .. UniqueLine(u) .. (u.Merged and "" or "[NEWLINE]Not merged: the first civilization has its own."));
+			icon.Root:SetToolTipString((KIND_LABEL[u.Kind] or "") .. ": " .. UniqueLine(u) .. (u.Merged and "" or "[NEWLINE]Not merged: " .. (u.Why or "the first civilization has its own.")));
 		end
 		c.Uniques:CalculateSize();
 		local h = c.Ability:GetSizeY();
@@ -968,10 +1007,12 @@ ContextPtr:SetInputHandler(function(uiMsg, wParam, lParam)
 		if uiMsg == MouseEvents.MouseMove then
 			local x, y = UIManager:GetMousePos();
 			if g_Drag.Kind == "size" then
-				g_W = g_Drag.W + (x - g_Drag.X) * 2;
-				g_H = g_Drag.H + (y - g_Drag.Y) * 2;
+				-- The window is centred on its offset, so it grows by the mouse's move and shifts by half of what it
+				-- grew: its top-left corner stays put and the grip stays under the mouse. The chat redraws on letting go.
+				g_W = g_Drag.W + (x - g_Drag.X);
+				g_H = g_Drag.H + (y - g_Drag.Y);
 				Layout();
-				RenderChat(false);
+				Controls.Window:SetOffsetVal(g_Drag.OffX + (g_W - g_Drag.W) / 2, g_Drag.OffY + (g_H - g_Drag.H) / 2);
 			else
 				Controls.Window:SetOffsetVal(g_Drag.OffX + (x - g_Drag.X), g_Drag.OffY + (y - g_Drag.Y));
 			end
@@ -1002,5 +1043,6 @@ ContextPtr:SetUpdate(function(dt)
 end);
 
 g_W = tonumber(g_Settings.GetValue("W")) or 1080;
-g_H = tonumber(g_Settings.GetValue("H")) or 720;
+-- H2 replaced H when the window grew a quarter taller; a height saved before that grows by the same quarter.
+g_H = tonumber(g_Settings.GetValue("H2")) or math.floor((tonumber(g_Settings.GetValue("H")) or 720) * 1.25);
 RefreshAll();

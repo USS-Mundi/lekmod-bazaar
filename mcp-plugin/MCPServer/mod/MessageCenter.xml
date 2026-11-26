@@ -172,7 +172,7 @@
 	</Button>
 
 	<!-- the window -->
-	<Grid ID="Window" Anchor="C,C" Size="1080,720" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
+	<Grid ID="Window" Anchor="C,C" Size="1080,900" Texture="mc_win.dds" ULSize="8,8" ULTexStart="0,0" UCSize="1,8" UCTexStart="8,0" URSize="8,8" URTexStart="24,0" LSize="8,1" LTexStart="0,8" CSize="1,1" CTexStart="8,8" RSize="8,1" RTexStart="24,8" LLSize="8,8" LLTexStart="0,24" LCSize="1,8" LCTexStart="8,24" LRSize="8,8" LRTexStart="24,24" ConsumeMouse="1" Hidden="1">
 		<Button ID="DragBar" Anchor="L,T" Offset="4,4" Size="1030,42" />
 		<Box ID="RuleLeft" Anchor="L,T" Offset="20,24" Size="400,1" Color="205,176,106,170" />
 		<Label ID="Title" Anchor="C,T" Offset="0,17" String="MESSAGE CENTER" Font="TwCenMT16" FontStyle="Shadow" />
@@ -202,6 +202,10 @@
 				<Button ID="MembersButton" Anchor="R,C" Offset="10,0" Size="96,28" ToolTip="Who is in this chat">
 					<Grid Anchor="C,C" Size="96,28" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
 					<Label Anchor="C,C" String="MEMBERS" Font="TwCenMT14" FontStyle="Shadow" />
+				</Button>
+				<Button ID="DismissButton" Anchor="R,C" Offset="10,0" Size="110,28" Hidden="1" ToolTip="Stop the model playing this city-state: the game's AI takes it back, and your alliance stays as it is">
+					<Grid Anchor="C,C" Size="110,28" Texture="mc_ghost.dds" ULSize="5,5" ULTexStart="0,0" UCSize="1,5" UCTexStart="5,0" URSize="5,5" URTexStart="27,0" LSize="5,1" LTexStart="0,5" CSize="1,1" CTexStart="5,5" RSize="5,1" RTexStart="27,5" LLSize="5,5" LLTexStart="0,27" LCSize="1,5" LCTexStart="5,27" LRSize="5,5" LRTexStart="27,27" />
+					<Label Anchor="C,C" String="DISMISS" Font="TwCenMT14" FontStyle="Shadow" />
 				</Button>
 			</Box>
 			<Box ID="ChatRule" Anchor="L,T" Offset="4,84" Size="718,4" Color="40,78,73,235">

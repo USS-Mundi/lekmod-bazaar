@@ -296,12 +296,24 @@ for _, e in ipairs(emblems) do if e.player == 0 and e.size == 45 then mine = tru
 check(mine, "you show as your civilization's emblem")
 for _, size in ipairs(hooked) do check(size >= 64, "no leader portrait is asked for at a size the game lacks (" .. size .. ")") end
 
+-- resizing from the grip: the window grows by the mouse's move, its top-left corner stays put
+check(Controls.Window._sy == 900, "the window opens a quarter taller than before (900, was 720)")
+local w0, h0 = Controls.Window._sx, Controls.Window._sy
+local ox0, oy0 = Controls.Window:GetOffsetX(), Controls.Window:GetOffsetY()
+UIManager._x, UIManager._y = 0, 0
+click(Controls.Grip, "down")
+UIManager._x, UIManager._y = 100, 60
+handlers.input(MouseEvents.MouseMove, 0, 0)
+check(Controls.Window._sx == w0 + 100 and Controls.Window._sy == h0 + 60, "the window grows by as much as the mouse moves")
+check(Controls.Window:GetOffsetX() == ox0 + 50 and Controls.Window:GetOffsetY() == oy0 + 30, "its top-left corner stays where it was")
+handlers.input(MouseEvents.LButtonUp, 0, 0)
 -- resize within limits
+UIManager._x, UIManager._y = 0, 0
 click(Controls.Grip, "down")
 UIManager._x, UIManager._y = 5000, 5000
 handlers.input(MouseEvents.MouseMove, 0, 0)
 handlers.input(MouseEvents.LButtonUp, 0, 0)
-check(Controls.Window._sx == 1400 and Controls.Window._sy == 900, "resizing stops at 1400x900")
+check(Controls.Window._sx == 1400 and Controls.Window._sy == 1125, "resizing stops at 1400x1125")
 local function headNames()
 	local shown, all = 0, 0
 	for _, ch in ipairs(Controls.HeadPortraits._children) do
@@ -317,6 +329,14 @@ handlers.input(MouseEvents.MouseMove, 0, 0)
 handlers.input(MouseEvents.LButtonUp, 0, 0)
 local shownNarrow, allNarrow = headNames()
 check(allNarrow == 4 and shownNarrow == 0, "narrow: names that would not fit on one row go, icons stay")
+UIManager._x, UIManager._y = 0, 0
+UIManager.GetScreenSizeVal = function() return 1280, 800 end
+click(Controls.Grip, "down")
+UIManager._x, UIManager._y = 5000, 5000
+handlers.input(MouseEvents.MouseMove, 0, 0)
+handlers.input(MouseEvents.LButtonUp, 0, 0)
+check(Controls.Window._sx == 1240 and Controls.Window._sy == 760, "and never past the screen")
+UIManager.GetScreenSizeVal = nil
 
 -- moving: a click drops the window where it is, even when the button-up never arrives
 UIManager._x, UIManager._y = 0, 0
@@ -430,8 +450,17 @@ check(valletta and hover(valletta.Root) == nil, "a city-state's row has no leade
 Game.SecondLeader = function(id)
 	if id ~= 1 then return nil end
 	return { Civ = "CIV_ENGLAND", Leader = "LEADER_ELIZABETH", Traits = { { Type = "TRAIT_OCEAN", Merged = true, LeftOut = "its ban on training Settler (bans never pass on)" } },
-		Units = { { Type = "UNIT_LONGBOW", Replaces = "UNIT_CROSSBOWMAN", Merged = true }, { Type = "UNIT_HORSEMAN", Replaces = "UNIT_HORSEMAN", Merged = false } }, Buildings = {} }
+		Units = { { Type = "UNIT_LONGBOW", Replaces = "UNIT_CROSSBOWMAN", Merged = true }, { Type = "UNIT_HORSEMAN", Replaces = "UNIT_HORSEMAN", Merged = false } }, Buildings = {},
+		Improvements = { { Type = "IMPROVEMENT_CASTLE", Merged = true } } }
 end
+-- Second Leader's rows on screens: the merged Longbow also listed as India's, marked as the second's
+local realUnitOverrides, realImprovements = GameInfo.Civilization_UnitClassOverrides, GameInfo.Improvements
+GameInfo.Civilization_UnitClassOverrides = Table({ { CivilizationType = "CIV_INDIA", UnitClassType = "UNITCLASS_HORSEMAN", UnitType = "UNIT_ELEPHANT" },
+	{ CivilizationType = "CIV_INDIA", UnitClassType = "UNITCLASS_SETTLER" },
+	{ CivilizationType = "CIV_INDIA", UnitClassType = "UNITCLASS_CROSSBOWMAN", UnitType = "UNIT_LONGBOW", SecondLeaderFrom = "CIV_ENGLAND" } })
+-- the merged Castle is also listed as India's, marked as the second's, as SecondLeaderRows.lua lists it on screens
+GameInfo.Improvements = Table({ { Type = "IMPROVEMENT_CASTLE", CivilizationType = "CIV_ENGLAND", Description = "Castle", PortraitIndex = 4, IconAtlas = "I" },
+	{ Type = "IMPROVEMENT_CASTLE", CivilizationType = "CIV_INDIA", SecondLeaderFrom = "CIV_ENGLAND", Description = "Castle", PortraitIndex = 4, IconAtlas = "I" } })
 local ashokaHead
 for _, ch in ipairs(Controls.HeadPortraits._children) do
 	if ch.name == "HeadInstance" and ch.inst.Name:GetText():find("Ashoka") then ashokaHead = ch.inst end
@@ -443,10 +472,14 @@ click(ashokaHead.Root)
 check(not Controls.LeaderCard:IsHidden(), "a click opens the leader card")
 check(children(Controls.CardStack, "CardCivInstance") == 2, "the card shows both civilizations")
 check(Controls.CardNote:IsHidden(), "a merged card has no note at the bottom")
-check(children(Controls.CardStack._children[1].inst.Uniques, "CardUniqueInstance") == 1, "a forbidden class is not a unique")
+check(children(Controls.CardStack._children[1].inst.Uniques, "CardUniqueInstance") == 1,
+	"the first shows its own uniques only: not a forbidden class, not the second's merged Longbow")
 local second = Controls.CardStack._children[2].inst
 check(second.Name:GetText():find("SECOND") and second.Name:GetText():find("ELIZABETH"), "the second is named as the second")
-check(children(second.Uniques, "CardUniqueInstance") == 2, "the second's uniques, merged or not")
+check(children(second.Uniques, "CardUniqueInstance") == 3, "the second's uniques, merged or not, its improvement too")
+local castle = second.Uniques._children[3].inst
+check((castle.Root._alpha or 1) == 1 and castle.Root._tip:find("Castle") and not castle.Root._tip:find("Not merged"),
+	"the second's unique improvement is merged: shown plainly, under the second")
 check(second.Ability:GetText():find("without its ban on training Settler", 1, true) and not second.Ability:GetText():find("not merged", 1, true),
 	"a merged ability names what of it stays out")
 local faded = second.Uniques._children[2].inst
@@ -454,6 +487,7 @@ check(faded.Root._alpha < 1 and faded.Root._tip:find("Not merged"), "a unique le
 handlers.input(KeyEvents.KeyDown, Keys.VK_ESCAPE, 0)
 check(Controls.LeaderCard:IsHidden() and not Controls.Window:IsHidden(), "Escape closes the card first")
 Game.SecondLeader = nil
+GameInfo.Civilization_UnitClassOverrides, GameInfo.Improvements = realUnitOverrides, realImprovements
 
 -- ===== city-states: every one met, from the MCP plugin; its ally may speak, the rest are greyed and read-only =====
 Players[23] = player("Kabul", "Kabul", 23, true, 1)
@@ -497,15 +531,20 @@ Controls.ChatEntry:SetText("Take the hill.")
 Controls.ChatEntry._cb.default()
 check(#CS_SENT == 1 and CS_SENT[1].player == 22 and CS_SENT[1].text == "Take the hill." and #SENT == mcBefore, "it goes through the game's city-state channel, not a chat file")
 check(Controls.MembersButton:IsHidden(), "a city-state's chat has no Members button")
+check(not Controls.DismissButton:IsHidden(), "a city-state a model plays for you has a Dismiss button")
+click(Controls.DismissButton)
+check(#CS_SENT == 2 and CS_SENT[2].player == 22 and CS_SENT[2].text == "dismiss", "Dismiss switches it off through the game's channel, as writing dismiss does")
+local csSent = #CS_SENT
 
 click(kRow.Root)
 handlers.update(1)
 check(children(Controls.ChatStack, "MineInstance") == 1, "a greyed city-state still shows your past conversation")
 check(Controls.Field:IsHidden() and Controls.SendButton:IsHidden() and not Controls.ReadOnly:IsHidden(), "a greyed city-state is read-only")
 check(Controls.ReadOnly:GetText():find("Only its ally"), "and says why")
+check(Controls.DismissButton:IsHidden(), "a city-state you do not lead has no Dismiss button")
 Controls.ChatEntry:SetText("Let me in.")
 Controls.ChatEntry._cb.default()
-check(#CS_SENT == 1, "nothing is sent to a city-state you do not lead")
+check(#CS_SENT == csSent, "nothing is sent to a city-state you do not lead")
 
 -- a city-state's new line counts as unread and dings
 Controls.Window:SetHide(true)
@@ -532,7 +571,7 @@ Controls.ChatEntry._cb.default()
 local toCs = SENT[#SENT]
 check(#SENT == sentBefore + 1 and toCs and table.concat(toCs.members, ","):find("p23") and table.concat(toCs.members, ","):find("p1"),
 	"the group is written to by seat: the city-state's and the civilization's")
-check(#CS_SENT == 1, "and nothing more goes down the ally's own line")
+check(#CS_SENT == csSent, "and nothing more goes down the ally's own line")
 -- such a group in the list and in the chat: the city-state by its name
 table.insert(CHATS, { Id = "p23+human+p1", Members = { "p23", "human", "p1" }, Name = "", StartedBy = "human", StartedTurn = 82, Lines = 1, Unread = 0,
 	LastTurn = 82, Stale = false, Last = { Time = "1", Turn = 82, From = "p23", Text = "The strait is held." } })
