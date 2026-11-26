@@ -20,6 +20,8 @@ LOG=$REPO/build/mcp-build.log
 mkdir -p "$LEK/pobj" "$LEK/out/plugin" "$LEK/pinc"; rm -f "$LEK"/pobj/*.obj
 # The agents' rulebook goes into the plugin, so the launcher always hands out the one that matches its tools.
 python3 "$REPO/mcp-plugin/tools/gen_rulebook.py" >/dev/null
+# So do the map pages game_settings carries.
+python3 "$REPO/mcp-plugin/tools/gen_map_pages.py" >/dev/null
 # The release script would write this from VERSION; the sources may include it.
 printf '#pragma once\r\n#define PLUGIN_VERSION "%s"\r\n' "$(sed -n 's/^release //p' "$SRC/../../VERSION" | tr -d '\r')" > "$LEK/pinc/PluginVersion.h"
 win() { printf 'Z:%s' "$1" | sed 's|/|\\|g'; }

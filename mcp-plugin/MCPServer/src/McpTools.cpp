@@ -11,6 +11,7 @@
 #include "McpToolHandlers.h"
 #include "McpCityStates.h"
 #include "McpMapImage.h"
+#include "McpMapPages.h"
 #include <algorithm>
 #include "McpBridge.h"
 #include "McpDiplomacy.h"
@@ -69,7 +70,9 @@ picojson::value McpGameSettingsJson(int iFallbackPlayer)
 	size_t slash = script.find_last_of("\\/");
 	if(slash != std::string::npos) script = script.substr(slash + 1);
 	size_t dot = script.find_last_of('.');
-	o["map_type"] = J(dot == std::string::npos ? script : script.substr(0, dot));
+	std::string mapType = dot == std::string::npos ? script : script.substr(0, dot);
+	o["map_type"] = J(mapType);
+	if(const char* page = McpMapPage(mapType)) o["map"] = J(std::string(page));
 	o["map_size"] = J(GC.getMap().getWorldInfo().GetDescription());
 	PlayerTypes eHuman = GC.getGame().getActivePlayer();
 	PlayerTypes eHandicap = eHuman == NO_PLAYER ? eFallback : eHuman;
@@ -1526,7 +1529,7 @@ namespace
 		  "Social policy branches and policies: what is unlocked, adoptable now, and what each does; plus your culture and the next policy cost.",
 		  SCHEMA_EMPTY, ToolPolicyOptions, LOG_NONE, false },
 		{ "game_settings",
-		  "How this game was set up, fixed for its whole life: start era, map type and size, difficulty, pace, victory types, every game option switched on (including ones setup mods add, such as no happiness) and the map script's own options.",
+		  "How this game was set up, fixed for its whole life: start era, map type and size, difficulty, pace, victory types, every game option switched on (including ones setup mods add, such as no happiness) and the map script's own options. For a map script with a page, map describes what its land and sea are like.",
 		  SCHEMA_EMPTY, ToolGameSettings, LOG_NONE, false },
 		{ "rankings",
 		  "Where you stand, as the game's Demographics and score screens show it: your rank and the best, average and worst for population, food, production, gold, land, military, approval and literacy (best and worst are named only if you have met them); your score breakdown; and each met civilization's score. With the InfoAddict mod loaded, met civilizations also show InfoAddict's figures. history_turns (up to 100) with history_metrics adds the game's per-turn history, e.g. [\"science_yield_per_turn\", \"military_might\"].",

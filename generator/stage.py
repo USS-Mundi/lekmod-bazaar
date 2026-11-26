@@ -147,7 +147,12 @@ def main():
         built[name] = scrubbed(path, os.path.join(STAGE, "dll", name))
     sl = os.path.join(PLUGINS, "second-leader", "mod")
     tod = os.path.join(PLUGINS, "time-of-day", "mod")
-    extras = ([(built["SecondLeader.dll"], "SecondLeader.dll", 0)]
+    # Lekmap Fusion ships as the mod's map script; its includes are the Lekmap files LEKMOD installs.
+    fusion = os.path.join(REPO, "build", "lekmap-fusion", "LekmapFusion.lua")
+    if not os.path.isfile(fusion):
+        sys.exit("no Lekmap Fusion at %s; run maps/lekmap-fusion/build.sh first" % fusion)
+    extras = ([(fusion, "LekmapFusion.lua", 0)]
+              + [(built["SecondLeader.dll"], "SecondLeader.dll", 0)]
               + [(os.path.join(sl, f), f, 0) for f in ("SecondLeader.sql", "SecondLeaderScripts.lua", "SecondLeaderScripts.xml")]
               + [(built["ColorGrade.dll"], "ColorGrade.dll", 0)]
               + [(os.path.join(tod, f), f, 0) for f in ("TimeOfDay.sql", "TimeOfDay.lua", "TimeOfDay.xml")]
@@ -192,6 +197,10 @@ def main():
                       '    <EntryPoint type="InGameUIAddin" file="TimeOfDay.xml">',
                       "      <Name>Time of Day</Name>",
                       "      <Description>The Time of Day panel: off until a mode is picked.</Description>",
+                      "    </EntryPoint>",
+                      '    <EntryPoint type="MapScript" file="LekmapFusion.lua">',
+                      "      <Name>Lekmap Fusion</Name>",
+                      "      <Description>Lekmap v6.3's Pangaea, torn apart along rifts.</Description>",
                       "    </EntryPoint>"])
     print("staged %s: %d files" % (host_folder, len(host_files)))
 
