@@ -40,15 +40,19 @@ local function db()
 		Civilization_UnitClassOverrides = gtable({ { CivilizationType = "CIVILIZATION_DENMARK", UnitClassType = "UNITCLASS_LONGSWORDSMAN", UnitType = "UNIT_BERSERKER" },
 			{ CivilizationType = "CIVILIZATION_UAE", UnitClassType = "UNITCLASS_PRIVATEER", UnitType = "UNIT_QASIMI_RAIDER" } }),
 		Civilization_BuildingClassOverrides = gtable({ { CivilizationType = "CIVILIZATION_UAE", BuildingClassType = "BUILDINGCLASS_HOTEL", BuildingType = "BUILDING_BURJ" } }),
-		Improvements = gtable({}), Civilization_Leaders = gtable({}), Leader_Traits = gtable({}),
+		Improvements = gtable({ { Type = "IMPROVEMENT_FARM" }, { Type = "IMPROVEMENT_DENMARK_OWN", CivilizationType = "CIVILIZATION_DENMARK" },
+			{ Type = "IMPROVEMENT_UAE_OASIS", CivilizationType = "CIVILIZATION_UAE" }, { Type = "IMPROVEMENT_KILWA_REEF", CivilizationType = "CIVILIZATION_KILWA" } }),
+		Civilization_Leaders = gtable({}), Leader_Traits = gtable({}),
 	};
 end
 
 GameDefines = { MAX_MAJOR_CIVS = 4 };
 PreGame = { GetCivilization = function(id) return ({ [0] = 0, [1] = 2 })[id] or -1 end };
 local seconds = {
-	[0] = { Civ = "CIVILIZATION_UAE", Units = { { Type = "UNIT_QASIMI_RAIDER", Merged = true } }, Buildings = { { Type = "BUILDING_BURJ", Merged = true } } },
-	[1] = { Civ = "CIVILIZATION_KILWA", Units = { { Type = "UNIT_DHOW", Merged = false } }, Buildings = { { Type = "BUILDING_CORAL_PORT", Merged = true } } },
+	[0] = { Civ = "CIVILIZATION_UAE", Units = { { Type = "UNIT_QASIMI_RAIDER", Merged = true } }, Buildings = { { Type = "BUILDING_BURJ", Merged = true } },
+		Improvements = { { Type = "IMPROVEMENT_UAE_OASIS", Merged = true } } },
+	[1] = { Civ = "CIVILIZATION_KILWA", Units = { { Type = "UNIT_DHOW", Merged = false } }, Buildings = { { Type = "BUILDING_CORAL_PORT", Merged = true } },
+		Improvements = { { Type = "IMPROVEMENT_KILWA_REEF", Merged = false } } },
 };
 local on = true;
 local function game() return { SecondLeaderOn = function() return on end, SecondLeader = function(id) return seconds[id] end } end
@@ -62,6 +66,10 @@ dofile(ROWS);
 local u = collect(GameInfo.Civilization_UnitClassOverrides());
 check(#u == 3 and has(u, "CIVILIZATION_DENMARK", "UNIT_QASIMI_RAIDER", "UnitType"), "Denmark lists the merged Qasimi Raider after the real rows");
 check(not has(u, "CIVILIZATION_CHILE", "UNIT_DHOW", "UnitType"), "a unit that did not merge is not listed");
+local from = {};
+for _, r in ipairs(u) do from[r.UnitType] = r.SecondLeaderFrom or false end
+check(from.UNIT_QASIMI_RAIDER == "CIVILIZATION_UAE" and from.UNIT_BERSERKER == false,
+	"a merged row names the second it came from, so a screen showing each civilization apart can leave it out");
 local b = collect(GameInfo.Civilization_BuildingClassOverrides{ CivilizationType = "CIVILIZATION_CHILE" });
 check(#b == 1 and b[1].BuildingType == "BUILDING_CORAL_PORT" and b[1].BuildingClassType == "BUILDINGCLASS_WORKSHOP", "a table filter finds Chile's Coral Port");
 check(GameInfo.Civilization_BuildingClassOverrides{ CivilizationType = "CIVILIZATION_DENMARK", BuildingClassType = "BUILDINGCLASS_HOTEL" }().BuildingType == "BUILDING_BURJ",
@@ -71,6 +79,22 @@ check(#s == 2, "a Civilopedia condition finds the Raider for the UAE and for Den
 check(GameInfo.Civilization_UnitClassOverrides.SecondLeaderRows == true, "the table is wrapped");
 dofile(ROWS);
 check(#collect(GameInfo.Civilization_UnitClassOverrides()) == 3, "running the chunk twice wraps once");
+
+-- 1b. unique improvements: a merged second's is its player's civilization's on every screen, listed once
+local imps = collect(GameInfo.Improvements());
+local civOf, fromOf = {}, {};
+for _, r in ipairs(imps) do civOf[r.Type] = r.CivilizationType or false; fromOf[r.Type] = r.SecondLeaderFrom or false end
+check(#imps == 4, "every improvement listed once (got " .. #imps .. ")");
+check(civOf.IMPROVEMENT_UAE_OASIS == "CIVILIZATION_DENMARK" and fromOf.IMPROVEMENT_UAE_OASIS == "CIVILIZATION_UAE",
+	"the merged Oasis reads as Denmark's, marked as the UAE's");
+check(civOf.IMPROVEMENT_KILWA_REEF == "CIVILIZATION_KILWA" and civOf.IMPROVEMENT_DENMARK_OWN == "CIVILIZATION_DENMARK" and civOf.IMPROVEMENT_FARM == false,
+	"an improvement that did not merge, Denmark's own and a common one stay as they are");
+local uae = collect(GameInfo.Improvements{ CivilizationType = "CIVILIZATION_UAE" });
+check(#uae == 1 and uae[1].Type == "IMPROVEMENT_UAE_OASIS", "the UAE's own page still lists its Oasis");
+local den = collect(GameInfo.Improvements("CivilizationType = 'CIVILIZATION_DENMARK'"));
+check(#den == 2 and has(den, "CIVILIZATION_DENMARK", "IMPROVEMENT_UAE_OASIS", "Type"), "Denmark's page lists its own and the Oasis");
+check(GameInfo.Improvements.IMPROVEMENT_UAE_OASIS.CivilizationType == "CIVILIZATION_UAE" and GameInfo.Improvements.SecondLeaderRows == true,
+	"a row read by its type is the database's, and the table is wrapped");
 
 -- 2. the real tech tree reads Denmark's units through the wrapped table
 Locale = { ConvertTextKey = function(k) return k end }; Events = {};
@@ -86,10 +110,22 @@ end
 check(units and units.UNITCLASS_PRIVATEER == "UNIT_QASIMI_RAIDER", "the tech tree shows the Qasimi Raider for Denmark");
 check(units and units.UNITCLASS_LONGSWORDSMAN == "UNIT_BERSERKER", "and still Denmark's own Berserker");
 check(buildings and buildings.BUILDINGCLASS_HOTEL == "BUILDING_BURJ", "and the Burj");
+local improvements;
+for i = 1, 20 do
+	local name, v = debug.getupvalue(GatherInfoAboutUniqueStuff, i);
+	if not name then break end
+	if name == "validImprovementBuilds" then improvements = v end
+end
+check(improvements and improvements.IMPROVEMENT_UAE_OASIS and improvements.IMPROVEMENT_DENMARK_OWN and improvements.IMPROVEMENT_FARM,
+	"the tech tree shows the UAE's Oasis for Denmark, with its own and the common ones");
+check(improvements and not improvements.IMPROVEMENT_KILWA_REEF, "and not an improvement that did not merge");
 
 -- 3. option off: only the real rows
 on = false;
 check(#collect(GameInfo.Civilization_UnitClassOverrides()) == 2, "with the option off only the database's rows");
+local offImps = {};
+for r in GameInfo.Improvements() do offImps[r.Type] = r.CivilizationType end
+check(offImps.IMPROVEMENT_UAE_OASIS == "CIVILIZATION_UAE", "and every improvement its own civilization's");
 on = true;
 
 -- 4. a screen's own environment: GameInfo and the base library reached through it, as the plugin runs the chunk
@@ -136,6 +172,13 @@ if ok then
 		if name == "validUnitBuilds" then gunits = v end
 	end
 	check(gunits and gunits.UNITCLASS_PRIVATEER == "UNIT_QASIMI_RAIDER", "and its tech tree shows the Qasimi Raider for Denmark");
+	local gimps;
+	for i = 1, 20 do
+		local name, v = debug.getupvalue(genv.GatherInfoAboutUniqueStuff, i);
+		if not name then break end
+		if name == "validImprovementBuilds" then gimps = v end
+	end
+	check(gimps and gimps.IMPROVEMENT_UAE_OASIS, "and the UAE's Oasis");
 	pcall(gchunk);
 	check(#collect(genv.GameInfo.Civilization_UnitClassOverrides()) == 3, "and a second run there lists it once");
 end

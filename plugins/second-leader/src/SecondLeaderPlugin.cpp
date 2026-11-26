@@ -1,8 +1,9 @@
 // Second Leader: with the game option "Second Leader For Everyone!", every civilization in the game also gets a random
 // second civilization no one else in the game has: its leader's trait, merged row by row with the first's (the game core
-// adds the two together; see patches/lekmod-trait-merge.patch), and its unique units and buildings wherever they do not
-// clash with the first's. Applied through after-hooks on the game's own checks (a leader's traits, a
-// civilization's unit and building for a class), so nothing in the database changes. See ../README.md.
+// adds the two together; see patches/lekmod-trait-merge.patch), its unique units and buildings wherever they do not
+// clash with the first's, and its unique improvements. Applied through after-hooks on the game's own checks (a leader's
+// traits, a civilization's unit and building for a class, the civilization an improvement or build belongs to), so
+// nothing in the database changes. See ../README.md.
 #include "CvGameCoreDLLPCH.h"
 #include "CvGameCoreUtils.h"
 
@@ -39,10 +40,12 @@ namespace
 	std::vector<std::map<int, int> > s_units, s_buildings;
 	// By civilization id, the free starting units its second adds: class -> (count, unit AI).
 	std::vector<std::map<int, std::pair<int, int> > > s_freeUnits;
+	// By civilization id, the civilization whose player builds its unique improvements: a second's go to its player's.
+	std::vector<int> s_improvementOwner;
 
 	// What was decided, for Lua and the agents.
 	struct Piece { std::string type, replaces, clash; bool merged; std::vector<std::string> leftOut; };
-	struct Second { int player; std::string civ, leader; std::vector<Piece> traits, units, buildings, starting; };
+	struct Second { int player; std::string civ, leader; std::vector<Piece> traits, units, buildings, starting, improvements; };
 	std::vector<Second> s_seconds;
 	std::vector<int> s_part;   // each slot's civilization if it takes part in the pairing, else -1
 	std::string s_wroteFor;   // the game name the agents' file last carried
@@ -188,6 +191,7 @@ namespace
 	{
 		s_on = false;
 		s_traits.clear(); s_units.clear(); s_buildings.clear(); s_freeUnits.clear(); s_seconds.clear(); s_part.clear();
+		s_improvementOwner.clear();
 	}
 
 	void Merge(const char* table, const char* classCol, const char* itemCol, const char* classTable, const char* itemTable, const char* defaultCol,
@@ -297,6 +301,7 @@ namespace
 		std::vector<int> pool;
 		for(size_t i = 0; i < poolTypes.size(); ++i) { int id = Id(poolTypes[i]); if(id >= 0) pool.push_back(id); }
 		std::vector<int> pair = SlPair(civs, pool, CvPreGame::mapRandomSeed());
+		s_improvementOwner = SlImprovementOwners(civs, pair, GC.getNumCivilizationInfos());
 
 		s_traits.assign(GC.getNumLeaderHeadInfos(), std::vector<char>());
 		s_units.assign(GC.getNumCivilizationInfos(), std::map<int, int>());
@@ -353,6 +358,16 @@ namespace
 				start.type = StartingUnit(civ1, civ1Id, gained[k].cls);
 				start.merged = true;
 				s.starting.push_back(start);
+			}
+			// The second's unique improvements, built as the player's own (AfterImprovementCiv).
+			std::vector<std::string> imps = Column("SELECT Type FROM Improvements WHERE CivilizationType = " + Q(civ2));
+			for(size_t k = 0; k < imps.size(); ++k)
+			{
+				Piece imp;
+				imp.type = imps[k];
+				imp.merged = pair[p] < (int)s_improvementOwner.size() && s_improvementOwner[pair[p]] == civs[p];
+				if(!imp.merged) imp.clash = "another player plays the same first civilization";
+				s.improvements.push_back(imp);
 			}
 			s_seconds.push_back(s);
 			Log("player %d: %s + %s (%s)", p, civ1.c_str(), civ2.c_str(), leader2.c_str());
@@ -414,7 +429,7 @@ namespace
 			       "and leader that no one else in the game has. Each has its own leader's ability and unique units and buildings, and its "
 			       "second's too. The two abilities add up, row by row; where both fill a slot that holds one thing, its own stays, and "
 			       "the second's bans never pass on. A unique unit or building the first civilization has for the same class stays its "
-			       "own. Unique improvements stay with their own civilization.\n";
+			       "own. The second's unique improvements are its to build too.\n";
 			for(size_t i = 0; i < s_seconds.size(); ++i)
 			{
 				const Second& s = s_seconds[i];
@@ -442,6 +457,13 @@ namespace
 						if(p.merged) body += std::string("- Second unique ") + kinds[l] + ": " + name + " (replaces " + was + ")\n";
 						else body += std::string("- Second unique ") + kinds[l] + " not merged: " + name + " (its own " + was + " stays)\n";
 					}
+				for(size_t k = 0; k < s.improvements.size(); ++k)
+				{
+					const Piece& p = s.improvements[k];
+					std::string name = Name("Improvements", p.type, "Description");
+					if(p.merged) body += "- Second unique improvement: " + name + "\n";
+					else body += "- Second unique improvement not merged: " + name + " (" + p.clash + ")\n";
+				}
 			}
 		}
 		FILE* f = 0;
@@ -526,6 +548,18 @@ namespace
 		if(it != s_freeUnits[self->GetID()].end() && it->second.second >= 0) result = it->second.second;
 	}
 	void AfterUnitOverridden(const CvCivilizationInfo* self, int cls, bool& result) { if(Lookup(s_units, self, cls) != -2) result = true; }
+
+	// Every check of a unique improvement or of the build that makes it (can a player build it, the AI's workers, settling
+	// and research) compares the civilization it belongs to with the asking player's. A second civilization is no one's in
+	// the game, so its improvements answer its player's civilization: that player builds them, and no one else.
+	void Owner(CivilizationTypes& civ)
+	{
+		if(!s_on || civ < 0 || civ >= (int)s_improvementOwner.size()) return;
+		int owner = s_improvementOwner[civ];
+		if(owner >= 0) civ = (CivilizationTypes)owner;
+	}
+	void AfterImprovementCiv(const CvImprovementEntry*, CivHookSlot< CivilizationTypes >::Type result) { Owner(result); }
+	void AfterBuildCiv(const CvBuildInfo*, CivHookSlot< CivilizationTypes >::Type result) { Owner(result); }
 	void AfterBuildingOverridden(const CvCivilizationInfo* self, int cls, bool& result) { if(Lookup(s_buildings, self, cls) != -2) result = true; }
 
 	// ----- Lua: Game.SecondLeaderOn(), Game.SecondLeader(player) -----
@@ -550,7 +584,7 @@ namespace
 
 	int lOn(lua_State* L) { lua_pushboolean(L, s_on); return 1; }
 
-	//table|nil SecondLeader(int player); { Civ, Leader, Traits, Units, Buildings }, each piece { Type, Replaces, Merged, Clash, LeftOut }
+	//table|nil SecondLeader(int player); { Civ, Leader, Traits, Units, Buildings, Improvements }, each piece { Type, Replaces, Merged, Clash, LeftOut }
 	int lSecond(lua_State* L)
 	{
 		int player = (int)lua_tointeger(L, 1);
@@ -558,12 +592,13 @@ namespace
 		{
 			if(s_seconds[i].player != player) continue;
 			const Second& s = s_seconds[i];
-			lua_createtable(L, 0, 5);
+			lua_createtable(L, 0, 6);
 			SetString(L, "Civ", s.civ);
 			SetString(L, "Leader", s.leader);
 			PushPieces(L, "Traits", s.traits);
 			PushPieces(L, "Units", s.units);
 			PushPieces(L, "Buildings", s.buildings);
+			PushPieces(L, "Improvements", s.improvements);
 			return 1;
 		}
 		lua_pushnil(L);
@@ -624,6 +659,8 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	Check(CivRegisterAfter<CivHooks::CvCivilizationInfo_getCivilizationFreeUnitsClass>(host, &AfterFreeUnitsClass), "after CvCivilizationInfo::getCivilizationFreeUnitsClass");
 	Check(CivRegisterAfter<CivHooks::CvCivilizationInfo_getCivilizationFreeUnitsDefaultUnitAI>(host, &AfterFreeUnitsAI), "after CvCivilizationInfo::getCivilizationFreeUnitsDefaultUnitAI");
 	Check(CivRegisterAfter<CivHooks::CvCivilizationInfo_isCivilizationBuildingOverridden>(host, &AfterBuildingOverridden), "after CvCivilizationInfo::isCivilizationBuildingOverridden");
+	Check(CivRegisterAfter<CivHooks::CvImprovementEntry_GetRequiredCivilization>(host, &AfterImprovementCiv), "after CvImprovementEntry::GetRequiredCivilization");
+	Check(CivRegisterAfter<CivHooks::CvBuildInfo_GetRequiredCivilization>(host, &AfterBuildCiv), "after CvBuildInfo::GetRequiredCivilization");
 	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
 	Check(CivRegisterBefore<CivHooks::CvLuaGame_lGetActivePlayer>(host, &BeforeGetActivePlayer), "before CvLuaGame::lGetActivePlayer");
 	return true;

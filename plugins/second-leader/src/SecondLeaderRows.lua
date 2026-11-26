@@ -2,7 +2,9 @@
 -- screens call it just before they read their uniques). Screens read a civilization's unique
 -- units and buildings from GameInfo.Civilization_UnitClassOverrides and _BuildingClassOverrides (the tech tree, the
 -- Civilopedia, the culture overview, trade route tooltips). Here those two tables also list each merged second's units
--- and buildings as rows of its player's own civilization. The database is not changed; only this state's GameInfo.
+-- and buildings as rows of its player's own civilization. Its unique improvements read as its player's civilization's
+-- in GameInfo.Improvements (the tech tree keeps only the improvements of the player's civilization). The database is not
+-- changed; only this state's GameInfo.
 local KINDS = {
 	{ key = "Civilization_UnitClassOverrides", pieces = "Units", info = "Units", class = "Class", classCol = "UnitClassType", typeCol = "UnitType" },
 	{ key = "Civilization_BuildingClassOverrides", pieces = "Buildings", info = "Buildings", class = "BuildingClass", classCol = "BuildingClassType", typeCol = "BuildingType" },
@@ -17,7 +19,8 @@ local function merged(kind)
 		for _, p in ipairs(civ and s[kind.pieces] or {}) do
 			local info = p.Merged and GameInfo[kind.info][p.Type];
 			if info then
-				rows[#rows + 1] = { CivilizationType = civ.Type, [kind.classCol] = info[kind.class], [kind.typeCol] = p.Type };
+				-- SecondLeaderFrom: the second it came from, for a screen that shows each civilization apart (the leader card)
+				rows[#rows + 1] = { CivilizationType = civ.Type, [kind.classCol] = info[kind.class], [kind.typeCol] = p.Type, SecondLeaderFrom = s.Civ };
 			end
 		end
 	end
@@ -64,7 +67,57 @@ local function wrap(real, kind)
 	});
 end
 
--- The screen gets a GameInfo of its own: the two tables wrapped, every other read passed to the game's GameInfo, which
+-- Each merged second's improvement, by type: the database's row read as its player's civilization's, with
+-- SecondLeaderFrom naming the second.
+local function improvementRows(real)
+	local out = {};
+	if not (Game and Game.SecondLeaderOn and Game.SecondLeaderOn()) then return out; end
+	for id = 0, GameDefines.MAX_MAJOR_CIVS - 1 do
+		local s = Game.SecondLeader(id);
+		local civ = s and GameInfo.Civilizations[PreGame.GetCivilization(id)];
+		for _, p in ipairs(civ and s.Improvements or {}) do
+			local info = p.Merged and real[p.Type];
+			if info then out[p.Type] = setmetatable({ CivilizationType = civ.Type, SecondLeaderFrom = s.Civ }, { __index = info }); end
+		end
+	end
+	return out;
+end
+
+-- Improvements are listed once each: a merged one as its player's civilization's wherever the filter still takes it
+-- that way, else as the database has it (the second's own Civilopedia page), and after the database's rows wherever
+-- only the player's civilization takes it (that civilization's page).
+local function wrapImprovements(real)
+	return setmetatable({ SecondLeaderRows = true }, {
+		__index = real,
+		__call = function(_, filter)
+			local it, moved, done, extra, i = nil, nil, {}, nil, 0;
+			if filter == nil then it = real(); else it = real(filter); end
+			return function()
+				moved = moved or improvementRows(real);
+				if it then
+					local row = it();
+					if row ~= nil then
+						local m = moved[row.Type];
+						if m and matches(m, filter) then done[row.Type] = true; return m; end
+						return row;
+					end
+					it = nil;
+				end
+				if not extra then
+					extra = {};
+					for t, m in pairs(moved) do
+						if not done[t] and matches(m, filter) then extra[#extra + 1] = m; end
+					end
+					table.sort(extra, function(a, b) return a.ID < b.ID; end);
+				end
+				i = i + 1;
+				return extra[i];
+			end
+		end,
+	});
+end
+
+-- The screen gets a GameInfo of its own: the tables wrapped, every other read passed to the game's GameInfo, which
 -- is never written to. A screen's environment has no rawset.
 local function install(gi)
 	if type(gi) ~= "table" then
@@ -79,6 +132,10 @@ local function install(gi)
 			own[kind.key] = wrap(real, kind);
 			wrapped = wrapped + 1;
 		end
+	end
+	if gi.Improvements ~= nil then
+		own.Improvements = wrapImprovements(gi.Improvements);
+		wrapped = wrapped + 1;
 	end
 	if wrapped == 0 then return; end
 	SecondLeaderGameInfo = setmetatable(own, { __index = gi });

@@ -135,6 +135,24 @@ int main()
 	}
 	CHECK(sw && ar && banned);
 
+	// unique improvements: a second's go to the civilization of the one player it is paired with
+	{
+		std::vector<int> civs, seconds;
+		civs.push_back(3); civs.push_back(-1); civs.push_back(5); civs.push_back(7);
+		seconds.push_back(10); seconds.push_back(-1); seconds.push_back(11); seconds.push_back(-1);
+		std::vector<int> owner = SlImprovementOwners(civs, seconds, 12);
+		CHECK(owner.size() == 12);
+		CHECK(owner[10] == 3 && owner[11] == 5);
+		CHECK(owner[3] == -1 && owner[5] == -1 && owner[7] == -1 && owner[0] == -1);   // nobody's own civilization moves
+		// two players on the same civilization: a single owner cannot be told, so that second's improvements stay put
+		civs[3] = 3; seconds[3] = 9;
+		owner = SlImprovementOwners(civs, seconds, 12);
+		CHECK(owner[10] == -1 && owner[9] == -1 && owner[11] == 5);
+		// ids out of range are ignored
+		seconds[2] = 40;
+		CHECK(SlImprovementOwners(civs, seconds, 12)[11] == -1);
+	}
+
 	// plain text
 	CHECK(SlPlain("+1 [ICON_GOLD] Gold.[NEWLINE]Units [COLOR_POSITIVE_TEXT]heal[ENDCOLOR]  fast.") == "+1 Gold. Units heal fast.");
 	CHECK(SlPlain("") == "");

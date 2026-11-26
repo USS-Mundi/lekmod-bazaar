@@ -11,7 +11,8 @@ picked at random) plus one that no one else in the game has, neither as their ow
 | The second leader's ability (its traits) | Merges row by row: the game core adds the two leaders' abilities together (`patches/lekmod-trait-merge.patch`), so +1 food on Sheep from one and +1 faith on Sheep from the other give both, and the same bonus twice adds up. Two things stay out, each named on the leader card and in the agents' file: a slot that holds one thing and both fill (a free building in every city or the capital or conquered cities, the settling unit's yields, the combat bonus beside an improvement, the free buildings' tech, a build's time), where the first's stays; and the second's bans (a unit it may not train, an improvement it may not build, an order its units may not take), which never pass on. Needs the patched game core: on LEKMOD's own core a merged trait can wipe the first's values. |
 | The second civilization's unique units and buildings | Each merges unless the first civilization overrides the same class itself (its own unique stays). The second's bans (a class it cannot build) never pass on. |
 | Free starting units | The second's merge where it starts with more of a class than the first (Nubia's free Scout, which its unique unit makes an Apedemak's Bow), with the first's unit AI where the first starts with that class too. Listed in the agents' file. |
-| Unique improvements and free buildings | Never merge; they stay with their own civilization. |
+| The second civilization's unique improvements | Merge: its player builds them, workers and the AI included. A second civilization is no one else's in the game, so wherever the game asks which civilization an improvement or its build belongs to, a second's answer its player's own civilization. Left out only when two players play the same first civilization (no single owner). |
+| Free buildings | Never merge; they stay with their own civilization. |
 
 An ability LEKMOD scripts in Lua (`Lua/Civilizations/Lekmod_<civ>.lua`, e.g. the UAE's or Kilwa's) checks the
 player's own civilization, so the database merge cannot reach it. The `SecondLeaderScripts` context includes each
@@ -23,12 +24,15 @@ Screens list a civilization's uniques from `GameInfo.Civilization_UnitClassOverr
 (tech tree, Civilopedia, culture overview, trade route tooltips), once, as each screen loads. The first time a Lua
 environment calls `Game.GetActivePlayer` (the tech screens do just before they gather), the plugin runs
 `src/SecondLeaderRows.lua` (embedded at build) in that caller's environment. It makes those two tables also yield each
-merged second's units and buildings as rows of its player's own civilization. Running it where `Game` is registered does
+merged second's units and buildings as rows of its player's own civilization, and makes `GameInfo.Improvements` read a
+merged second's improvements as its player's civilization's (listed once; the second's own Civilopedia page keeps them).
+Running it where `Game` is registered does
 not work: that state has no base library yet. `tests/run_rows.sh` drives it, through LEKMOD's own
 `TechButtonInclude.lua`.
 
 Nothing in the database changes: after-hooks answer the game's own questions (`CvLeaderHeadInfo::hasTrait`,
-`CvCivilizationInfo::getCivilizationUnits` / `getCivilizationBuildings` / `isCivilization*Overridden`).
+`CvCivilizationInfo::getCivilizationUnits` / `getCivilizationBuildings` / `isCivilization*Overridden`,
+`CvImprovementEntry::GetRequiredCivilization`, `CvBuildInfo::GetRequiredCivilization`).
 
 ## When it is decided
 
@@ -41,7 +45,7 @@ deal every survivor a different second. Without a matching record, a load pairs 
 
 ## What it tells
 
-- **Lua:** `Game.SecondLeaderOn()`, `Game.SecondLeader(player)` → `{ Civ, Leader, Traits, Units, Buildings }`, each piece
+- **Lua:** `Game.SecondLeaderOn()`, `Game.SecondLeader(player)` → `{ Civ, Leader, Traits, Units, Buildings, Improvements }`, each piece
   `{ Type, Replaces, Merged, Clash }`, or nil, for any screen that shows it.
 - **AI players and tools:** `merges/current.md` in the same folder, for the game loaded now: `# Merge random second
   leader: on|off`, a `Game: civ5-game-...` line once the game has its name, then every civilization's two halves in

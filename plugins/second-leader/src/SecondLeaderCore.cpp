@@ -120,6 +120,20 @@ std::vector<SlFreeUnit> SlMergeFreeUnits(const std::vector<SlFreeUnit>& first, c
 	return out;
 }
 
+std::vector<int> SlImprovementOwners(const std::vector<int>& civs, const std::vector<int>& seconds, int numCivs)
+{
+	std::vector<int> owner(numCivs > 0 ? numCivs : 0, -1);
+	for(size_t p = 0; p < civs.size() && p < seconds.size(); ++p)
+	{
+		int civ = civs[p], second = seconds[p];
+		if(civ < 0 || second < 0 || second >= numCivs) continue;
+		int players = 0;
+		for(size_t q = 0; q < civs.size(); ++q) players += civs[q] == civ;
+		if(players == 1) owner[second] = civ;
+	}
+	return owner;
+}
+
 std::vector<SlMerged> SlMergeOverrides(const std::vector<SlOverride>& first, const std::vector<SlOverride>& second)
 {
 	std::vector<SlMerged> out;

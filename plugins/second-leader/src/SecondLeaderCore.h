@@ -50,6 +50,11 @@ struct SlMerged { int cls; int item; bool merged; };
 // The second's uniques (never its forbidden classes), each merged unless the first overrides the same class.
 std::vector<SlMerged> SlMergeOverrides(const std::vector<SlOverride>& first, const std::vector<SlOverride>& second);
 
+// Whose a civilization's unique improvements become, by civilization id (numCivs of them): for each player's second, the
+// player's own civilization, which the game then lets build them. -1 where nothing moves, and for a second whose player
+// shares a civilization with another player (no single owner). civs[i] and seconds[i] are player i's, -1 for none.
+std::vector<int> SlImprovementOwners(const std::vector<int>& civs, const std::vector<int>& seconds, int numCivs);
+
 // Game text as plain words for an agent: [NEWLINE] becomes a space, other [MARKUP] goes, spaces collapse.
 std::string SlPlain(const std::string& text);
 
