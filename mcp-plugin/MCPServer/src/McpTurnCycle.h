@@ -218,9 +218,17 @@ extern const char* const MCP_HAVE_POLICY;
 extern const char* const MCP_NO_MOVES_LEFT;
 // An order for the unit a city finishes as the turn opens (from_city) when the city finished none: nothing to order.
 extern const char* const MCP_NO_NEW_UNIT;
+// A set-up the unit cannot make now (not a siege unit that sets up, set up already, no moves left, embarked), and a
+// promotion ordered for a unit with none to take: neither leaves anything to decide, so neither holds the turn.
+extern const char* const MCP_CANNOT_SET_UP;
+extern const char* const MCP_NO_PROMOTION_READY;
 bool McpOrderAlreadyDone(const std::string& tool, const std::string& err);
-// How run_plan reports such an order: "already so", or "skipped, no moves left this turn".
+// How run_plan reports such an order: "already so", or "skipped, ..." with why.
 std::string McpOrderDoneNote(const std::string& err);
+// The rest a unit takes for a fortify or sleep order: the two are one intent, rest in place, so a unit the game lets do
+// only the other one does that (a Worker or a ship told to fortify sleeps; a Warrior told to sleep fortifies). With
+// neither open the order stays as asked.
+std::string McpRestChoice(const std::string& asked, bool bCanFortify, bool bCanSleep);
 
 // The unit type an order for a new unit (from_city) means. made: the types the city makes for it (what it finishes as
 // the turn opens, and what the plan buys there before the order); named: the type the order names (unit), -1 if none.

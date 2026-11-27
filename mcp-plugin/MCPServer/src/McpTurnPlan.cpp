@@ -13,6 +13,7 @@
 #include "McpDiplomacy.h"
 #include "McpMapImage.h"
 #include "McpTurnView.h"
+#include "McpViewGate.h"
 #include "McpClocksGame.h"
 #include "McpCrashLog.h"
 #include "CvGame.h"
@@ -793,7 +794,23 @@ MCP_TOOL(ToolPlanTurn)
 	std::vector<std::string> damaged = McpDamagedInLand(me);
 	if(!damaged.empty()) o["damaged_in_your_land"] = JVal(Lines(damaged));
 	if(!open.empty()) o["left_open"] = JVal(Lines(open));
-	if(!bMajor)
+	if(bMajor && McpIsPlayerTurn(*me))
+	{
+		// The turn is open already. A plan made from the round's view came through the gate (McpViewGate): the open
+		// turn's view comes with this reply, marked against the round's view, and counts as opening it. Either way the
+		// seat runs the plan itself: nothing is left to wait for.
+		std::map<int, int>::const_iterator onTurn = s_viewOnTurn.find((int)me->GetID());
+		if(onTurn == s_viewOnTurn.end() || onTurn->second != iTurn)
+		{
+			McpAddPlanToTurnStart(me, o);
+			McpViewGateViewed((int)me->GetID(), iTurn);
+			o[MCP_DO_NOW] = J("read the turn view in this reply (turn_view): your turn opened while you planned, and it marks what changed since "
+				"the view you planned from. Then call run_plan (drop and add change the plan). It is the view turn_view gives; do not call turn_view again.");
+		}
+		o["next"] = J(std::string("your turn is open: call run_plan to carry out these orders (drop and add change them)")
+			+ (open.empty() ? "" : "; the turn will not end while what left_open lists has no order, so add one for each in the same run_plan"));
+	}
+	else if(!bMajor)
 		o["next"] = J(warnings.empty() ? "call wait_for_my_turn; when your turn opens it brings the turn view"
 			: "fix what the warnings show with another plan_turn if it matters, then call wait_for_my_turn");
 	else if(warnings.empty() && open.empty())
@@ -988,6 +1005,7 @@ void McpAddPlanToTurnStart(CvPlayer* me, picojson::object& o)
 		bool bSinceRoundView = bMine && s_roundViewTurn.count(seat) && s_roundViewTurn[seat] == iTurn;
 		shownIn[seat] = iTurn;
 		s_viewShown[seat] = iTurn;
+		if(!bMine) McpViewGateRoundViewed(seat, iTurn);
 		McpTrail("turn view: gather begins", seat, iTurn);
 		McpTurnViewData d = McpGatherTurnView(me);
 		McpGatherTurnNews(d);

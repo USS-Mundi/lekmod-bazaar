@@ -907,6 +907,22 @@ MCP_TOOL(ToolUnitAction)
 
 	size_t count = 0;
 	const UnitActionDef* defs = UnitActions(count);
+	// fortify and sleep are one intent, rest in place: a unit the game lets do only the other one does that.
+	if(action == "fortify" || action == "sleep")
+	{
+		bool bCanFortify = false, bCanSleep = false;
+		for(size_t i = 0; i < count; ++i)
+		{
+			if(std::string(defs[i].name) == "fortify") bCanFortify = defs[i].can(u, p);
+			if(std::string(defs[i].name) == "sleep") bCanSleep = defs[i].can(u, p);
+		}
+		std::string rest = McpRestChoice(action, bCanFortify, bCanSleep);
+		if(rest != action)
+		{
+			o["instead"] = J("this unit cannot " + action + ", so it was told to " + rest + ": both rest it in place");
+			action = rest;
+		}
+	}
 	for(size_t i = 0; i < count; ++i)
 	{
 		const UnitActionDef& def = defs[i];

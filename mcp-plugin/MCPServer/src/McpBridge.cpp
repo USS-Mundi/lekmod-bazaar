@@ -1724,7 +1724,8 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 				if(bEnded || bIdle) { Sleep(250); KeepAlive(token); continue; }
 			}
 			if(GameRunning() && SessionWakes(token, iSeqAtStart, iNudgeAtStart)) break;
-			Sleep(250);
+			// 50 ms: a seat's turn follows the one before it within a twentieth of a second, not a quarter.
+			Sleep(50);
 			// A client that went away stops being kept alive, so its seat frees as any idle session's does.
 			if(McpHttpClientGone()) { bClientGone = true; break; }
 			KeepAlive(token);

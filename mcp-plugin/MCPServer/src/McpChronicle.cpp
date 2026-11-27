@@ -124,6 +124,7 @@ namespace
 		}
 		else if(kind == "deed") AddDeed(c, turn, Str(e, "with"), Str(e, "text"));
 		else if(kind == "forget") c.gone.insert(Str(e, "civ"));
+		else if(kind == "drop") c.relations.erase(Str(e, "civ"));
 		else if(kind == "relation")
 		{
 			McpRelation& r = c.relations[Str(e, "civ")];
@@ -208,14 +209,15 @@ namespace
 
 	bool Known(const McpChronicleNow& now, const std::string& name)
 	{
-		if(now.players.empty()) return true;
 		for(size_t i = 0; i < now.players.size(); ++i) if(now.players[i] == name) return true;
 		return false;
 	}
 
-	std::string Players(const McpChronicleNow& now)
+	// Why a name is not taken: an entry and a thread are about a civilization the seat has met.
+	std::string NotMet(const McpChronicleNow& now, const std::string& name)
 	{
-		std::string out;
+		if(now.players.empty()) return "you have met no other civilization yet: an entry and a thread are each about a civilization you have met";
+		std::string out = "no player you have met is called " + name + "; they are: ";
 		for(size_t i = 0; i < now.players.size(); ++i) out += (i ? ", " : "") + now.players[i];
 		return out;
 	}
@@ -279,6 +281,20 @@ void McpChronicleForget(McpChronicle& c, const std::string& civ)
 	Emit(c, e);
 }
 
+int McpChronicleDropUnknown(McpChronicle& c, const std::set<std::string>& met)
+{
+	std::vector<std::string> unknown;
+	for(std::map<std::string, McpRelation>::const_iterator it = c.relations.begin(); it != c.relations.end(); ++it)
+		if(!met.count(it->first) && !c.gone.count(it->first)) unknown.push_back(it->first);
+	for(size_t i = 0; i < unknown.size(); ++i)
+	{
+		JObj e;
+		e["e"] = J("drop"); e["civ"] = J(unknown[i]);
+		Emit(c, e);
+	}
+	return (int)unknown.size();
+}
+
 std::string McpChronicleDue(const McpChronicle& c, int era, int eliminations, int citiesLost, int turn)
 {
 	if(!c.started) return "";
@@ -314,7 +330,7 @@ bool McpChronicleApply(McpChronicle& c, const picojson::object& args, const McpC
 				if(!it->second.is<JObj>()) { no.push_back(at + "an entry is {text, until, why}"); continue; }
 				const JObj& entry = it->second.get<JObj>();
 				bool ok = true;
-				if(!Known(now, civ)) { no.push_back(at + "no player you have met is called that; they are: " + Players(now)); ok = false; }
+				if(!Known(now, civ)) { no.push_back(at + NotMet(now, civ)); ok = false; }
 				if(Str(entry, "text").empty()) { no.push_back(at + "text is missing"); ok = false; }
 				int until = Int(entry, "until", -1);
 				if(!HasInt(entry, "until") || until <= turn || until > turn + ENTRY_TURNS)
@@ -352,7 +368,8 @@ bool McpChronicleApply(McpChronicle& c, const picojson::object& args, const McpC
 	}
 	for(std::map<std::string, McpRelation>::const_iterator it = c.relations.begin(); it != c.relations.end(); ++it)
 	{
-		if(sent.count(it->first) || c.gone.count(it->first)) continue;
+		// An entry on a name the seat cannot write under now is owed nothing: asking for it could never be answered.
+		if(sent.count(it->first) || c.gone.count(it->first) || !Known(now, it->first)) continue;
 		std::vector<const McpDeed*> since = DeedsSince(c, it->first, it->second.deedsSeen);
 		if(!since.empty())
 		{
@@ -380,7 +397,7 @@ bool McpChronicleApply(McpChronicle& c, const picojson::object& args, const McpC
 				const JObj& o = (*open)[i].get<JObj>();
 				bool ok = true;
 				if(Str(o, "with").empty() || Str(o, "words").empty()) { no.push_back(at + "a thread needs with (the player) and words (what you have sworn, claimed or are owed)"); ok = false; }
-				else if(!Known(now, Str(o, "with"))) { no.push_back(at + "no player you have met is called " + Str(o, "with") + "; they are: " + Players(now)); ok = false; }
+				else if(!Known(now, Str(o, "with"))) { no.push_back(at + NotMet(now, Str(o, "with"))); ok = false; }
 				JObj e;
 				e["e"] = J("thread_open"); e["turn"] = J(turn); e["with"] = J(Str(o, "with")); e["words"] = J(Str(o, "words"));
 				if(o.find("vow") != o.end())

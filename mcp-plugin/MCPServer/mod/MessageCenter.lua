@@ -909,14 +909,15 @@ function OpenLeaderCard(playerID)
 		c.Ability:SetText(table.concat(ab, "[NEWLINE][NEWLINE]"));
 		for _, u in ipairs(part.Uniques) do
 			local icon = Build("CardUniqueInstance", c.Uniques);
-			icon.Icon:SetHide(not IconHookup(u.Info.PortraitIndex, 45, u.Info.IconAtlas, icon.Icon));
+			-- 64: every unique's icon sheet has it; some improvements' have no 45, and a 45 would leave an empty frame
+			icon.Icon:SetHide(not IconHookup(u.Info.PortraitIndex, 64, u.Info.IconAtlas, icon.Icon));
 			icon.Root:SetAlpha(u.Merged and 1 or 0.35);
 			icon.Root:SetToolTipString((KIND_LABEL[u.Kind] or "") .. ": " .. UniqueLine(u) .. (u.Merged and "" or "[NEWLINE]Not merged: " .. (u.Why or "the first civilization has its own.")));
 		end
 		c.Uniques:CalculateSize();
 		local h = c.Ability:GetSizeY();
 		c.Uniques:SetOffsetY(36 + h + 8);
-		c.Root:SetSizeY(math.max(72, 36 + h + 8 + ((#part.Uniques > 0) and 50 or 0) + 8));
+		c.Root:SetSizeY(math.max(72, 36 + h + 8 + ((#part.Uniques > 0) and 69 or 0) + 8));
 	end
 	Controls.CardStack:CalculateSize();
 	local merged = #parts > 1;

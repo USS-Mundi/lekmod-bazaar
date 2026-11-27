@@ -108,6 +108,12 @@ static void TestNewAgents()
 	std::string settings = Read(a1 + "/.claude/settings.json");
 	Check(Has(settings, "\"defaultMode\":\"dontAsk\"") && Has(settings, "\"mcp__civ5\"") && Has(settings, "\"mcp__civ5__lookup\""),
 		"settings never ask: the game's tools allowed, lookup denied, anything else refused");
+	// Under dontAsk a tool outside the allow list is refused anyway; denied by name it also leaves every request, and
+	// Claude Code's own tools are a large part of what a seat sends with each call.
+	Check(Has(settings, "\"Artifact\"") && Has(settings, "\"Bash\"") && Has(settings, "\"WebSearch\"") && Has(settings, "\"Workflow\""),
+		"settings deny by name Claude Code's own tools a seat cannot use");
+	Check(!Has(settings, "\"Read\"") && !Has(settings, "\"Edit\"") && !Has(settings, "\"ToolSearch\"") && !Has(settings, "\"EndConversation\""),
+		"and leave the ones it reads its folder and keeps its notes with");
 	Check(Has(settings, "NOTES.md"), "an agent may keep its notes");
 	std::string mcp = Read(a1 + "/mcp.json");
 	Check(Has(mcp, "\"url\":\"http://127.0.0.1:7676/mcp\"") && Has(mcp, "\"X-Lekmod-Agent\":\"" + k.gameId + "/agent-1\""),

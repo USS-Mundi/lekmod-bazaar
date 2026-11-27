@@ -432,7 +432,16 @@ void McpChronicleSync(CvPlayer* me)
 		bool bGone = std::find(gone.begin(), gone.end(), deeds[i].with) != gone.end();
 		if(now.players.count(deeds[i].with) || bGone) McpChronicleDeed(c, iTurn, deeds[i].with, deeds[i].text);
 	}
+	// An entry on a name the seat cannot write under is owed nothing. A civilization that is out of the game keeps its
+	// entry, as one that just left does; an entry on anything else (a city-state, a name never met) goes.
+	for(std::map<std::string, McpRelation>::const_iterator it = c.relations.begin(); it != c.relations.end(); ++it)
+	{
+		if(now.players.count(it->first) || c.gone.count(it->first)) continue;
+		PlayerTypes eThem = FindPlayer(it->first);
+		if(eThem != NO_PLAYER && (int)eThem < MAX_MAJOR_CIVS && !GET_PLAYER(eThem).isAlive()) gone.push_back(it->first);
+	}
 	for(size_t i = 0; i < gone.size(); ++i) McpChronicleForget(c, gone[i]);
+	McpChronicleDropUnknown(c, now.players);
 	if(s.world.turn < 0 || !SameMoment(s.world, now))
 	{
 		s.world = now;

@@ -638,12 +638,15 @@ const char* const MCP_KNOWN_TECH = "you already know ";
 const char* const MCP_HAVE_POLICY = "you already have that policy";
 const char* const MCP_NO_MOVES_LEFT = "this unit has no moves left this turn; try again next turn";
 const char* const MCP_NO_NEW_UNIT = "finished no new unit this turn, so this order has nothing to move";
+const char* const MCP_CANNOT_SET_UP = "only siege units that must set up before firing can set up, and only with moves left and not embarked; a unit already set up stays set up until it moves";
+const char* const MCP_NO_PROMOTION_READY = "this unit has no promotion to take now";
 
 bool McpOrderAlreadyDone(const std::string& tool, const std::string& err)
 {
 	if(tool == "end_turn" || tool == "attack" || tool == "city_attack") return false;
 	if(err.find(MCP_NO_MOVES_LEFT) != std::string::npos) return tool == "unit_action";
-	const char* const already[] = { MCP_ALREADY_RESTING, MCP_CITY_HAS_IT, MCP_TEAM_HAS_IT, MCP_KNOWN_TECH, MCP_HAVE_POLICY, MCP_NO_NEW_UNIT };
+	const char* const already[] = { MCP_ALREADY_RESTING, MCP_CITY_HAS_IT, MCP_TEAM_HAS_IT, MCP_KNOWN_TECH, MCP_HAVE_POLICY, MCP_NO_NEW_UNIT,
+		MCP_CANNOT_SET_UP, MCP_NO_PROMOTION_READY };
 	for(size_t i = 0; i < sizeof(already) / sizeof(already[0]); ++i)
 		if(err.find(already[i]) != std::string::npos) return true;
 	return false;
@@ -651,7 +654,17 @@ bool McpOrderAlreadyDone(const std::string& tool, const std::string& err)
 
 std::string McpOrderDoneNote(const std::string& err)
 {
-	return err.find(MCP_NO_MOVES_LEFT) != std::string::npos ? "skipped, no moves left this turn" : "already so";
+	if(err.find(MCP_NO_MOVES_LEFT) != std::string::npos) return "skipped, no moves left this turn";
+	if(err.find(MCP_CANNOT_SET_UP) != std::string::npos) return "skipped, nothing to set up now";
+	if(err.find(MCP_NO_PROMOTION_READY) != std::string::npos) return "skipped, no promotion to take now";
+	return "already so";
+}
+
+std::string McpRestChoice(const std::string& asked, bool bCanFortify, bool bCanSleep)
+{
+	if(asked == "fortify" && !bCanFortify && bCanSleep) return "sleep";
+	if(asked == "sleep" && !bCanSleep && bCanFortify) return "fortify";
+	return asked;
 }
 
 McpNewUnitPick McpNewUnitType(const std::vector<int>& made, int named, int& type)

@@ -3,7 +3,7 @@
 
 namespace
 {
-	std::map<int, int> s_viewedTurn;
+	std::map<int, int> s_viewedTurn, s_roundViewedTurn;
 
 	bool RunsBeforeView(const std::string& tool)
 	{
@@ -19,9 +19,16 @@ std::string McpViewGateRefusal(int player, int turn, bool bMyTurn, const std::st
 	if(!bMyTurn || RunsBeforeView(tool)) return "";
 	std::map<int, int>::const_iterator it = s_viewedTurn.find(player);
 	if(it != s_viewedTurn.end() && it->second == turn) return "";
+	if(tool == "plan_turn")
+	{
+		std::map<int, int>::const_iterator round = s_roundViewedTurn.find(player);
+		if(round != s_roundViewedTurn.end() && round->second == turn) return "";
+	}
 	return "DO NOW: call turn_view. Nothing else runs on your turn until you have opened it.";
 }
 
 void McpViewGateViewed(int player, int turn) { s_viewedTurn[player] = turn; }
 
-void McpViewGateReset() { s_viewedTurn.clear(); }
+void McpViewGateRoundViewed(int player, int turn) { s_roundViewedTurn[player] = turn; }
+
+void McpViewGateReset() { s_viewedTurn.clear(); s_roundViewedTurn.clear(); }

@@ -153,11 +153,18 @@ namespace
 	{
 		// dontAsk refuses whatever is not allowed here, so an agent never stops to ask. The hook's words carry no quote
 		// or other character a shell would read, so it runs the same under sh, cmd and PowerShell.
+		// Claude Code's own tools outside the allow list are denied by name as well: dontAsk would refuse them anyway,
+		// and a denied tool leaves the request, where together they outweigh the game's tools. A name this Claude Code
+		// does not have is ignored.
 		return "{\n"
 			"  \"permissions\": {\n"
 			"    \"defaultMode\":\"dontAsk\",\n"
 			"    \"allow\": [\"mcp__civ5\", \"Read(./**)\", \"Edit(./NOTES.md)\"],\n"
-			"    \"deny\": [\"mcp__civ5__lookup\"]\n"
+			"    \"deny\": [\"mcp__civ5__lookup\", \"Agent\", \"Task\", \"Artifact\", \"ArtifactComments\", \"ArtifactData\", \"AskUserQuestion\", "
+			"\"Bash\", \"CronCreate\", \"CronDelete\", \"CronList\", \"DesignSync\", \"EnterPlanMode\", \"ExitPlanMode\", \"EnterWorktree\", "
+			"\"ExitWorktree\", \"ListAgents\", \"McpTaskCheck\", \"Monitor\", \"NotebookEdit\", \"PushNotification\", \"RemoteTrigger\", "
+			"\"ReportFindings\", \"ScheduleWakeup\", \"SendMessage\", \"SendToProject\", \"SendToProjectContext\", \"Skill\", \"TaskStop\", "
+			"\"WebFetch\", \"WebSearch\", \"Workflow\", \"Write\", \"advisor\", \"mcp__easel__chart\"]\n"
 			"  },\n"
 			"  \"hooks\": {\n"
 			"    \"SessionStart\": [{\"matcher\": \"compact\", \"hooks\": [{\"type\": \"command\", \"command\": "

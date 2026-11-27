@@ -85,8 +85,8 @@
 	</Instance>
 
 	<Instance Name="CardUniqueInstance">
-		<Button ID="Root" Anchor="L,T" Size="45,45">
-			<Image ID="Icon" Anchor="C,C" Size="45,45" />
+		<Button ID="Root" Anchor="L,T" Size="64,64">
+			<Image ID="Icon" Anchor="C,C" Size="64,64" />
 		</Button>
 	</Instance>
 

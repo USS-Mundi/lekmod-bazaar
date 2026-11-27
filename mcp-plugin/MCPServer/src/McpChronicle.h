@@ -69,6 +69,9 @@ void McpChronicleStart(McpChronicle& c, int turn, int era, int eliminations, int
 void McpChronicleDeed(McpChronicle& c, int turn, const std::string& with, const std::string& text);
 // A player left the game: its entry no longer goes stale and no longer expires.
 void McpChronicleForget(McpChronicle& c, const std::string& civ);
+// Drops the relations entries on names that are neither in met nor a player that left: an entry on a city-state, taken
+// when any name was, can never be written again, so it is owed nothing. Returns how many it dropped.
+int McpChronicleDropUnknown(McpChronicle& c, const std::set<std::string>& met);
 
 // Why a chapter is due, or "" when none is: the seat's era changed, a civilization left the game, one of the seat's
 // cities was taken, or 40 turns passed since the chapter opened.
@@ -78,7 +81,7 @@ struct McpChronicleNow
 {
 	int turn, era, eliminations, citiesLost;
 	std::string direction;                   // the plan's standing direction
-	std::vector<std::string> players;        // the players an entry or a thread may name; empty: any name is taken
+	std::vector<std::string> players;        // the players an entry or a thread may name: the ones the seat has met; none: no name is taken
 	McpChronicleNow() : turn(0), era(-1), eliminations(0), citiesLost(0) {}
 };
 

@@ -34,6 +34,17 @@ int main()
 	McpViewGateReset();
 	CHECK(!McpViewGateRefusal(3, 5, true, "move_unit").empty());
 
+	// A plan made from this round's view may still be sent once the turn has opened: plan_turn alone passes, for that
+	// seat and that turn. Its reply brings the open turn's view; everything else still waits for it.
+	McpViewGateRoundViewed(3, 7);
+	CHECK(McpViewGateRefusal(3, 7, true, "plan_turn").empty());
+	CHECK(!McpViewGateRefusal(3, 7, true, "run_plan").empty());
+	CHECK(!McpViewGateRefusal(3, 7, true, "move_unit").empty());
+	CHECK(!McpViewGateRefusal(2, 7, true, "plan_turn").empty());
+	CHECK(!McpViewGateRefusal(3, 8, true, "plan_turn").empty());
+	McpViewGateReset();
+	CHECK(!McpViewGateRefusal(3, 7, true, "plan_turn").empty());
+
 	if(s_failures) { std::printf("%d failure(s)\n", s_failures); return 1; }
 	std::printf("view gate: all passed\n");
 	return 0;

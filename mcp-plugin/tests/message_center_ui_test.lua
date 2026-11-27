@@ -469,6 +469,9 @@ check((castle.Root._alpha or 1) == 1 and castle.Root._tip:find("Castle") and not
 check(second.Ability:GetText():find("without its ban on training Settler", 1, true) and not second.Ability:GetText():find("not merged", 1, true),
 	"a merged ability names what of it stays out")
 local faded = second.Uniques._children[2].inst
+local shown = 0
+for _, ch in ipairs(second.Uniques._children) do if not ch.inst.Icon:IsHidden() then shown = shown + 1 end end
+check(shown == 3, "every unique's icon shows, the improvement's too: the card asks for 64, a size every unique's icon sheet has (some improvements have no 45)")
 check(faded.Root._alpha < 1 and faded.Root._tip:find("Not merged"), "a unique left out is faded and says why")
 handlers.input(KeyEvents.KeyDown, Keys.VK_ESCAPE, 0)
 check(Controls.LeaderCard:IsHidden() and not Controls.Window:IsHidden(), "Escape closes the card first")

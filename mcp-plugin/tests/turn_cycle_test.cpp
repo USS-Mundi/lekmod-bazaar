@@ -711,6 +711,28 @@ namespace
 		CHECK(!McpOrderAlreadyDone("set_production", "this city cannot build BUILDING_TEMPLE: needs Shrine in this city first"));
 		CHECK(!McpOrderAlreadyDone("unit_action", "cannot do that build on this tile (wrong unit, tech missing, or terrain)"));
 		CHECK(!McpOrderAlreadyDone("end_turn", MCP_ALREADY_RESTING));
+		// A set-up the unit cannot make (not a siege unit, set up already, no moves, embarked) leaves nothing to decide
+		// about the set-up itself; an attack that needed it fails on its own and brings the turn back.
+		CHECK(McpOrderAlreadyDone("unit_action", MCP_CANNOT_SET_UP));
+		CHECK(McpOrderDoneNote(MCP_CANNOT_SET_UP) == "skipped, nothing to set up now");
+		// A promotion for a unit that has none to take: nothing to choose. One it may not take is a choice still open.
+		CHECK(McpOrderAlreadyDone("promote_unit", MCP_NO_PROMOTION_READY));
+		CHECK(McpOrderDoneNote(MCP_NO_PROMOTION_READY) == "skipped, no promotion to take now");
+		CHECK(!McpOrderAlreadyDone("promote_unit", "that unit cannot take that promotion now"));
+	}
+
+	// fortify and sleep are one intent, rest in place: a unit the game lets do only one of them does that one.
+	void TestARestOrderTakesTheRestTheUnitHas()
+	{
+		CHECK(McpRestChoice("fortify", true, false) == "fortify");
+		CHECK(McpRestChoice("fortify", false, true) == "sleep");        // a Worker, a ship, a mounted or embarked unit
+		CHECK(McpRestChoice("sleep", true, false) == "fortify");        // a combat unit that fortifies does not sleep
+		CHECK(McpRestChoice("sleep", false, true) == "sleep");
+		CHECK(McpRestChoice("sleep", true, true) == "sleep");           // where both are open, the one asked for
+		CHECK(McpRestChoice("fortify", true, true) == "fortify");
+		// Neither is open (already resting, stacked): the order stays as asked, and fails with the game's reason.
+		CHECK(McpRestChoice("fortify", false, false) == "fortify");
+		CHECK(McpRestChoice("sleep", false, false) == "sleep");
 	}
 
 	void TestABuildTheUnitCannotStartHereWaitsForItsQueuedMove()
@@ -1087,6 +1109,7 @@ int main()
 	TestThreatsWake();
 	TestAPlannedTurnRunsUnlessSomethingHoldsIt();
 	TestAnOrderForWhatIsAlreadySoCountsAsDone();
+	TestARestOrderTakesTheRestTheUnitHas();
 	TestABuildTheUnitCannotStartHereWaitsForItsQueuedMove();
 	TestOnlyAPathThatCanNeverBeWalkedIsRefused();
 	TestAQueueItemMovesByNeighbourSwaps();

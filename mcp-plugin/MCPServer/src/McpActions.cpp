@@ -143,6 +143,7 @@ MCP_TOOL(ToolPromoteUnit)
 	std::string key = ArgStr(args, "promotion");
 	PromotionTypes e = FindPromotionType(key);
 	if(e == NO_PROMOTION) { err = "unknown promotion '" + key + "'; see unit_options.promotions_available"; return JVal(); }
+	if(!u->isPromotionReady()) { err = MCP_NO_PROMOTION_READY; return JVal(); }
 	if(!u->canPromote(e, -1)) { err = "that unit cannot take that promotion now"; return JVal(); }
 	u->doCommand(COMMAND_PROMOTION, e, -1);
 	JObj o;

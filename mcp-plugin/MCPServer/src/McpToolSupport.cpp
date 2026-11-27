@@ -692,7 +692,7 @@ namespace McpTool
 			{ "alert",      CanSentry,  CvTypes::getMISSION_ALERT,   "unit cannot go on alert here", false },
 			{ "heal",       CanHeal,    CvTypes::getMISSION_HEAL,    "unit cannot heal here (full health, or healing not allowed on this tile)", false },
 			{ "pillage",    CanPillage, CvTypes::getMISSION_PILLAGE, "nothing to pillage here or unit cannot pillage", true },
-			{ "set_up",     CanSetUp,   CvTypes::getMISSION_SET_UP_FOR_RANGED_ATTACK, "only siege units that must set up before firing can set up, and only with moves left and not embarked; a unit already set up stays set up until it moves", true },
+			{ "set_up",     CanSetUp,   CvTypes::getMISSION_SET_UP_FOR_RANGED_ATTACK, MCP_CANNOT_SET_UP, true },
 			{ "discover",   CanDiscover, CvTypes::getMISSION_DISCOVER, "only a Great Scientist can discover a technology", true },
 			{ "hurry_production", CanHurry, CvTypes::getMISSION_HURRY, "only a Great Engineer inside one of your cities can hurry production", true },
 			{ "trade_mission", CanTradeMission, CvTypes::getMISSION_TRADE, "only a Great Merchant inside a city-state can run a trade mission", true },

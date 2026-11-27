@@ -20,6 +20,7 @@ namespace
 	{
 		McpChronicleNow n;
 		n.turn = turn; n.era = era; n.eliminations = eliminations; n.citiesLost = citiesLost; n.direction = direction;
+		n.players.push_back("Goths"); n.players.push_back("Inca"); n.players.push_back("Maya");   // the players these seats have met
 		return n;
 	}
 
@@ -293,6 +294,7 @@ static void TestAnEntryOrThreadMustNameAPlayerTheSeatHasMet()
 	McpChronicle c = Started();
 	McpChronicleResult r;
 	McpChronicleNow now = Now(12);
+	now.players.clear();
 	now.players.push_back("Goths"); now.players.push_back("Inca");
 	r = McpChronicleResult();
 	CHECK(!McpChronicleApply(c, Args("{\"plan\":{\"relations\":{\"The Goths\":{\"text\":\"A wolf.\",\"until\":30}}},\"threads\":{\"open\":[{\"with\":\"Gothia\",\"words\":\"w\"}]}}"), now, r));
@@ -300,6 +302,65 @@ static void TestAnEntryOrThreadMustNameAPlayerTheSeatHasMet()
 	CHECK(McpChronicleApply(c, Args("{\"plan\":{\"relations\":{\"Goths\":{\"text\":\"A wolf.\",\"until\":30}}}}"), now, r));
 	McpChronicle none;                                                   // not started: plan_turn goes on as before
 	CHECK(McpChronicleApply(none, Args("{\"plan\":{\"relations\":\"anything\"}}"), now, r));
+}
+
+// Before a seat has met anyone it can name no one: an entry taken then (on a city-state, say) could never be written
+// again once a first civilization was met, and every plan_turn after it ran out was refused.
+static void TestBeforeMeetingAnyoneNoNameIsTaken()
+{
+	McpChronicle c = Started();
+	McpChronicleResult r;
+	McpChronicleNow now = Now(4);
+	now.players.clear();
+	CHECK(!Apply(c, "{\"plan\":{\"relations\":{\"Bangkok\":{\"text\":\"A maritime court at my door.\",\"until\":20}}},"
+		"\"threads\":{\"open\":[{\"with\":\"Bangkok\",\"words\":\"I will guard it.\"}]}}", now, r));
+	CHECK(r.refusals.size() == 2 && Has(r.refusals[0], "you have met no other civilization yet") && Has(r.refusals[1], "you have met no other civilization yet"));
+	CHECK(!Has(Refusals(r), "they are:"));
+	CHECK(c.relations.empty() && c.threads.empty());
+	CHECK(Apply(c, "{}", now, r));                                       // and nothing is owed
+}
+
+// A chronicle from before that rule holds such an entry. It is owed nothing: no plan_turn asks for it again.
+static void TestAnEntryOnANameNeverMetIsOwedNothing()
+{
+	McpChronicle c = Started(1);
+	McpChronicleLoad(c, "{\"e\":\"relation\",\"turn\":4,\"civ\":\"Bangkok\",\"text\":\"A maritime court at my door.\",\"until\":20}\n");
+	CHECK(c.relations.count("Bangkok") == 1);
+	McpChronicleResult r;
+	McpChronicleNow now = Now(21);
+	now.players.clear();
+	now.players.push_back("England");
+	CHECK(Apply(c, "{}", now, r));                                       // ran out, and not asked for
+	CHECK_EQ(Refusals(r), std::string(""));
+	McpChronicleDeed(c, 22, "Bangkok", "we made a deal");                // nor when something is filed under it
+	CHECK(Apply(c, "{}", Now(23), r));
+	CHECK(Apply(c, "{\"plan\":{\"relations\":{\"England\":{\"text\":\"The fleet to the north.\",\"until\":40}}}}", now, r));
+	now.turn = 41;
+	CHECK(!Apply(c, "{}", now, r));                                      // an entry on a player it has met is still owed
+	CHECK(Has(Refusals(r), "your entry on England held until turn 40") && !Has(Refusals(r), "Bangkok"));
+}
+
+// The game drops such entries when it reads the world, so no view lists them as run out either.
+static void TestEntriesOnNamesNeverMetAreDropped()
+{
+	McpChronicle c = Started(1);
+	McpChronicleLoad(c, "{\"e\":\"relation\",\"turn\":4,\"civ\":\"Bangkok\",\"text\":\"A maritime court at my door.\",\"until\":20}\n"
+		"{\"e\":\"relation\",\"turn\":5,\"civ\":\"England\",\"text\":\"The fleet to the north.\",\"until\":20}\n"
+		"{\"e\":\"relation\",\"turn\":6,\"civ\":\"Carthage\",\"text\":\"Gone now.\",\"until\":20}\n");
+	McpChronicleForget(c, "Carthage");                                   // a player that left the game keeps its entry
+	c.log.clear();
+	std::set<std::string> met;
+	met.insert("England");
+	CHECK(McpChronicleDropUnknown(c, met) == 1);
+	CHECK(c.relations.count("Bangkok") == 0 && c.relations.count("England") == 1 && c.relations.count("Carthage") == 1);
+	CHECK(c.log.size() == 1);
+	CHECK(!Has(McpChronicleBlock(c, "Arabia", "page", 25, ""), "Bangkok"));
+	CHECK(Has(McpChronicleBlock(c, "Arabia", "page", 25, ""), "England  held until T20"));
+	CHECK(!Has(McpChronicleRelationsText(c), "Bangkok"));
+	CHECK(McpChronicleDropUnknown(c, met) == 0);                         // once
+	McpChronicle again = Started(1);                                     // and the file replays to the same state
+	McpChronicleLoad(again, "{\"e\":\"relation\",\"turn\":4,\"civ\":\"Bangkok\",\"text\":\"A maritime court at my door.\",\"until\":20}\n" + c.log[0] + "\n");
+	CHECK(again.relations.empty());
 }
 
 int main()
@@ -316,6 +377,9 @@ int main()
 	TestTheMirrorCountsRoundsNothingServed();
 	TestTheBlockShowsWhatIsOwed();
 	TestAnEntryOrThreadMustNameAPlayerTheSeatHasMet();
+	TestBeforeMeetingAnyoneNoNameIsTaken();
+	TestAnEntryOnANameNeverMetIsOwedNothing();
+	TestEntriesOnNamesNeverMetAreDropped();
 	if(s_failures) { std::printf("%d failed\n", s_failures); return 1; }
 	std::printf("all chronicle tests passed\n");
 	return 0;
