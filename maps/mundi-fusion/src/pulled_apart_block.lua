@@ -12,6 +12,7 @@
 --                                               the start rules for this map
 --   AssignStartingPlots:PlaceResourcesAndCityStates  accepts the first map, so each map is made once
 --   AssignStartingPlots:ExaminePlotForNaturalWondersEligibility  no natural wonder on a bridge
+--   AddFeatures                                 lays the shallows on the fords (Crossings: Shallow fords)
 --   GenerateMap                                 checks the bridges and writes the map to the log
 -- Lekmap remakes a map until its balance checks pass, up to 300 times; those checks
 -- expect one landmass, so here the first map is kept and a map takes one pass.
@@ -28,16 +29,18 @@ local function PA_Steps(first, last, step)
 end
 
 -- Defaults are the operator's settings from the preview (2026-11-20); islands: fewer and larger (2026-11-20); his style
--- from the generator (2026-11-23): four wide rifts, middle-sea islands of medium size; since 2026-11-26 the rifts at
--- full strength (100) and the continents as the rifts fall.
+-- from the generator (2026-11-23): four wide rifts, middle-sea islands of medium size; since 2026-11-26 the continents
+-- as the rifts fall; since 2026-11-27 his pick from the generator: rifts at strength 85 with a 50% spread and 6 tiles
+-- of raggedness, so necks of high ground survive, three shallow fords for each continent, and any sea the land shuts
+-- in opened to the ocean.
 PA_OPTIONS = {
 	{ key = "on",        name = "Pull Apart",                values = {1, 2}, labels = {"On", "Off (plain Lekmap Pangaea, made once)"}, default = 1 },
 	{ key = "rifts",     name = "Rifts",                     values = {1, 2, 3, 4}, default = 4 },
 	{ key = "spread",    name = "Rift Angle Spread",         values = {0, 30, 60, 90, 120, 150, 180}, suffix = " degrees", default = 180 },
-	{ key = "strength",  name = "Rift Strength",             values = {40, 50, 60, 70, 80, 85, 89, 95, 100}, default = 100 },
-	{ key = "vary",      name = "Rift Strength Spread",      values = {0, 25, 50, 75, 100}, suffix = "%", default = 100 },
+	{ key = "strength",  name = "Rift Strength",             values = {40, 50, 60, 70, 80, 85, 89, 95, 100}, default = 85 },
+	{ key = "vary",      name = "Rift Strength Spread",      values = {0, 25, 50, 75, 100}, suffix = "%", default = 50 },
 	{ key = "width",     name = "Rift Width",                values = PA_Steps(2, 10.5, 0.5), suffix = " tiles", default = 6.5 },
-	{ key = "rag",       name = "Rift Raggedness",           values = PA_Steps(0, 8, 0.5), suffix = " tiles", default = 5.5 },
+	{ key = "rag",       name = "Rift Raggedness",           values = PA_Steps(0, 8, 0.5), suffix = " tiles", default = 6 },
 	{ key = "grain",     name = "Rift Grain",                values = {1, 2, 3}, labels = {"Coarse", "Medium", "Fine"}, default = 3 },
 	{ key = "wave",      name = "Rift Waviness",             values = PA_Steps(0, 10, 1), suffix = " tiles", default = 6 },
 	{ key = "bends",     name = "Rift Bends",                values = {1, 2, 3, 4}, default = 4 },
@@ -50,6 +53,11 @@ PA_OPTIONS = {
 	{ key = "mountains", name = "Mountains",                 values = {1, 2}, labels = {"Like Lekmap Continents", "Like Lekmap Pangaea"}, default = 1, show = 1.7 },
 	{ key = "continents", name = "Continents",               values = {1, 2}, labels = {"At least two", "As the rifts fall"}, default = 2, show = 1.2 },
 	{ key = "deep",      name = "Deep sea",                  values = {1, 2}, labels = {"On", "Off (Lekmap's coasts)"}, default = 1, show = 1.6 },
+	-- Added after the others, so every earlier option keeps its position (they are read by position).
+	{ key = "crossing",  name = "Crossings",                 values = {1, 2}, labels = {"Land bridges", "Shallow fords"}, default = 2, show = 1.52 },
+	{ key = "crossings", name = "Crossings per Continent",   values = {1, 2, 3}, default = 3, show = 1.54 },
+	{ key = "riftwater", name = "Rift Water",                values = {1, 2}, labels = {"Deep in the middle", "Shallow all through"}, default = 1, show = 1.62 },
+	{ key = "inland",    name = "Inland Seas",               values = {1, 2}, labels = {"As the land leaves them", "Opened to the ocean"}, default = 2, show = 1.64 },
 }
 -- No island under 4 tiles (operator, 2026-11-21).
 local PA_MID_SIZES = { {4, 5}, {4, 7}, {5, 10} }
@@ -92,12 +100,12 @@ function GetMapScriptInfo()
 	end
 	if next(pending) then error("Mundi Fusion: Lekmap has no option " .. next(pending)) end
 	info.Name = "Mundi Fusion"
-	info.Description = "Mundi Fusion: Lekmap v6.3's Pangaea, torn by rifts at their own angles and strengths. The sea seeps in along them, high ground survives as necks and peninsulas, and islands rise in the sea between. Each map is made once."
+	info.Description = "Mundi Fusion: Lekmap v6.3's Pangaea, torn by rifts at their own angles and strengths. The sea seeps in along them, high ground survives as necks and peninsulas, shallow fords join the continents, and islands rise in the sea between. Each map is made once."
 	for k, opt in ipairs(PA_OPTIONS) do
 		local values = {}
 		for v = 1, #opt.values do values[v] = PA_Label(opt, v) end
 		-- Shown above all of Lekmap's own options (theirs sort from -99 up).
-		table.insert(info.CustomOptions, { Name = opt.name, Values = values, DefaultValue = PA_DefaultIndex(opt), SortPriority = -1000 + 10 * (opt.show or k) })
+		table.insert(info.CustomOptions, { Name = opt.name, Values = values, DefaultValue = PA_DefaultIndex(opt), SortPriority = -2000 + 50 * (opt.show or k) })
 	end
 	return info
 end
@@ -231,6 +239,11 @@ function PA_PullApart(plotTypes)
 	PA_CONNECT = false
 	PA_CANAL = false
 	PA_DEEP = false
+	PA_FORDS = false
+	PA_CROSS_N = 1
+	PA_SHALLOW_RIFTS = false
+	PA_OPEN_SEAS = false
+	PA_CARVED = {}
 	local S = PA_Settings()
 	if S.on ~= 1 then
 		print("Mundi Fusion: off; plain Lekmap Pangaea")
@@ -324,6 +337,10 @@ function PA_PullApart(plotTypes)
 		carved = carved + sunk
 		if sunk > 0 then splitNote = split and ("; " .. sunk .. " more sank to leave two continents") or ("; WARNING " .. sunk .. " more sank and still one continent") end
 	end
+	-- The rifts' seas: land the rifts sank (Rift Water: Shallow keeps it shallow).
+	for _, i in ipairs(land) do
+		if plotTypes[i] == OCEAN then PA_CARVED[i] = true end
+	end
 
 	-- Islands: first in the sea the rifts opened, then in the ocean around; two tiles clear of other land.
 	local function landNear(i, blob)
@@ -394,6 +411,10 @@ function PA_PullApart(plotTypes)
 	PA_CONNECT = (S.connect ~= 3)
 	PA_CANAL = (S.connect == 2)
 	PA_DEEP = (S.deep == 1)
+	PA_FORDS = (S.crossing == 2)
+	PA_CROSS_N = S.crossings
+	PA_SHALLOW_RIFTS = (S.riftwater == 2)
+	PA_OPEN_SEAS = (S.inland == 2)
 	local shares = {}
 	for k = 1, math.min(4, #sizes) do shares[k] = math.floor(100 * sizes[k] / total + 0.5) .. "%" end
 	print("Mundi Fusion: " .. S.rifts .. " rifts, " .. carved .. " tiles of land became sea, " ..
@@ -443,7 +464,19 @@ end
 -- types: plot types by plot index, changed in place; depth: the rifts' depth per tile, or nil;
 -- canal: true to leave one canal spot on each bridge that crosses water.
 -- Returns the bridges made, the tiles raised, the canal spots, and every tile of every bridge.
-function PA_Bridge(types, depth, W, H, wrap, civs, canal)
+--
+-- With fords (ford), the water on a crossing stays water and becomes shallows: land units walk across, ships sail
+-- through, so no crossing closes a sea and none needs a canal. A wall of mountains still gets a pass of hills.
+-- A ford takes the shortest way over water, as each tile of shallows costs a land unit 2 moves; a bridge takes the
+-- way where the rifts cut shallowest.
+-- perContinent above 1: each continent big enough for a civ gets more crossings, each to another such continent,
+-- PA_CROSS_APART tiles or more from the crossings already laid and over PA_CROSS_MAX tiles of water or fewer; one
+-- that would wall a sea off is not laid.
+-- Returns the crossings laid, the tiles raised, the canal spots, every crossing tile, and the ford tiles.
+PA_CROSS_APART = 5
+PA_CROSS_MAX = 8
+
+function PA_Bridge(types, depth, W, H, wrap, civs, canal, ford, perContinent)
 	local LAND, HILLS, MOUNTAIN, OCEAN = PlotTypes.PLOT_LAND, PlotTypes.PLOT_HILLS, PlotTypes.PLOT_MOUNTAIN, PlotTypes.PLOT_OCEAN
 	local nbCache = {}
 	local function nb(i)
@@ -451,7 +484,8 @@ function PA_Bridge(types, depth, W, H, wrap, civs, canal)
 		if list == nil then list = PA_Neighbours(i, W, H, wrap); nbCache[i] = list end
 		return list
 	end
-	local function walkable(i) return types[i] == LAND or types[i] == HILLS end
+	local fordSet = {}
+	local function walkable(i) return types[i] == LAND or types[i] == HILLS or fordSet[i] == true end
 	local function polar(i) local y = math.floor((i - 1) / W); return y < 2 or y > H - 3 end
 	local function landmasses()
 		local id, sizes, first, total = {}, {}, {}, 0
@@ -525,13 +559,107 @@ function PA_Bridge(types, depth, W, H, wrap, civs, canal)
 		return seaBetween(a, b) and seaBetween(b, a)
 	end
 
-	local bridges, raised, canals, tiles, skip = 0, 0, {}, {}, {}
+	local bridges, raised, canals, tiles, skip, fords = 0, 0, {}, {}, {}, {}
+	-- Lays a crossing along path (from the far landmass to the land it joins). Returns true when laid; otherwise puts
+	-- everything back and returns false. last: the final try, which keeps a bridge that walls a sea off or has no canal spot.
+	local function lay(path, last)
+		-- Sea and mountains on the path become land (with fords: sea becomes shallows), so nothing on it stops a unit.
+		local changed, wet, forded = {}, {}, {}
+		local function raise(j, flat)
+			if types[j] == OCEAN then
+				if ford then
+					if not fordSet[j] then fordSet[j] = true; forded[#forded + 1] = j end
+				else
+					changed[j] = OCEAN
+					types[j] = (not flat and Map.Rand(5, "Pulled Apart bridge hills") == 0) and HILLS or LAND
+				end
+			elseif types[j] == MOUNTAIN then
+				changed[j] = MOUNTAIN
+				types[j] = HILLS
+			end
+		end
+		for n, j in ipairs(path) do
+			if types[j] == OCEAN then wet[#wet + 1] = n end
+			raise(j, true)
+		end
+		local spot = nil
+		if canal and not ford and #wet > 0 then
+			local mid = wet[math.ceil(#wet / 2)]
+			local order = {}
+			for _, n in ipairs(wet) do order[#order + 1] = n end
+			table.sort(order, function(x, y) return math.abs(x - mid) < math.abs(y - mid) end)
+			for _, n in ipairs(order) do
+				if n > 1 and n < #path and canalSpot(path[n], path[n - 1], path[n + 1]) then spot = path[n]; break end
+			end
+		end
+		local near = {}
+		if spot ~= nil then
+			near[spot] = true
+			for _, a in ipairs(nb(spot)) do near[a] = true; for _, b in ipairs(nb(a)) do near[b] = true end end
+		end
+		local onPath = {}
+		for _, j in ipairs(path) do onPath[j] = true end
+		for _, j in ipairs(path) do
+			for _, k in ipairs(nb(j)) do
+				if not polar(k) and not near[k] and not onPath[k] and PA_Rand() < 0.5 then raise(k, false) end
+			end
+		end
+		-- No single tile may cut a bridge, so no one city on it closes the way: widen it wherever one would
+		-- (a canal spot is the one tile left on purpose).
+		if spot == nil then
+			for pass = 1, 3 do
+				local thin = false
+				for _, j in ipairs(path) do
+					if j ~= path[1] and j ~= path[#path] and not joined(path[1], path[#path], j) then
+						thin = true
+						for _, k in ipairs(nb(j)) do if not polar(k) then raise(k, false) end end
+					end
+				end
+				if not thin then break end
+			end
+		end
+		local placed = {}
+		for j, was in pairs(changed) do if was == OCEAN then placed[j] = true end end
+		-- Without a spot for its canal a bridge tries another way; on the last try it is built solid instead.
+		local unfit = canal and not ford and #wet > 0 and spot == nil and not last
+		-- A way that walls a sea off is tried last: on the final attempt the land is joined anyway.
+		if unfit or (not last and PA_SplitsSea(types, placed, W, H, wrap)) then
+			for j, was in pairs(changed) do types[j] = was end
+			for _, j in ipairs(forded) do fordSet[j] = nil end
+			return false, wet
+		end
+		for j in pairs(changed) do raised = raised + 1; tiles[#tiles + 1] = j end
+		-- A bridge's tiles are its whole path; a ford's are only what it made (land it crosses stays plain land).
+		for _, j in ipairs(path) do if not changed[j] and not (ford and types[j] ~= OCEAN) then tiles[#tiles + 1] = j end end
+		for _, j in ipairs(forded) do
+			fords[#fords + 1] = j
+			if not onPath[j] then tiles[#tiles + 1] = j end
+		end
+		bridges = bridges + 1
+		if spot ~= nil then canals[#canals + 1] = spot end
+		return true, wet
+	end
+
+	-- The land as the rifts left it, before any crossing, and how many crossings reach each landmass of it.
+	local origId, origSizes, _, origTotal = landmasses()
+	local touches = {}
+	local function counted(path)
+		local a, b = origId[path[1]], origId[path[#path]]
+		if a then touches[a] = (touches[a] or 0) + 1 end
+		if b and b ~= a then touches[b] = (touches[b] or 0) + 1 end
+	end
+
+	-- Joins every landmass big enough for a civ to the biggest, one crossing each.
+	local function joinAll()
 	for round = 1, 40 do
 		local id, sizes, first, total = landmasses()
 		local main, target = nil, nil
 		for k, n in ipairs(sizes) do if main == nil or n > sizes[main] then main = k end end
 		if main == nil then break end
 		local need = math.max(20, math.floor(total / (2 * math.max(1, civs))))
+		-- With fords the civs are shared out over the landmasses by their land, so a smaller one may get a civ too:
+		-- every landmass of half a civ's share or more (20 tiles at least) is joined.
+		if ford then need = math.max(2 * PA_BIG_LANDMASS, math.floor(need / 2)) end
 		for k, n in ipairs(sizes) do
 			if k ~= main and n >= need and not skip[first[k]] and (target == nil or n > sizes[target]) then target = k end
 		end
@@ -555,7 +683,7 @@ function PA_Bridge(types, depth, W, H, wrap, civs, canal)
 							local step
 							if id[j] ~= nil then step = 0.1
 							elseif types[j] == MOUNTAIN then step = 2
-							else step = 1 + 4 * ((depth and depth[j]) or 0) + 0.5 * PA_Rand() end
+							else step = 1 + (ford and 0 or 4 * ((depth and depth[j]) or 0)) + 0.5 * PA_Rand() end
 							local nc = c + step
 							if cost[j] == nil or nc < cost[j] then cost[j] = nc; from[j] = i; heap.push(nc, j) end
 						end
@@ -565,78 +693,73 @@ function PA_Bridge(types, depth, W, H, wrap, civs, canal)
 			if reached == nil then break end
 			local path, i = {}, reached
 			while i ~= nil do path[#path + 1] = i; if id[i] == main then break end; i = from[i] end
-
-			-- Raise the path: sea and mountains become land, so nothing on a bridge stops a unit.
-			local changed, wet = {}, {}
-			local function raise(j, flat)
-				if types[j] == OCEAN then
-					changed[j] = OCEAN
-					types[j] = (not flat and Map.Rand(5, "Pulled Apart bridge hills") == 0) and HILLS or LAND
-				elseif types[j] == MOUNTAIN then
-					changed[j] = MOUNTAIN
-					types[j] = HILLS
-				end
-			end
-			for n, j in ipairs(path) do
-				if types[j] == OCEAN then wet[#wet + 1] = n end
-				raise(j, true)
-			end
-			local spot = nil
-			if canal and #wet > 0 then
-				local mid = wet[math.ceil(#wet / 2)]
-				local order = {}
-				for _, n in ipairs(wet) do order[#order + 1] = n end
-				table.sort(order, function(x, y) return math.abs(x - mid) < math.abs(y - mid) end)
-				for _, n in ipairs(order) do
-					if n > 1 and n < #path and canalSpot(path[n], path[n - 1], path[n + 1]) then spot = path[n]; break end
-				end
-			end
-			local near = {}
-			if spot ~= nil then
-				near[spot] = true
-				for _, a in ipairs(nb(spot)) do near[a] = true; for _, b in ipairs(nb(a)) do near[b] = true end end
-			end
-			local onPath = {}
-			for _, j in ipairs(path) do onPath[j] = true end
-			for _, j in ipairs(path) do
-				for _, k in ipairs(nb(j)) do
-					if not polar(k) and not near[k] and not onPath[k] and PA_Rand() < 0.5 then raise(k, false) end
-				end
-			end
-			-- No single tile may cut a bridge, so no one city on it closes the way: widen it wherever one would
-			-- (a canal spot is the one tile left on purpose).
-			if spot == nil then
-				for pass = 1, 3 do
-					local thin = false
-					for _, j in ipairs(path) do
-						if j ~= path[1] and j ~= path[#path] and not joined(path[1], path[#path], j) then
-							thin = true
-							for _, k in ipairs(nb(j)) do if not polar(k) then raise(k, false) end end
-						end
-					end
-					if not thin then break end
-				end
-			end
-			local placed = {}
-			for j, was in pairs(changed) do if was == OCEAN then placed[j] = true end end
-			-- Without a spot for its canal a bridge tries another way; on the last try it is built solid instead.
-			local unfit = canal and #wet > 0 and spot == nil and attempt < ATTEMPTS
-			-- A way that walls a sea off is tried last: on the final attempt the land is joined anyway.
-			if unfit or (attempt < ATTEMPTS and PA_SplitsSea(types, placed, W, H, wrap)) then
-				for j, was in pairs(changed) do types[j] = was end
-				for _, n in ipairs(wet) do blocked[path[n]] = true end
-			else
-				for j in pairs(changed) do raised = raised + 1; tiles[#tiles + 1] = j end
-				for _, j in ipairs(path) do if not changed[j] then tiles[#tiles + 1] = j end end
-				bridges = bridges + 1
-				if spot ~= nil then canals[#canals + 1] = spot end
-				built = true
-				break
-			end
+			local ok, wet = lay(path, attempt == ATTEMPTS)
+			if ok then counted(path); built = true; break end
+			for _, n in ipairs(wet) do blocked[path[n]] = true end
 		end
 		if not built then skip[first[target]] = true end
 	end
-	return bridges, raised, canals, tiles
+	end
+	joinAll()
+
+	-- More crossings, smallest continent first, so no continent hangs on a single neck.
+	if (perContinent or 1) > 1 then
+		local need = math.max(20, math.floor(origTotal / (2 * math.max(1, civs))))
+		local order = {}
+		for k, n in ipairs(origSizes) do if n >= need then order[#order + 1] = k end end
+		table.sort(order, function(a, b) if origSizes[a] ~= origSizes[b] then return origSizes[a] < origSizes[b] end return a < b end)
+		for _, k in ipairs(order) do
+			local refused, tries = {}, 0
+			while (touches[k] or 0) < perContinent and tries < 2 * perContinent do
+				tries = tries + 1
+				-- Tiles near a crossing already laid are kept out, so the next one is somewhere else.
+				local apart, queue, head = {}, {}, 1
+				for _, t in ipairs(tiles) do apart[t] = 0; queue[#queue + 1] = t end
+				while head <= #queue do
+					local c = queue[head]
+					head = head + 1
+					if apart[c] < PA_CROSS_APART then
+						for _, j in ipairs(nb(c)) do if apart[j] == nil then apart[j] = apart[c] + 1; queue[#queue + 1] = j end end
+					end
+				end
+				local function open(j) return apart[j] == nil and not refused[j] and not polar(j) end
+				local cost, from, heap = {}, {}, PA_Heap()
+				for i = 1, W * H do
+					if origId[i] == k and open(i) then cost[i] = 0; heap.push(0, i) end
+				end
+				local reached = nil
+				while true do
+					local c, i = heap.pop()
+					if c == nil then break end
+					if c <= cost[i] then
+						local o = origId[i]
+						if o ~= nil and o ~= k and origSizes[o] >= need then reached = i; break end
+						for _, j in ipairs(nb(i)) do
+							if open(j) and origId[j] ~= k then
+								local step
+								if walkable(j) then step = 0.1
+								elseif types[j] == MOUNTAIN then step = 2
+								else step = 1 + (ford and 0 or 4 * ((depth and depth[j]) or 0)) + 0.5 * PA_Rand() end
+								local nc = c + step
+								if cost[j] == nil or nc < cost[j] then cost[j] = nc; from[j] = i; heap.push(nc, j) end
+							end
+						end
+					end
+				end
+				if reached == nil then break end
+				local path, i = {}, reached
+				while i ~= nil do path[#path + 1] = i; i = from[i] end
+				local water = 0
+				for _, j in ipairs(path) do if types[j] == OCEAN then water = water + 1 end end
+				if water > PA_CROSS_MAX then break end
+				local ok, wet = lay(path, false)
+				if ok then counted(path) else for _, n in ipairs(wet) do refused[path[n]] = true end end
+			end
+		end
+		-- A crossing's pass of hills can join scraps into a new landmass big enough for a civ: join it too.
+		joinAll()
+	end
+	return bridges, raised, canals, tiles, fords
 end
 
 function PA_CivCount()
@@ -687,10 +810,13 @@ end
 
 PA_CANALS = {}  -- the canal spots of the map being made, kept clear of moved specks
 PA_BRIDGE = {}  -- every bridge tile of the map being made, by plot index: no natural wonder or mountain goes there
+PA_FORD = {}    -- every ford tile of the map being made, by plot index: water that gets the shallows feature
+PA_CARVED = {}  -- land the rifts sank, by plot index
 
 function PA_ConnectLandmasses()
 	PA_CANALS = {}
 	PA_BRIDGE = {}
+	PA_FORD = {}
 	if PA_DEPTH == nil or not PA_CONNECT then return end
 	local W, H = Map.GetGridSize()
 	local types, before = {}, {}
@@ -702,9 +828,10 @@ function PA_ConnectLandmasses()
 		end
 	end
 	if beta_cliffs == 1 then PA_FlattenCoastalMountains(types, W, H, Map:IsWrapX()) end
-	local bridges, raised, canals, tiles = PA_Bridge(types, PA_DEPTH, W, H, Map:IsWrapX(), PA_CivCount(), PA_CANAL)
+	local bridges, raised, canals, tiles, fords = PA_Bridge(types, PA_DEPTH, W, H, Map:IsWrapX(), PA_CivCount(), PA_CANAL, PA_FORDS, PA_CROSS_N)
 	PA_CANALS = canals
 	for _, i in ipairs(tiles) do PA_BRIDGE[i] = true end
+	for _, i in ipairs(fords) do PA_FORD[i] = true end
 	for i = 1, W * H do
 		if types[i] ~= before[i] then
 			local x = (i - 1) % W
@@ -713,6 +840,14 @@ function PA_ConnectLandmasses()
 		end
 	end
 	if bridges > 0 then Map.RecalculateAreas() end
+	if PA_FORDS then
+		-- Fords are water, so the continents stay landmasses of their own: civs are shared out over them by their land
+		-- (the game's continental method), every one joined to the rest.
+		PA_METHOD = 2
+		print("Mundi Fusion: connect all continents: " .. bridges .. " shallow fords (" .. #fords .. " tiles of shallows, " .. raised ..
+			" tiles raised); civs shared out over the continents, each joined to the rest")
+		return
+	end
 	-- Every civ starts on the joined land: the game's one-landmass method puts them all on the biggest.
 	PA_METHOD = 1
 	local spots = {}
@@ -897,7 +1032,10 @@ function PA_PullInSpecks()
 			before[i] = types[i]
 		end
 	end
-	local moved, sunk = PA_Magnetize(types, W, H, Map:IsWrapX(), PA_CANALS)
+	local keep = {}
+	for _, c in ipairs(PA_CANALS) do keep[#keep + 1] = c end
+	for i in pairs(PA_FORD) do keep[#keep + 1] = i end
+	local moved, sunk = PA_Magnetize(types, W, H, Map:IsWrapX(), keep)
 	for i = 1, W * H do
 		if types[i] ~= before[i] then
 			local x = (i - 1) % W
@@ -907,6 +1045,110 @@ function PA_PullInSpecks()
 	end
 	if moved + sunk > 0 then Map.RecalculateAreas() end
 	print("Mundi Fusion: specks under " .. PA_MIN_ISLAND .. " tiles: " .. moved .. " pulled onto nearby land, " .. sunk .. " sunk")
+end
+
+------------------------------------------------------------------------------
+-- Inland seas. With Inland Seas: Opened, each body of PA_MIN_SEA water tiles or more cut off from the ocean gets a
+-- channel to it, the shortest way through the land (never through a canal spot). The channel is shallows: ships sail
+-- through, land units still walk across. A sea whose channel would cut more than PA_CHANNEL_MAX tiles of land stays shut.
+PA_CHANNEL_MAX = 6
+PA_OPEN_SEAS = false
+
+-- types: plot types by plot index, changed in place; avoid: tiles no channel may cut. Returns the tiles sunk, the seas
+-- opened and the seas left shut.
+function PA_OpenSeaPlan(types, W, H, wrap, avoid)
+	local OCEAN, HILLS, MOUNTAIN = PlotTypes.PLOT_OCEAN, PlotTypes.PLOT_HILLS, PlotTypes.PLOT_MOUNTAIN
+	local function polar(i) local y = math.floor((i - 1) / W); return y < 2 or y > H - 3 end
+	local cut, opened, left, given = {}, 0, 0, {}
+	for round = 1, 30 do
+		local body, size, first = {}, {}, {}
+		for i = 1, W * H do
+			if types[i] == OCEAN and not body[i] then
+				local k = #size + 1
+				local stack, n = { i }, 0
+				body[i] = k
+				first[k] = i
+				while #stack > 0 do
+					local c = table.remove(stack)
+					n = n + 1
+					for _, j in ipairs(PA_Neighbours(c, W, H, wrap)) do
+						if types[j] == OCEAN and not body[j] then body[j] = k; stack[#stack + 1] = j end
+					end
+				end
+				size[k] = n
+			end
+		end
+		local ocean, inland = nil, nil
+		for k, n in ipairs(size) do if ocean == nil or n > size[ocean] then ocean = k end end
+		for k, n in ipairs(size) do
+			if k ~= ocean and n >= PA_MIN_SEA and not given[first[k]] and (inland == nil or n > size[inland]) then inland = k end
+		end
+		if inland == nil then break end
+		local cost, from, heap = {}, {}, PA_Heap()
+		for i = 1, W * H do
+			if body[i] == inland then cost[i] = 0; heap.push(0, i) end
+		end
+		local reached = nil
+		while true do
+			local c, i = heap.pop()
+			if c == nil then break end
+			if c <= cost[i] then
+				if body[i] == ocean then reached = i; break end
+				for _, j in ipairs(PA_Neighbours(i, W, H, wrap)) do
+					if not polar(j) and not (avoid and avoid[j]) then
+						local step
+						if types[j] == OCEAN then step = 0.1
+						elseif types[j] == MOUNTAIN then step = 4
+						elseif types[j] == HILLS then step = 1.5
+						else step = 1 end
+						local nc = c + step
+						if cost[j] == nil or nc < cost[j] then cost[j] = nc; from[j] = i; heap.push(nc, j) end
+					end
+				end
+			end
+		end
+		local dig = {}
+		local c = reached and from[reached]
+		while c ~= nil and body[c] ~= inland do
+			if types[c] ~= OCEAN then dig[#dig + 1] = c end
+			c = from[c]
+		end
+		if reached == nil or #dig > PA_CHANNEL_MAX then
+			given[first[inland]] = true
+			left = left + 1
+		else
+			for _, j in ipairs(dig) do types[j] = OCEAN; cut[#cut + 1] = j end
+			opened = opened + 1
+		end
+	end
+	return cut, opened, left
+end
+
+-- Runs on the map itself, after the specks.
+function PA_OpenSeas()
+	if PA_DEPTH == nil or not PA_OPEN_SEAS then return end
+	local W, H = Map.GetGridSize()
+	local types = {}
+	for y = 0, H - 1 do
+		for x = 0, W - 1 do types[y * W + x + 1] = Map.GetPlot(x, y):GetPlotType() end
+	end
+	local avoid = {}
+	for _, c in ipairs(PA_CANALS) do avoid[c] = true end
+	local cut, opened, left = PA_OpenSeaPlan(types, W, H, Map:IsWrapX(), avoid)
+	for _, i in ipairs(cut) do
+		local x = (i - 1) % W
+		Map.GetPlot(x, (i - 1 - x) / W):SetPlotType(PlotTypes.PLOT_OCEAN)
+		if BETA_TECTONIC_LANDS ~= nil and BETA_TECTONIC_LANDS[i] ~= nil and BETA_TECTONIC_LANDS[i] > 0 then BETA_TECTONIC_LANDS[i] = 0 end
+		PA_FORD[i] = true
+		PA_BRIDGE[i] = true
+	end
+	if #cut > 0 then
+		Map.RecalculateAreas()
+		-- A channel is water, so the land beside it is two landmasses joined by shallows: civs are shared out over them.
+		PA_METHOD = 2
+	end
+	print("Mundi Fusion: inland seas: " .. opened .. " opened to the ocean by a channel of shallows (" .. #cut .. " tiles)" ..
+		((left > 0) and ("; " .. left .. " left shut, the ocean more than " .. PA_CHANNEL_MAX .. " tiles of land away") or ""))
 end
 
 ------------------------------------------------------------------------------
@@ -970,9 +1212,32 @@ function PA_DeepWater(types, W, H, wrap, civs)
 	return shallow
 end
 
+-- Water that stays shallow whatever the deep-sea pass decides: fords, and with Rift Water: Shallow, the rifts' seas.
+function PA_KeepShallow(i)
+	return PA_FORD[i] == true or (PA_SHALLOW_RIFTS == true and PA_CARVED[i] == true)
+end
+
 -- Runs on the map itself, after the game's coasts are laid.
 function PA_DeepSea()
-	if PA_DEPTH == nil or not PA_DEEP then return end
+	if PA_DEPTH == nil then return end
+	if not PA_DEEP then
+		-- Lekmap's coasts stay; only fords and shallow rifts are made shallow.
+		if next(PA_FORD) == nil and not PA_SHALLOW_RIFTS then return end
+		local W, H = Map.GetGridSize()
+		local made = 0
+		for i = 1, W * H do
+			if PA_KeepShallow(i) then
+				local x = (i - 1) % W
+				local plot = Map.GetPlot(x, (i - 1 - x) / W)
+				if plot:GetPlotType() == PlotTypes.PLOT_OCEAN and not plot:IsLake() and plot:GetTerrainType() ~= GameDefines.SHALLOW_WATER_TERRAIN then
+					plot:SetTerrainType(GameDefines.SHALLOW_WATER_TERRAIN, false, false)
+					made = made + 1
+				end
+			end
+		end
+		print("Mundi Fusion: shallow water: " .. made .. " tiles of fords and rifts made shallow; Lekmap's coasts elsewhere")
+		return
+	end
 	local W, H = Map.GetGridSize()
 	local types = {}
 	for y = 0, H - 1 do
@@ -986,7 +1251,7 @@ function PA_DeepSea()
 			local x = (i - 1) % W
 			local plot = Map.GetPlot(x, (i - 1 - x) / W)
 			if not plot:IsLake() then
-				local want = shallow[i] and GameDefines.SHALLOW_WATER_TERRAIN or GameDefines.DEEP_WATER_TERRAIN
+				local want = (shallow[i] or PA_KeepShallow(i)) and GameDefines.SHALLOW_WATER_TERRAIN or GameDefines.DEEP_WATER_TERRAIN
 				if plot:GetTerrainType() ~= want then
 					if want == GameDefines.DEEP_WATER_TERRAIN then deepened = deepened + 1 end
 					plot:SetTerrainType(want, false, false)
@@ -995,7 +1260,7 @@ function PA_DeepSea()
 		end
 	end
 	print("Mundi Fusion: deep sea: " .. deepened .. " shallow tiles made deep; water beside land stays shallow, and islands within " ..
-		PA_ISLAND_REACH .. " tiles of other land keep a shallow way to it")
+		PA_ISLAND_REACH .. " tiles of other land keep a shallow way to it" .. (PA_SHALLOW_RIFTS and "; the rifts' seas stay shallow" or ""))
 end
 
 function GeneratePlotTypes()
@@ -1009,6 +1274,7 @@ function GeneratePlotTypes()
 	end
 	PA_ConnectLandmasses();
 	PA_PullInSpecks();
+	PA_OpenSeas();
 	GenerateCoasts();
 	PA_DeepSea();
 end
@@ -1028,6 +1294,12 @@ PA_LAND3 = {}                     -- land within 3 tiles, by plot index, for thi
 local function PA_IsLand(plot)
 	local t = plot:GetPlotType()
 	return t == PlotTypes.PLOT_LAND or t == PlotTypes.PLOT_HILLS
+end
+
+-- Whether a water plot carries LEKMOD's shallows (walkable water). Outside the game, with no features, a planned ford counts.
+function PA_IsShallows(plot)
+	if FeatureTypes == nil or FeatureTypes.FEATURE_SHALLOWS == nil or plot.GetFeatureType == nil then return true end
+	return plot:GetFeatureType() == FeatureTypes.FEATURE_SHALLOWS
 end
 
 local function PA_XY(i)
@@ -1140,7 +1412,9 @@ function PA_WalkableLand()
 	local id, sizes = {}, {}
 	local function walk(i)
 		local x = (i - 1) % W
-		return PA_IsLand(Map.GetPlot(x, (i - 1 - x) / W))
+		local plot = Map.GetPlot(x, (i - 1 - x) / W)
+		if PA_IsLand(plot) then return true end
+		return PA_FORD[i] == true and PA_IsShallows(plot)
 	end
 	for i = 1, W * H do
 		if id[i] == nil and walk(i) then
@@ -1211,7 +1485,7 @@ function PA_DumpMap()
 			end
 		end
 	end
-	print("Mundi Fusion map: " .. W .. "x" .. H .. ", north first; ~ ocean, - coast, o lake, # land, n hills, ^ mountains, A-V civ starts by player number, * city-state starts")
+	print("Mundi Fusion map: " .. W .. "x" .. H .. ", north first; ~ ocean, - coast, = shallows, o lake, # land, n hills, ^ mountains, A-V civ starts by player number, * city-state starts")
 	for y = H - 1, 0, -1 do
 		local row = {}
 		for x = 0, W - 1 do
@@ -1219,6 +1493,8 @@ function PA_DumpMap()
 			local c = marks[y * W + x + 1]
 			if c == nil then
 				if plot:IsLake() then c = "o"
+				elseif plot:IsWater() and FeatureTypes ~= nil and FeatureTypes.FEATURE_SHALLOWS ~= nil and plot.GetFeatureType ~= nil
+					and plot:GetFeatureType() == FeatureTypes.FEATURE_SHALLOWS then c = "="
 				elseif plot:IsWater() then c = (plot:GetTerrainType() == TerrainTypes.TERRAIN_COAST) and "-" or "~"
 				elseif plot:IsMountain() then c = "^"
 				elseif plot:IsHills() then c = "n"
@@ -1271,6 +1547,34 @@ function PA_CheckBridges()
 	end
 	print("Mundi Fusion: bridges checked: " .. fixed .. " mountains on bridges made hills; " ..
 		((#apart == 0) and "every civ can walk to every other" or ("WARNING civs " .. table.concat(apart, " ") .. " cannot walk to the rest")))
+end
+
+-- Fords: each planned ford tile still water gets the shallows feature on shallow water. Lekmap's later pass that
+-- removes shallows leading nowhere looks only at its own tectonic tiles, so these are marked as none of them.
+function PA_LayFords()
+	if next(PA_FORD) == nil then return end
+	local W = Map.GetGridSize()
+	local laid, left = 0, 0
+	for i in pairs(PA_FORD) do
+		local x = (i - 1) % W
+		local plot = Map.GetPlot(x, (i - 1 - x) / W)
+		if plot:IsWater() and not plot:IsLake() then
+			if plot:GetTerrainType() ~= GameDefines.SHALLOW_WATER_TERRAIN then plot:SetTerrainType(GameDefines.SHALLOW_WATER_TERRAIN, false, false) end
+			plot:SetFeatureType(FeatureTypes.FEATURE_SHALLOWS)
+			if BETA_TECTONIC_LANDS ~= nil and BETA_TECTONIC_LANDS[i] ~= nil and BETA_TECTONIC_LANDS[i] > 0 then BETA_TECTONIC_LANDS[i] = 0 end
+			laid = laid + 1
+		else
+			left = left + 1
+		end
+	end
+	print("Mundi Fusion: fords: " .. laid .. " tiles of shallows laid" .. ((left > 0) and ("; WARNING " .. left .. " ford tiles were no longer open water") or ""))
+end
+
+local PA_LekmapAddFeatures = AddFeatures
+function AddFeatures()
+	if PA_LekmapAddFeatures ~= nil then PA_LekmapAddFeatures() end
+	local ok, err = pcall(PA_LayFords)
+	if not ok then print("Mundi Fusion: WARNING could not lay the fords: " .. tostring(err)) end
 end
 
 local PA_LekmapGenerateMap = GenerateMap

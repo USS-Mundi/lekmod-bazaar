@@ -265,8 +265,9 @@ for d in "$STAGE"/MODS/*/; do
   n=$(basename "$d"); echo "-> MODS/$n"
   rsync -a --delete "$d" "$MODS/$n/"
 done
-echo "4/4 Lekmap map scripts -> Assets/Maps/Lekmap"
+echo "4/4 Lekmap map scripts -> Assets/Maps/Lekmap, Mundi Fusion among them (the setup screen lists it from there)"
 rsync -a --delete "$LEKMAP/" "$GAME/Assets/Maps/Lekmap/"
+cp "$STAGE/MODS/LEKMOD for Bazaar (v 1)/MundiFusion.lua" "$GAME/Assets/Maps/Lekmap/MundiFusion.lua"
 echo "done. In the game: Mods -> enable 'LEKMOD for Bazaar' and 'MCP Server for LEKMOD'; leave 'Local MCP Server DLL' off."
 echo "Map Type -> a Lekmap script: the stock scripts never place LEKMOD's luxuries."
 ''' % (GAME, MODS, LEKMOD_DLC, STAGE, os.path.join(host_folder, "CvGameCore_Expansion2.dll"), LEKMAP))

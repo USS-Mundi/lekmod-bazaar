@@ -275,6 +275,118 @@ do
 end
 print("bridges: ok")
 
+-- Shallow fords: the same crossing left as water, which land units walk and ships sail; the sea stays one body.
+local function walkReach(t, ford, from, to, without)
+  local function ok(i) return i ~= without and (t[i] == LAND_T or t[i] == PlotTypes.PLOT_HILLS or ford[i]) end
+  local seen, stack = { [from] = true }, { from }
+  while #stack > 0 do
+    local c = table.remove(stack)
+    if c == to then return true end
+    for _, j in ipairs(PA_NeighbourList(c, W, H, true)) do
+      if not seen[j] and ok(j) then seen[j] = true; stack[#stack + 1] = j end
+    end
+  end
+  return false
+end
+local function clusters(set)
+  local seen, n = {}, 0
+  for i in pairs(set) do
+    if not seen[i] then
+      n = n + 1
+      local stack = { i }
+      seen[i] = true
+      while #stack > 0 do
+        local c = table.remove(stack)
+        for _, j in ipairs(PA_NeighbourList(c, W, H, true)) do if set[j] and not seen[j] then seen[j] = true; stack[#stack + 1] = j end end
+      end
+    end
+  end
+  return n
+end
+do
+  local t = world(false)
+  local land = 0
+  for i = 1, W * H do if t[i] ~= OCEAN_T then land = land + 1 end end
+  local crossings, raised, canals, tiles, fords = PA_Bridge(t, nil, W, H, true, 4, true, true, 1)
+  assert(crossings == 1 and raised == 0 and #canals == 0 and #fords > 0, "one ford, nothing raised, no canal spot: got " .. crossings .. ", " .. raised .. ", " .. #canals .. ", " .. #fords)
+  local ford, after = {}, 0
+  for _, j in ipairs(fords) do ford[j] = true; assert(t[j] == OCEAN_T, "a ford stays water") end
+  for i = 1, W * H do if t[i] ~= OCEAN_T then after = after + 1 end end
+  assert(after == land, "no land is made")
+  for _, j in ipairs(tiles) do assert(ford[j], "a ford's tiles are its shallows only") end
+  assert(walkReach(t, ford, idx(15, 25), idx(40, 25)), "the two landmasses are joined over the shallows")
+  for _, j in ipairs(fords) do assert(walkReach(t, ford, idx(15, 25), idx(40, 25), j), "no single tile cuts the ford") end
+  assert(not walkReach(t, ford, idx(15, 25), idx(55, 40)), "the small island stays apart")
+  assert(seaCount(t) == 1, "the sea stays one body")
+end
+-- Two crossings for each continent, apart from each other; the default is one.
+do
+  local t = sea()
+  fill(t, 10, 25, 8, 48); fill(t, 31, 45, 8, 48)               -- two tall continents across a channel 5 tiles wide
+  local one = PA_Bridge(t, nil, W, H, true, 4, false, true, 1)
+  assert(one == 1, "one ford by default, got " .. one)
+  t = sea()
+  fill(t, 10, 25, 8, 48); fill(t, 31, 45, 8, 48)
+  local two, _, _, _, fords = PA_Bridge(t, nil, W, H, true, 4, false, true, 2)
+  local ford = {}
+  for _, j in ipairs(fords) do ford[j] = true end
+  assert(two == 2 and clusters(ford) == 2, "two fords, apart: got " .. two .. " in " .. clusters(ford) .. " groups")
+  -- with land bridges, the second one would wall the channel between them off: it is not built
+  t = sea()
+  fill(t, 10, 25, 8, 48); fill(t, 31, 45, 8, 48)
+  local bridges = PA_Bridge(t, nil, W, H, true, 4, false, false, 2)
+  assert(bridges == 1 and seaCount(t) == 1, "a second bridge that walls water off is not built, got " .. bridges)
+end
+print("fords: ok")
+
+-- Inland seas: a sea the land shuts in gets a channel to the ocean, the shortest way, never through a canal spot.
+do
+  local t = sea()
+  fill(t, 15, 45, 15, 45)
+  for y = 19, 41 do for x = 19, 41 do t[idx(x, y)] = OCEAN_T end end -- a sea shut in by a ring of land 4 tiles thick
+  for x = 42, 45 do t[idx(x, 30)] = PlotTypes.PLOT_MOUNTAIN end         -- mountains on one of the ways east
+  assert(seaCount(t) == 2)
+  local cut, opened, left = PA_OpenSeaPlan(t, W, H, true, {})
+  assert(opened == 1 and left == 0 and #cut >= 1 and #cut <= PA_CHANNEL_MAX, "one channel, " .. #cut .. " tiles")
+  assert(seaCount(t) == 1, "the sea reaches the ocean")
+  for _, j in ipairs(cut) do assert(t[j] == OCEAN_T, "the channel is water") end
+  local thick = sea()
+  fill(thick, 5, 55, 8, 50)
+  for y = 27, 31 do for x = 27, 33 do thick[idx(x, y)] = OCEAN_T end end -- 35 tiles of sea, 20 tiles of land from the ocean
+  local cut2, opened2, left2 = PA_OpenSeaPlan(thick, W, H, true, {})
+  assert(#cut2 == 0 and opened2 == 0 and left2 == 1, "a sea far inland stays shut")
+end
+print("inland seas: ok")
+
+-- In the game: after Lekmap's features, each ford still open water gets the shallows feature on shallow water.
+do
+  local saved = { Map.GetPlot, FeatureTypes, GameDefines, AddFeatures }
+  FeatureTypes = { NO_FEATURE = -1, FEATURE_SHALLOWS = 7 }
+  GameDefines = { SHALLOW_WATER_TERRAIN = 5, DEEP_WATER_TERRAIN = 6, MAX_MAJOR_CIVS = 22, MAX_CIV_PLAYERS = 63 }
+  local plots = {}
+  local function plot(x, y)
+    local i = y * W + x + 1
+    if not plots[i] then
+      local water = (x ~= 3)
+      plots[i] = { terrain = 6, feature = -1, IsWater = function() return water end, IsLake = function() return x == 4 end,
+        GetTerrainType = function(self) return self.terrain end, SetTerrainType = function(self, t) self.terrain = t end,
+        SetFeatureType = function(self, f) self.feature = f end, GetFeatureType = function(self) return self.feature end }
+    end
+    return plots[i]
+  end
+  Map.GetPlot = plot
+  local order = {}
+  local lekmapAddFeatures = function() order[#order + 1] = "lekmap" end
+  PA_FORD = { [idx(1, 10)] = true, [idx(2, 10)] = true, [idx(3, 10)] = true, [idx(4, 10)] = true }
+  PA_LayFords()
+  assert(plot(1, 10).feature == 7 and plot(1, 10).terrain == 5 and plot(2, 10).feature == 7, "open water gets shallows, on shallow water")
+  assert(plot(3, 10).feature == -1 and plot(4, 10).feature == -1, "land and lakes do not")
+  assert(PA_IsShallows(plot(1, 10)) and not PA_IsShallows(plot(3, 10)), "shallows are told apart")
+  PA_FORD = {}
+  Map.GetPlot, FeatureTypes, GameDefines, AddFeatures = saved[1], saved[2], saved[3], saved[4]
+end
+print("fords in the game: ok")
+
 -- Specks: a landmass under 4 tiles that no city on a big landmass could work is moved whole onto the
 -- nearest land; specks near each other gather into one island; one with no land near sinks; no land is made.
 local function landCount(t) local n = 0 for i = 1, W * H do if t[i] ~= OCEAN_T then n = n + 1 end end return n end
@@ -412,13 +524,15 @@ end
 print("deep sea: ok")
 
 -- Defaults: canal spots on, continents as the rifts fall, deep sea on; the operator's style of 2026-11-23 (four wide
--- rifts on a bigger, lower-sea map, middle-sea islands of medium size), at full strength since 2026-11-26.
+-- rifts on a bigger, lower-sea map, middle-sea islands of medium size); his pick of 2026-11-27: strength 85, spread 50%,
+-- raggedness 6, three shallow fords for each continent, shut-in seas opened to the ocean.
 do
   local info = GetMapScriptInfo()
   local want = { ["Connect all continents"] = "On, with a canal spot on each bridge", ["Continents"] = "As the rifts fall", ["Deep sea"] = "On",
-    ["Rifts"] = "4", ["Rift Strength"] = "100", ["Rift Width"] = "6.5 tiles", ["Rift Raggedness"] = "5.5 tiles",
+    ["Rifts"] = "4", ["Rift Strength"] = "85", ["Rift Strength Spread"] = "50%", ["Rift Width"] = "6.5 tiles", ["Rift Raggedness"] = "6 tiles",
     ["Middle-Sea Island Size"] = "Medium (4-7 tiles)", ["TXT_KEY_MAP_OPTION_SEA_LEVEL"] = "TXT_KEY_MAP_OPTION_LOW",
-    ["Land Size X"] = "Default +10 tiles", ["Land Size Y"] = "Default +10 tiles" }
+    ["Land Size X"] = "Default +10 tiles", ["Land Size Y"] = "Default +10 tiles",
+    ["Crossings"] = "Shallow fords", ["Crossings per Continent"] = "3", ["Rift Water"] = "Deep in the middle", ["Inland Seas"] = "Opened to the ocean" }
   for _, o in ipairs(info.CustomOptions) do
     if want[o.Name] then assert(o.Values[o.DefaultValue] == want[o.Name], o.Name .. " defaults to " .. tostring(o.Values[o.DefaultValue])); want[o.Name] = nil end
   end
